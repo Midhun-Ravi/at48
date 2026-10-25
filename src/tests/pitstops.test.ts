@@ -146,4 +146,29 @@ describe('Curated Highway Pitstops & Stop-Aware Scheduling Engine', () => {
     expect(r.timeline.some(t => t.category === 'PITSTOP')).toBe(true);
     expect(r.activityOutcomes.find(o => o.activityId === 'mysuru-market')?.status).toBe('omitted');
   });
+
+  it('10. flags near-closing advisory when closing margin is under 30m, and small delay reschedules', () => {
+    const mysuru = destination('mysuru');
+    // Base departure 08:30 + 45m adjustment + Maddur Tiffanys (40m) finishes Palace at 17:28 (2m before 17:30)
+    const rTight = evaluateFeasibility(mysuru, {
+      ...base,
+      selectedPitstopIds: ['maddur-tiffanys'],
+    });
+
+    // 1. Should flag the tight 2-minute closing margin as an advisory
+    expect(
+      rTight.violations.some(
+        v => v.type === 'UNVERIFIED_OPENING_HOURS' && v.message.includes('Tight closing margin') && v.message.includes('2m margin')
+      )
+    ).toBe(true);
+    expect(rTight.activityOutcomes.find(a => a.activityId === 'mysuru-palace')?.status).toBe('day1');
+
+    // 2. A small +15m origin adjustment pushes Palace finish past 17:30 cutoff, causing rollover to Day 2
+    const rDelayed = evaluateFeasibility(mysuru, {
+      ...base,
+      drivingAdjustmentMinutes: base.drivingAdjustmentMinutes + 15,
+      selectedPitstopIds: ['maddur-tiffanys'],
+    });
+    expect(rDelayed.activityOutcomes.find(a => a.activityId === 'mysuru-palace')?.status).toBe('day2');
+  });
 });

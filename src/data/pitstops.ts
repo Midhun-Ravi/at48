@@ -22,8 +22,8 @@ export const PITSTOPS: Pitstop[] = [
       osmUrl: 'https://www.openstreetmap.org/node/14076079701',
       verified: true,
     },
-    // The Mysuru expressway corridor serves Mysuru directly, and forms the first leg for Ooty, Wayanad, and Coorg
-    compatibleDestinationIds: ['mysuru', 'ooty', 'wayanad', 'coorg-madikeri'],
+    // The Mysuru expressway corridor serves Mysuru directly, and forms the first leg for Ooty and Coorg
+    compatibleDestinationIds: ['mysuru', 'ooty', 'coorg-madikeri'],
     applicableLeg: 'both',
     positionRatio: 0.50, // Approx. 75 km from MG Road reference on the ~145 km corridor to Mysuru
     dwellMinutes: 30, // 30m estimated dining & restroom break

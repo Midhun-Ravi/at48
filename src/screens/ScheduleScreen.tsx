@@ -5,6 +5,7 @@ import type { UserConstraints } from '../types';
 import { getDestination } from '../data/destinations';
 import { getCompatiblePitstops } from '../data/pitstops.js';
 import { evaluateFeasibility, parseIST } from '../engine/scheduler';
+import TripMap from '../components/TripMap';
 import {
   buildTripSummaryText,
   buildWhatsAppShareUrl,
@@ -134,6 +135,14 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
           </p>
         </div>
       </div>
+
+      {/* Interactive Trip Map */}
+      <TripMap
+        destination={dest}
+        inputs={inputs}
+        result={r}
+        onTogglePitstop={togglePitstop}
+      />
 
       {/* Adjustments & Scenarios */}
       <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

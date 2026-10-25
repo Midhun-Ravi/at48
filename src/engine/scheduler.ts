@@ -184,6 +184,18 @@ export function evaluateFeasibility(
     push('WAIT', `Wait for ${activity.name} to open`, transferEnd, begin, day);
     push('ACTIVITY', activity.name, begin, finish, day, activity.id, activity.isOptional);
     activityOutcomes.push({ activityId: activity.id, status: day === 1 ? 'day1' : 'day2' });
+
+    // Flag near-closing risk when visit concludes with under 30 minutes of margin before closing
+    const closingMargin = Math.round((closing - finish) / MINUTE_MS);
+    if (closingMargin < 30) {
+      violation(
+        'UNVERIFIED_OPENING_HOURS',
+        'ADVISORY',
+        `Tight closing margin: ${activity.name} visit finishes at ${formatIST(finish).slice(11)} against ${activity.closeTime} closing—only ${closingMargin}m margin. Operational cutoff or entrance delay risk; verify last entry before travel.`,
+        activity.id
+      );
+    }
+
     return finish;
   }
 

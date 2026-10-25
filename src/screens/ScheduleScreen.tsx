@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router';
 import type { Dispatch, SetStateAction } from 'react';
 import type { UserConstraints } from '../types';
 import { getDestination } from '../data/destinations';
+import { getCompatiblePitstops } from '../data/pitstops.js';
 import { evaluateFeasibility, parseIST } from '../engine/scheduler';
 import {
   buildTripSummaryText,
@@ -32,6 +33,19 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   }
 
   const r = evaluateFeasibility(dest, inputs);
+  const compatibleStops = getCompatiblePitstops(dest.id);
+  const selectedPitstopIds = inputs.selectedPitstopIds ?? [];
+
+  const togglePitstop = (pitstopId: string) => {
+    setInputs(s => {
+      const current = s.selectedPitstopIds ?? [];
+      const updated = current.includes(pitstopId)
+        ? current.filter(item => item !== pitstopId)
+        : [...current, pitstopId];
+      return { ...s, selectedPitstopIds: updated };
+    });
+  };
+
   const maps =
     'https://www.google.com/maps/dir/?api=1&origin=' +
     encodeURIComponent('MG Road, Bengaluru') +
@@ -74,6 +88,17 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         <div className="text-sm font-semibold uppercase tracking-widest text-teal-700">Step 3 / 3</div>
         <h1 className="mt-1 text-3xl font-extrabold text-slate-900">{dest.name}: your weekend</h1>
         <p className="mt-1 text-sm text-slate-600">Plan estimates in IST, not a live GPS tracker.</p>
+      </div>
+
+      {/* Informational Stay Zone Badge */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-700">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-slate-900">📍 Planned Stay Zone:</span>
+          <span>Central {dest.name} Area</span>
+        </div>
+        <span className="rounded bg-slate-200 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
+          Informational Badge · 1 PM check-in modeled
+        </span>
       </div>
 
       {/* Primary Feasibility Card */}
@@ -143,6 +168,88 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         ))}
       </div>
 
+      {/* Curated Highway Pitstops Section */}
+      {compatibleStops.length > 0 && (
+        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Curated Highway Pitstops</h2>
+              <p className="text-xs text-slate-500">
+                Verified highway stops along your travel corridor. Adding a stop inserts an explicit PITSTOP block and updates arrival time and slack.
+              </p>
+            </div>
+            <span className="rounded-full bg-amber-50 border border-amber-200 px-2.5 py-0.5 text-xs font-bold text-amber-800">
+              Corridor Stops
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {compatibleStops.map(stop => {
+              const isSelected = selectedPitstopIds.includes(stop.id);
+              const totalStopMinutes = stop.dwellMinutes + stop.detourMinutes;
+
+              return (
+                <div
+                  key={stop.id}
+                  className={`rounded-xl border p-4 transition-all ${
+                    isSelected ? 'border-amber-400 bg-amber-50/50 shadow-sm' : 'border-slate-200 bg-slate-50/40 hover:bg-slate-50'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <strong className="text-sm font-bold text-slate-900">{stop.name}</strong>
+                        <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+                          {stop.categoryLabel}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-600">{stop.description}</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        📍 {stop.location.address}{' '}
+                        <a
+                          href={stop.location.osmUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold text-teal-700 hover:underline ml-1"
+                        >
+                          [OpenStreetMap Node #{stop.location.osmNodeId} ↗]
+                        </a>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/80 pt-3 text-xs">
+                    <div className="text-slate-600">
+                      <span>Est. Dwell: <strong>{stop.dwellMinutes}m</strong></span>
+                      <span className="mx-1.5">·</span>
+                      <span>Slip-road Detour: <strong>{stop.detourMinutes}m</strong></span>
+                      <span className="mx-1.5">·</span>
+                      <span className="font-semibold text-slate-800">Total: +{totalStopMinutes}m</span>
+                      {stop.replacesArrivalMeal && (
+                        <p className="mt-0.5 text-[11px] text-teal-800 font-medium">
+                          ✓ Midday meal taken at pitstop replaces redundant 45m check-in dining allowance.
+                        </p>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => togglePitstop(stop.id)}
+                      className={`rounded-xl px-4 py-2 text-xs font-bold transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border border-amber-600 bg-amber-600 text-white shadow-sm hover:bg-amber-700'
+                          : 'border border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-100'
+                      }`}
+                    >
+                      {isSelected ? '✓ Stop Included (Click to Remove)' : `+ Add Pitstop (+${totalStopMinutes}m)`}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Violations / Advisories */}
       {r.violations.length > 0 && (
         <div className="space-y-2">
@@ -180,6 +287,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                 const isFree = entry.category === 'FREE';
                 const isDrive = entry.category === 'DRIVE';
                 const isActivity = entry.category === 'ACTIVITY';
+                const isPitstop = entry.category === 'PITSTOP';
 
                 return (
                   <div
@@ -187,6 +295,8 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                     className={`rounded-xl border p-3.5 text-sm transition-colors ${
                       isFree
                         ? 'border-emerald-200 bg-emerald-50/70 text-emerald-950'
+                        : isPitstop
+                        ? 'border-amber-300 bg-amber-50/80 text-amber-950'
                         : isDrive
                         ? 'border-blue-100 bg-blue-50/50'
                         : isActivity
@@ -196,7 +306,15 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <strong className="text-slate-900">{entry.label}</strong>
-                      <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                      <span
+                        className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                          isPitstop
+                            ? 'bg-amber-200 text-amber-900 font-bold'
+                            : isFree
+                            ? 'bg-emerald-100 text-emerald-800 font-bold'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
                         {entry.category}
                       </span>
                     </div>
@@ -220,7 +338,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
           <div>
             <h2 className="text-lg font-bold text-slate-900">Trip Summary Preview</h2>
             <p className="text-xs text-slate-500">
-              Live preview updates instantly when you modify delays or optional activities.
+              Live preview updates instantly when you modify delays, pitstops, or optional activities.
             </p>
           </div>
           <span className="rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-800">

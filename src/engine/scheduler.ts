@@ -1,6 +1,7 @@
+import { getPitstop } from '../data/pitstops.js';
 import type {
   Activity, ActivityOutcome, ConstraintViolation, Destination,
-  FeasibilityRating, FeasibilityResult, TimetableEntry, TimelineCategory, UserConstraints,
+  FeasibilityRating, FeasibilityResult, Pitstop, TimetableEntry, TimelineCategory, UserConstraints,
 } from '../types';
 
 /**
@@ -87,8 +88,52 @@ export function evaluateFeasibility(
   const driveContingency = Math.round(adjustedOneWay * 0.20);
   const outboundMinutes = adjustedOneWay + driveContingency + input.simulateDelayMinutes;
   const inboundMinutes = adjustedOneWay + driveContingency;
-  const arrived = add(start, outboundMinutes);
-  push('DRIVE', `Drive to ${destination.name} (incl. ${driveContingency}m planning buffer)`, start, arrived, 1);
+
+  // Curated highway pitstops resolution
+  const selectedStopIds = input.selectedPitstopIds ?? [];
+  const validStops: Pitstop[] = [];
+  for (const id of selectedStopIds) {
+    const s = getPitstop(id);
+    if (!s || !s.compatibleDestinationIds.includes(destination.id)) {
+      violation('INVALID_INPUT', 'ADVISORY', `Selected pitstop "${id}" is not applicable to route ${destination.name}; ignored.`);
+    } else {
+      validStops.push(s);
+    }
+  }
+
+  // Outbound pitstop (at most one on outbound leg in initial experience)
+  const outboundStop = validStops.find(s => s.applicableLeg === 'outbound' || s.applicableLeg === 'both');
+  let arrived: number;
+  let outboundStopDwellAndDetour = 0;
+
+  if (outboundStop) {
+    outboundStopDwellAndDetour = outboundStop.dwellMinutes + outboundStop.detourMinutes;
+    const ratio = Math.max(0.1, Math.min(0.9, outboundStop.positionRatio));
+    const leg1Drive = Math.round(adjustedOneWay * ratio);
+    const leg1Buffer = Math.round(driveContingency * ratio);
+    const leg1Total = leg1Drive + leg1Buffer;
+
+    const stopArrival = add(start, leg1Total);
+    const stopDeparture = add(stopArrival, outboundStopDwellAndDetour);
+
+    const leg2Drive = adjustedOneWay - leg1Drive;
+    const leg2Buffer = driveContingency - leg1Buffer;
+    const leg2Total = leg2Drive + leg2Buffer + input.simulateDelayMinutes;
+    arrived = add(stopDeparture, leg2Total);
+
+    push('DRIVE', `Drive towards ${destination.name} (Leg 1, incl. ${leg1Buffer}m buffer)`, start, stopArrival, 1);
+    push(
+      'PITSTOP',
+      `${outboundStop.name} (${outboundStop.dwellMinutes}m dwell + ${outboundStop.detourMinutes}m detour)`,
+      stopArrival,
+      stopDeparture,
+      1
+    );
+    push('DRIVE', `Drive to ${destination.name} (Leg 2, incl. ${leg2Buffer}m buffer)`, stopDeparture, arrived, 1);
+  } else {
+    arrived = add(start, outboundMinutes);
+    push('DRIVE', `Drive to ${destination.name} (incl. ${driveContingency}m planning buffer)`, start, arrived, 1);
+  }
 
   const restStart = at(day1, '22:00');
   const day1FreeEnd = at(day1, '21:00');
@@ -105,8 +150,14 @@ export function evaluateFeasibility(
     push('WAIT', 'Waiting for 1 PM check-in assumption', day1Cursor, checkInEarliest, 1);
     day1Cursor = checkInEarliest;
   }
-  const afterCheckin = add(day1Cursor, p.arrivalMealCheckinMinutes);
-  push('CHECK_IN', 'Meal & hotel check-in (estimated)', day1Cursor, afterCheckin, 1);
+  const checkinDuration = outboundStop?.replacesArrivalMeal
+    ? Math.max(30, p.arrivalMealCheckinMinutes - 45)
+    : p.arrivalMealCheckinMinutes;
+  const checkinLabel = outboundStop?.replacesArrivalMeal
+    ? 'Hotel check-in & freshen up (meal taken at pitstop)'
+    : 'Meal & hotel check-in (estimated)';
+  const afterCheckin = add(day1Cursor, checkinDuration);
+  push('CHECK_IN', checkinLabel, day1Cursor, afterCheckin, 1);
   day1Cursor = afterCheckin;
 
   const sorted = [...destination.activities].sort((a, b) =>
@@ -213,9 +264,41 @@ export function evaluateFeasibility(
   // the return margin. Optional removal does not automatically change the
   // return margin unless the return leg's start truly changes.
   const returnDeparture = Math.max(preferredReturnDeparture, day2Cursor);
-  const homeArrival = add(returnDeparture, inboundMinutes);
-  push('DRIVE', `Return to Bengaluru (incl. ${driveContingency}m planning buffer)`,
-    returnDeparture, homeArrival, 2);
+
+  // Return pitstop (if configured for return and distinct from outbound)
+  const returnStop = validStops.find(s => s.applicableLeg === 'return' || (s.applicableLeg === 'both' && s.id !== outboundStop?.id));
+  let homeArrival: number;
+
+  if (returnStop) {
+    const returnStopDuration = returnStop.dwellMinutes + returnStop.detourMinutes;
+    const retRatio = Math.max(0.1, Math.min(0.9, 1 - returnStop.positionRatio));
+    const retLeg1Drive = Math.round(adjustedOneWay * retRatio);
+    const retLeg1Buffer = Math.round(driveContingency * retRatio);
+    const retLeg1Total = retLeg1Drive + retLeg1Buffer;
+
+    const retStopArrival = add(returnDeparture, retLeg1Total);
+    const retStopDeparture = add(retStopArrival, returnStopDuration);
+
+    const retLeg2Drive = adjustedOneWay - retLeg1Drive;
+    const retLeg2Buffer = driveContingency - retLeg1Buffer;
+    const retLeg2Total = retLeg2Drive + retLeg2Buffer;
+    homeArrival = add(retStopDeparture, retLeg2Total);
+
+    push('DRIVE', `Return drive towards Bengaluru (Leg 1, incl. ${retLeg1Buffer}m buffer)`, returnDeparture, retStopArrival, 2);
+    push(
+      'PITSTOP',
+      `${returnStop.name} (${returnStop.dwellMinutes}m dwell + ${returnStop.detourMinutes}m detour)`,
+      retStopArrival,
+      retStopDeparture,
+      2
+    );
+    push('DRIVE', `Return to Bengaluru (Leg 2, incl. ${retLeg2Buffer}m buffer)`, retStopDeparture, homeArrival, 2);
+  } else {
+    homeArrival = add(returnDeparture, inboundMinutes);
+    push('DRIVE', `Return to Bengaluru (incl. ${driveContingency}m planning buffer)`,
+      returnDeparture, homeArrival, 2);
+  }
+
   const margin = Math.round((deadline - homeArrival) / MINUTE_MS);
   if (margin < 0) {
     violation('MISSED_DEADLINE', 'BLOCKER',
@@ -240,7 +323,8 @@ export function evaluateFeasibility(
           `Checkpoint offsets are unverified; check the live route and authorities.`);
       }
     };
-    check(start, r.outboundCheckpointOffsetMinutes, 'Outbound');
+    const outboundCrossingBase = outboundStop ? add(start, outboundStopDwellAndDetour) : start;
+    check(outboundCrossingBase, r.outboundCheckpointOffsetMinutes, 'Outbound');
     check(returnDeparture, r.inboundCheckpointOffsetMinutes, 'Return');
   }
 

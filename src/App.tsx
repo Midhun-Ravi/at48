@@ -19,7 +19,7 @@ const [departureDateTime, returnDeadlineDateTime] = upcomingWeekend();
 const DEFAULTS: UserConstraints = {
   departureDateTime, returnDeadlineDateTime, pace: 'balanced',
   perPersonBudgetINR: 6000, partySize: 2, drivingAdjustmentMinutes: 0,
-  simulateDelayMinutes: 0, disabledActivityIds: [],
+  simulateDelayMinutes: 0, disabledActivityIds: [], selectedPitstopIds: [],
 };
 
 export default function App() {

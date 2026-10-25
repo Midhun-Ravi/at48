@@ -19,6 +19,7 @@ export interface UserConstraints {
   drivingAdjustmentMinutes: number; // -60 through +120, multiples of 15
   simulateDelayMinutes: 0 | 60; // outbound only
   disabledActivityIds: string[]; // only optional activities may be disabled
+  selectedPitstopIds?: string[]; // IDs of curated highway stops to include
 }
 
 export interface Activity {
@@ -64,7 +65,37 @@ export interface Destination {
 
 export type TimelineCategory =
   | 'DRIVE' | 'CHECK_IN' | 'MEAL' | 'ACTIVITY' | 'TRANSFER'
-  | 'REST' | 'WAIT' | 'FREE';
+  | 'REST' | 'WAIT' | 'FREE' | 'PITSTOP';
+
+export interface PitstopLocation {
+  address: string;
+  latitude: number;
+  longitude: number;
+  osmNodeId?: number;
+  osmUrl: string;
+  verified: boolean;
+}
+
+export type PitstopCategory = 'food' | 'cafe' | 'fuel' | 'rest';
+export type PitstopLeg = 'outbound' | 'return' | 'both';
+
+export interface Pitstop {
+  id: string;
+  name: string;
+  shortName: string;
+  category: PitstopCategory;
+  categoryLabel: string;
+  description: string;
+  location: PitstopLocation;
+  compatibleDestinationIds: string[];
+  applicableLeg: PitstopLeg;
+  positionRatio: number; // 0.0 to 1.0 along the driving leg
+  dwellMinutes: number; // estimated stop dwell time
+  detourMinutes: number; // estimated detour / slip-road access time
+  replacesArrivalMeal?: boolean; // if true on outbound, reduces redundant check-in meal
+  timingEvidence: Evidence;
+  locationEvidence: Evidence;
+}
 
 export interface TimetableEntry {
   id: string;

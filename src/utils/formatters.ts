@@ -1,3 +1,4 @@
+import { getPitstop } from '../data/pitstops.js';
 import type { Destination, FeasibilityResult, UserConstraints } from '../types';
 
 const MONTH_NAMES = [
@@ -154,6 +155,12 @@ export function buildTripSummaryText({
     if (disabledNames.length > 0) {
       adjustments.push(`Skipped optional activities: ${disabledNames.join(', ')}`);
     }
+  }
+  if (inputs.selectedPitstopIds && inputs.selectedPitstopIds.length > 0) {
+    const stopNames = inputs.selectedPitstopIds
+      .map(id => getPitstop(id)?.shortName ?? id)
+      .join(', ');
+    adjustments.push(`Highway pitstop: ${stopNames}`);
   }
 
   if (adjustments.length > 0) {

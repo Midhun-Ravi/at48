@@ -22,6 +22,7 @@ export interface UserConstraints {
   selectedPitstopIds?: string[]; // IDs of curated highway stops to include
   organizerName?: string; // display name e.g. "Sujil" (max 40 chars)
   planningMode?: 'solo' | 'group'; // default 'group'
+  destinationAdjustments?: Record<string, number>; // independent one-way adjustment minutes per destination ID
 }
 
 export interface Activity {

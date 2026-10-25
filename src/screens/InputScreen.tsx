@@ -10,12 +10,26 @@ type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserC
 export default function InputScreen({ inputs, setInputs }: Props) {
   const nav = useNavigate();
   const [error, setError] = useState('');
-  const modify = (patch: Partial<UserConstraints>) => setInputs(old => ({ ...old, ...patch }));
+  const modify = (patch: Partial<UserConstraints>) => {
+    setError('');
+    setInputs(old => ({ ...old, ...patch }));
+  };
 
   const proceed = () => {
     try {
-      const delta = (parseIST(inputs.returnDeadlineDateTime) - parseIST(inputs.departureDateTime)) / 3_600_000;
-      if (delta < 18 || delta > 60) throw new Error('Choose a trip window between 18 and 60 hours.');
+      const depEpoch = parseIST(inputs.departureDateTime);
+      const retEpoch = parseIST(inputs.returnDeadlineDateTime);
+
+      if (retEpoch <= depEpoch) {
+        throw new Error('Return time must be after departure time.');
+      }
+
+      const delta = (retEpoch - depEpoch) / 3_600_000;
+      if (delta < 18 || delta > 60) {
+        throw new Error(
+          '@48 currently plans 18–60 hour escapes. Adjust your dates to continue—longer adventures are on our roadmap.'
+        );
+      }
 
       if (inputs.organizerName && inputs.organizerName.trim().length > 40) {
         throw new Error('Organizer name must be 40 characters or fewer.');
@@ -33,7 +47,7 @@ export default function InputScreen({ inputs, setInputs }: Props) {
   return (
     <section className="mx-auto max-w-xl space-y-6">
       <div>
-        <div className="text-sm font-semibold uppercase tracking-widest text-teal-700">Step 1 / 3</div>
+        <div className="text-sm font-semibold uppercase tracking-widest text-teal-700">Step 1 / 4</div>
         <h1 className="mt-2 text-3xl font-extrabold text-slate-900">Make your weekend fit.</h1>
         <p className="mt-2 text-slate-600">
           Set your real limits. We'll compare four weekend escapes by usable time, not just distance.
@@ -88,26 +102,46 @@ export default function InputScreen({ inputs, setInputs }: Props) {
           </span>
         </label>
 
-        {/* Departure and Return Dates */}
-        <label className="block text-sm font-semibold text-slate-900">
-          Leave Bengaluru
-          <input
-            type="datetime-local"
-            className="mt-2 block w-full rounded-lg border border-slate-300 p-3 text-sm"
-            value={inputs.departureDateTime}
-            onChange={e => modify({ departureDateTime: e.target.value })}
-          />
-        </label>
+        {/* Positive Explanatory Messaging Box */}
+        <div className="rounded-xl border border-teal-200 bg-teal-50/70 p-4 text-xs text-teal-950">
+          <div className="flex items-center gap-2 font-bold text-teal-900 text-sm">
+            <span>🗺️</span>
+            <span>Big adventures are on our roadmap!</span>
+          </div>
+          <p className="mt-1 text-teal-800 leading-relaxed">
+            For now, @48 helps you plan realistic short escapes lasting 18 to 60 hours. Choose your departure and return times within this range to get started.
+          </p>
+        </div>
 
-        <label className="block text-sm font-semibold text-slate-900">
-          Must be home by
-          <input
-            type="datetime-local"
-            className="mt-2 block w-full rounded-lg border border-slate-300 p-3 text-sm"
-            value={inputs.returnDeadlineDateTime}
-            onChange={e => modify({ returnDeadlineDateTime: e.target.value })}
-          />
-        </label>
+        {/* Departure and Return Dates */}
+        <div className="space-y-4">
+          <label className="block text-sm font-semibold text-slate-900">
+            Leave Bengaluru
+            <input
+              type="datetime-local"
+              className="mt-2 block w-full rounded-lg border border-slate-300 p-3 text-sm"
+              value={inputs.departureDateTime}
+              onChange={e => modify({ departureDateTime: e.target.value })}
+            />
+          </label>
+
+          <label className="block text-sm font-semibold text-slate-900">
+            Must be home by
+            <input
+              type="datetime-local"
+              className="mt-2 block w-full rounded-lg border border-slate-300 p-3 text-sm"
+              value={inputs.returnDeadlineDateTime}
+              onChange={e => modify({ returnDeadlineDateTime: e.target.value })}
+            />
+          </label>
+        </div>
+
+        {/* Actionable date validation feedback right near the date inputs */}
+        {error && (
+          <div className="rounded-lg bg-red-50 p-3.5 border border-red-200 text-xs text-red-800 leading-relaxed" role="alert">
+            <span className="font-bold text-red-900">Notice:</span> {error}
+          </div>
+        )}
 
         {/* Travel Pace */}
         <div>
@@ -175,15 +209,9 @@ export default function InputScreen({ inputs, setInputs }: Props) {
         )}
 
         <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900 leading-relaxed">
-          Origin: MG Road, Bengaluru (reference). On the next screen you can adjust each one-way estimate for your starting area.
+          Origin: MG Road, Bengaluru (reference). On the next screen you can adjust each one-way estimate independently for your starting area.
         </p>
       </div>
-
-      {error && (
-        <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700" role="alert">
-          {error}
-        </p>
-      )}
 
       <button
         type="button"

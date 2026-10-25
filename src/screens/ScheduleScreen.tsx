@@ -20,6 +20,7 @@ import {
   buildShareableTripUrl,
   buildWhatsAppInvitationMessage,
   buildWhatsAppRSVPMessage,
+  cleanInputDisplayName,
   parseShareableTrip,
   sanitizeDisplayName,
 } from '../utils/tripShare';
@@ -246,7 +247,8 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                 placeholder="e.g. Roshan"
                 className="mt-1.5 block w-full rounded-lg border border-slate-300 p-2.5 text-sm focus:border-teal-700 focus:outline-none focus:ring-1 focus:ring-teal-700"
                 value={guestName}
-                onChange={e => setGuestName(sanitizeDisplayName(e.target.value))}
+                onChange={e => setGuestName(cleanInputDisplayName(e.target.value))}
+                onBlur={e => setGuestName(sanitizeDisplayName(e.target.value))}
               />
             </label>
             {guestError && <p className="mt-1 text-xs text-red-600">{guestError}</p>}
@@ -334,55 +336,144 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
       {/* Adjustments & Scenarios */}
       <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-bold text-slate-900">Itinerary Adjustments</h2>
-        <label className="flex items-center gap-3 font-semibold text-slate-800 cursor-pointer">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded text-teal-600 focus:ring-teal-500"
-            checked={currentInputs.simulateDelayMinutes === 60}
-            onChange={e =>
-              updateInputs(s => ({
-                ...s,
-                simulateDelayMinutes: e.target.checked ? 60 : 0,
-              }))
-            }
-          />
-          Simulate +1 hour outbound delay
-        </label>
+        <div>
+          <h2 className="text-base font-bold text-slate-900">Itinerary Scenarios & Attractions</h2>
+          <p className="text-xs text-slate-500">
+            Customize departure delays and optional visits. Feasibility metrics and timelines recalculate immediately.
+          </p>
+        </div>
 
-        {dest.activities.filter(a => a.isOptional).map(a => {
-          const aImg = getPlaceImage(a.id);
-          return (
-            <label key={a.id} className="flex items-center gap-3 text-sm text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded text-teal-600 focus:ring-teal-500"
-                checked={!currentInputs.disabledActivityIds.includes(a.id)}
-                onChange={e =>
-                  updateInputs(s => ({
-                    ...s,
-                    disabledActivityIds: e.target.checked
-                      ? s.disabledActivityIds.filter(i => i !== a.id)
-                      : [...s.disabledActivityIds, a.id],
-                  }))
-                }
-              />
-              {aImg && (
-                <img
-                  src={aImg.src}
-                  alt={aImg.alt}
-                  className="h-8 w-8 rounded object-cover flex-shrink-0"
-                  onError={e => {
-                    (e.target as HTMLElement).style.display = 'none';
-                  }}
-                />
-              )}
-              <span>
-                Include optional attraction: <strong>{a.name}</strong> ({formatDuration(a.durationMinutes)})
+        {/* Departure Delay Scenario */}
+        <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
+          <label className="flex items-center gap-3 font-semibold text-slate-800 cursor-pointer">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded text-teal-600 focus:ring-teal-500 cursor-pointer"
+              checked={currentInputs.simulateDelayMinutes === 60}
+              onChange={e =>
+                updateInputs(s => ({
+                  ...s,
+                  simulateDelayMinutes: e.target.checked ? 60 : 0,
+                }))
+              }
+            />
+            <div>
+              <span className="block text-sm text-slate-900 font-bold">Simulate +1 hour outbound departure delay</span>
+              <span className="text-xs text-slate-500 font-normal">
+                Models being held up leaving Bengaluru (e.g., Saturday morning traffic or late start).
               </span>
-            </label>
-          );
-        })}
+            </div>
+          </label>
+        </div>
+
+        {/* Attractions List: Required vs Optional */}
+        <div className="space-y-3 pt-1">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            Destination Attractions & Sightseeing
+          </h3>
+
+          <div className="space-y-2.5">
+            {dest.activities.map(a => {
+              const aImg = getPlaceImage(a.id);
+              const isOptional = a.isOptional;
+              const isIncluded = !currentInputs.disabledActivityIds.includes(a.id);
+
+              if (!isOptional) {
+                return (
+                  <div
+                    key={a.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3.5"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      {aImg && (
+                        <img
+                          src={aImg.src}
+                          alt={aImg.alt}
+                          className="h-10 w-10 rounded-lg object-cover flex-shrink-0 border border-slate-200"
+                          onError={e => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      )}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <strong className="text-sm text-slate-900">{a.name}</strong>
+                          <span className="rounded bg-teal-100 px-2 py-0.5 text-[10px] font-bold text-teal-900">
+                            Required Highlight
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          {formatDuration(a.durationMinutes)} planned visit · Core destination landmark mandatory for feasibility modeling.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-xs font-bold text-slate-400">Locked</span>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={a.id}
+                  className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3.5 transition-all ${
+                    isIncluded
+                      ? 'border-emerald-300 bg-emerald-50/40 shadow-sm'
+                      : 'border-slate-200 bg-slate-50/40 opacity-75'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    {aImg && (
+                      <img
+                        src={aImg.src}
+                        alt={aImg.alt}
+                        className="h-10 w-10 rounded-lg object-cover flex-shrink-0 border border-slate-200"
+                        onError={e => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    )}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <strong className="text-sm text-slate-900">{a.name}</strong>
+                        <span
+                          className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                            isIncluded
+                              ? 'bg-emerald-100 text-emerald-900'
+                              : 'bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          {isIncluded ? 'Included in Trip' : 'Excluded from Plan'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {formatDuration(a.durationMinutes)} planned visit · Optional stop — Include in my trip to visit.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateInputs(s => ({
+                        ...s,
+                        disabledActivityIds: isIncluded
+                          ? [...s.disabledActivityIds, a.id]
+                          : s.disabledActivityIds.filter(i => i !== a.id),
+                      }))
+                    }
+                    className={`rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+                      isIncluded
+                        ? 'border border-emerald-600 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700'
+                        : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {isIncluded ? '✓ Stop Included (Click to Remove)' : '+ Include in Trip'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Curated Highway Pitstops Section with Verified Thumbnail */}
@@ -562,15 +653,33 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <strong className="text-slate-900">{entry.label}</strong>
                           <span
-                            className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                            className={`rounded px-2.5 py-0.5 text-xs font-semibold ${
                               isPitstop
-                                ? 'bg-amber-200 text-amber-900 font-bold'
+                                ? 'bg-amber-200 text-amber-950 font-bold'
                                 : isFree
-                                ? 'bg-emerald-100 text-emerald-800 font-bold'
-                                : 'bg-slate-100 text-slate-600'
+                                ? 'bg-emerald-100 text-emerald-900 font-bold'
+                                : isDrive
+                                ? 'bg-blue-100 text-blue-900'
+                                : isActivity
+                                ? 'bg-purple-100 text-purple-900 font-semibold'
+                                : 'bg-slate-100 text-slate-700'
                             }`}
                           >
-                            {entry.category}
+                            {isPitstop
+                              ? '☕ Highway Pitstop'
+                              : isFree
+                              ? '🌿 Usable Free Time'
+                              : isDrive
+                              ? '🚗 Highway Drive'
+                              : isActivity
+                              ? '📍 Attraction Visit'
+                              : entry.category === 'REST'
+                              ? '🌙 Overnight Rest'
+                              : entry.category === 'CHECK_IN'
+                              ? '🏨 Hotel Check-in'
+                              : entry.category === 'MEAL'
+                              ? '🍽️ Dining Break'
+                              : entry.category}
                           </span>
                         </div>
                         <div className="mt-1 flex items-center justify-between text-xs text-slate-600">

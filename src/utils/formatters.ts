@@ -117,8 +117,9 @@ export function buildTripSummaryText({
   originUrl,
 }: TripSummaryParams): string {
   const totalDriveMinutes = result.outboundDriveMinutes + result.inboundDriveMinutes;
-  const lines: string[] = [
+  const lines: (string | null)[] = [
     `*@48 — The Weekend Reality Checker*`,
+    inputs.organizerName ? `*Trip Organizer:* ${inputs.organizerName}` : null,
     `*Destination:* ${destination.name} (${destination.routeName})`,
     `*Feasibility Verdict:* ${result.rating}`,
     `${result.ratingExplanation}`,
@@ -137,7 +138,9 @@ export function buildTripSummaryText({
     `💰 *Estimated Budget:*`,
     `• Cost per person: ₹${result.estimatedCostPerPersonINR.toLocaleString('en-IN')}`,
     `• Total estimated for party of ${inputs.partySize}: ₹${result.estimatedTripTotalINR.toLocaleString('en-IN')}`,
-    result.isBudgetExceeded ? `⚠️ Note: Estimated cost exceeds declared budget of ₹${inputs.perPersonBudgetINR.toLocaleString('en-IN')}/person.` : `✓ Within declared budget.`,
+    result.isBudgetExceeded
+      ? `⚠️ Note: Estimated cost exceeds declared budget of ₹${inputs.perPersonBudgetINR.toLocaleString('en-IN')}/person.`
+      : `✓ Within declared budget of ₹${inputs.perPersonBudgetINR.toLocaleString('en-IN')}/person.`,
   ];
 
   // Optional adjustments
@@ -197,7 +200,7 @@ export function buildTripSummaryText({
     `Plan link: ${link}`
   );
 
-  return lines.join('\n');
+  return lines.filter((l): l is string => l !== null).join('\n');
 }
 
 /**

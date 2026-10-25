@@ -34,8 +34,8 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
             Four destinations, one real weekend. Usable destination time computed deterministically.
           </p>
         </div>
-        <Link to="/" className="text-sm font-semibold text-teal-700 hover:underline">
-          ← Edit dates
+        <Link to="/plan" className="text-sm font-semibold text-teal-700 hover:underline">
+          ← Edit dates & budget
         </Link>
       </div>
 
@@ -108,7 +108,7 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
               </p>
 
               {/* Independent Destination Driving Adjustment Control */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <span className="block text-xs font-bold text-slate-800">Adjust driving estimate</span>
@@ -138,6 +138,22 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                     </button>
                   </div>
                 </div>
+
+                {/* Accessible explanation for mobile and desktop */}
+                <details className="group border-t border-slate-200/80 pt-2 text-[11px] text-slate-600">
+                  <summary className="cursor-pointer font-semibold text-teal-800 hover:text-teal-950 select-none flex items-center gap-1">
+                    <span>Why adjust this?</span>
+                    <span className="text-[10px] text-teal-600 group-open:rotate-180 transition-transform">▼</span>
+                  </summary>
+                  <div className="mt-1.5 space-y-1 rounded-lg bg-white p-2.5 border border-slate-200/70 text-slate-600 leading-relaxed">
+                    <p>
+                      Starting from somewhere other than MG Road? Add or remove time from this destination's estimated drive. This is a planning adjustment, not live traffic.
+                    </p>
+                    <p className="font-semibold text-slate-800">
+                      Example: +30 min means allowing an extra 30 minutes for the estimated one-way drive.
+                    </p>
+                  </div>
+                </details>
               </div>
 
               {/* Metric Grid */}

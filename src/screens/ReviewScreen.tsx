@@ -4,13 +4,15 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { UserConstraints } from '../types';
 import { getDestination } from '../data/destinations';
 import { getCompatiblePitstops } from '../data/pitstops.js';
-import { evaluateFeasibility } from '../engine/scheduler';
+import { evaluateFeasibility, parseIST } from '../engine/scheduler';
 import { getDestinationImage, getPlaceImage } from '../data/images';
 import {
   buildTripSummaryText,
   buildWhatsAppShareUrl,
   formatDuration,
+  formatReadableDate,
   formatReadableDateTime,
+  formatTimelineTime,
 } from '../utils/formatters';
 import {
   buildShareableParams,
@@ -76,6 +78,9 @@ export default function ReviewScreen({ inputs }: Props) {
 
   // Evaluate feasibility using the exact deterministic engine (NEVER re-implement or mock)
   const r = evaluateFeasibility(dest, activeInputs);
+
+  const day1Start = r.timeline.find(t => t.day === 1)?.startTime;
+  const day2Start = r.timeline.find(t => t.day === 2)?.startTime;
 
   const heroImage = getDestinationImage(dest.id);
   const compatibleStops = getCompatiblePitstops(dest.id);
@@ -418,23 +423,87 @@ export default function ReviewScreen({ inputs }: Props) {
         )}
       </div>
 
-      {/* Section D: Summary Preview Card */}
-      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
+      {/* Section D: Day-by-Day Itinerary & Visual Summary */}
+      <div className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">Trip Summary Text</h2>
+            <h2 className="text-lg font-bold text-slate-900">Day-by-Day Itinerary Review</h2>
             <p className="text-xs text-slate-500">
-              Formatted plain-text overview ready for messaging and itinerary notes.
+              Clear breakdown of driving legs, scheduled stops, and destination leisure time.
             </p>
           </div>
           <span className="rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-800">
-            Snapshot
+            Verified Itinerary
           </span>
         </div>
 
-        <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono text-xs text-slate-800 leading-relaxed">
-          {summaryText}
-        </pre>
+        {/* Day 1 & Day 2 Visual Sections */}
+        {([1, 2] as const).map(day => {
+          const items = r.timeline.filter(t => t.day === day && t.category !== 'REST');
+          const dayDate = day === 1 ? day1Start : day2Start;
+          return (
+            <div key={day} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+                <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wide">
+                  Day {day} {dayDate && <span className="text-xs font-normal text-slate-500 lowercase">· {formatReadableDate(dayDate)}</span>}
+                </h3>
+                <span className="text-[11px] font-semibold text-slate-500">
+                  {items.length} segments
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {items.map(item => {
+                  const isPitstop = item.category === 'PITSTOP';
+                  const isFree = item.category === 'FREE';
+                  const isDrive = item.category === 'DRIVE';
+                  const isActivity = item.category === 'ACTIVITY';
+                  const duration = Math.round((parseIST(item.endTime) - parseIST(item.startTime)) / 60_000);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`flex items-center justify-between gap-3 rounded-lg border p-2.5 text-xs transition-colors ${
+                        isFree
+                          ? 'border-emerald-200 bg-emerald-50/80 text-emerald-950 font-medium'
+                          : isPitstop
+                          ? 'border-amber-300 bg-amber-50 text-amber-950 font-semibold'
+                          : isDrive
+                          ? 'border-blue-100 bg-blue-50/60 text-blue-950'
+                          : isActivity
+                          ? 'border-purple-100 bg-purple-50/50 text-purple-950'
+                          : 'border-slate-200 bg-white text-slate-800'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <span className="font-semibold">{item.label}</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0 text-slate-600">
+                        <span>
+                          {formatTimelineTime(item.startTime)} - {formatTimelineTime(item.endTime)}
+                        </span>
+                        <span className="font-bold text-slate-800">({formatDuration(duration)})</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Expandable Plain-Text Preview for Copying */}
+        <details className="group border-t border-slate-200 pt-3">
+          <summary className="cursor-pointer text-xs font-bold text-teal-800 hover:text-teal-950 select-none flex items-center justify-between">
+            <span>Show plain-text messaging preview</span>
+            <span className="text-teal-600 group-open:rotate-180 transition-transform">▼</span>
+          </summary>
+          <div className="mt-3">
+            <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-800 font-sans leading-relaxed">
+              {summaryText}
+            </pre>
+          </div>
+        </details>
       </div>
 
       {/* Section E: Sharing & Review Actions */}

@@ -3,16 +3,56 @@ import { useNavigate } from 'react-router';
 import type { Dispatch, SetStateAction } from 'react';
 import type { UserConstraints } from '../types';
 import { parseIST } from '../engine/scheduler';
-import { sanitizeDisplayName } from '../utils/tripShare';
+import { cleanInputDisplayName, sanitizeDisplayName } from '../utils/tripShare';
 
 type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserConstraints>> };
 
 export default function InputScreen({ inputs, setInputs }: Props) {
   const nav = useNavigate();
   const [error, setError] = useState('');
+
+  // Track custom budget state
+  const isPresetBudget = [3000, 6000, 10000].includes(inputs.perPersonBudgetINR);
+  const [isCustomBudget, setIsCustomBudget] = useState(!isPresetBudget);
+  const [customBudgetStr, setCustomBudgetStr] = useState(
+    !isPresetBudget ? String(inputs.perPersonBudgetINR) : ''
+  );
+
   const modify = (patch: Partial<UserConstraints>) => {
     setError('');
     setInputs(old => ({ ...old, ...patch }));
+  };
+
+  const handleCustomBudgetChange = (val: string) => {
+    // Allow typing only digits
+    const cleaned = val.replace(/[^0-9]/g, '');
+    setCustomBudgetStr(cleaned);
+    if (cleaned) {
+      const num = parseInt(cleaned, 10);
+      if (!Number.isNaN(num) && num >= 500 && num <= 100000) {
+        modify({ perPersonBudgetINR: num });
+      }
+    }
+  };
+
+  const handleCustomBudgetBlur = () => {
+    if (!customBudgetStr) {
+      // Revert to default 6000 if empty
+      setCustomBudgetStr('6000');
+      modify({ perPersonBudgetINR: 6000 });
+      return;
+    }
+    const num = parseInt(customBudgetStr, 10);
+    if (Number.isNaN(num) || num < 500) {
+      setCustomBudgetStr('500');
+      modify({ perPersonBudgetINR: 500 });
+    } else if (num > 100000) {
+      setCustomBudgetStr('100000');
+      modify({ perPersonBudgetINR: 100000 });
+    } else {
+      setCustomBudgetStr(String(num));
+      modify({ perPersonBudgetINR: num });
+    }
   };
 
   const proceed = () => {
@@ -34,6 +74,14 @@ export default function InputScreen({ inputs, setInputs }: Props) {
       if (inputs.organizerName && inputs.organizerName.trim().length > 40) {
         throw new Error('Organizer name must be 40 characters or fewer.');
       }
+
+      if (inputs.perPersonBudgetINR < 500 || inputs.perPersonBudgetINR > 100000) {
+        throw new Error('Please enter a per-person budget between ₹500 and ₹1,00,000.');
+      }
+
+      // Normalize organizer name on submit
+      const cleanName = sanitizeDisplayName(inputs.organizerName);
+      modify({ organizerName: cleanName });
 
       setError('');
       nav('/compare');
@@ -90,10 +138,11 @@ export default function InputScreen({ inputs, setInputs }: Props) {
           <input
             type="text"
             maxLength={40}
-            placeholder={isGroup ? 'e.g. Sujil' : 'Your name'}
+            placeholder={isGroup ? 'e.g. Sujil Kumar' : 'Your name'}
             className="mt-2 block w-full rounded-lg border border-slate-300 p-3 text-sm focus:border-teal-700 focus:outline-none focus:ring-1 focus:ring-teal-700"
             value={inputs.organizerName ?? ''}
-            onChange={e => modify({ organizerName: sanitizeDisplayName(e.target.value) })}
+            onChange={e => modify({ organizerName: cleanInputDisplayName(e.target.value) })}
+            onBlur={e => modify({ organizerName: sanitizeDisplayName(e.target.value) })}
           />
           <span className="mt-1 block text-xs text-slate-500">
             {isGroup
@@ -166,15 +215,24 @@ export default function InputScreen({ inputs, setInputs }: Props) {
 
         {/* Budget Per Person */}
         <div>
-          <div className="mb-2 text-sm font-semibold text-slate-900">Budget per person</div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-semibold text-slate-900">Budget per person</span>
+            <span className="text-xs font-bold text-teal-800">
+              Selected: ₹{inputs.perPersonBudgetINR.toLocaleString('en-IN')}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-4 gap-2">
             {[3000, 6000, 10000].map(v => (
               <button
                 key={v}
                 type="button"
-                onClick={() => modify({ perPersonBudgetINR: v })}
-                className={`rounded-lg border px-2 py-3 text-sm transition-all ${
-                  inputs.perPersonBudgetINR === v
+                onClick={() => {
+                  setIsCustomBudget(false);
+                  modify({ perPersonBudgetINR: v });
+                }}
+                className={`rounded-lg border px-2 py-3 text-xs sm:text-sm transition-all ${
+                  !isCustomBudget && inputs.perPersonBudgetINR === v
                     ? 'border-teal-800 bg-teal-50 font-bold text-teal-950 shadow-sm'
                     : 'border-slate-200 text-slate-700 hover:bg-slate-50'
                 }`}
@@ -182,7 +240,51 @@ export default function InputScreen({ inputs, setInputs }: Props) {
                 ₹{v.toLocaleString('en-IN')}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => {
+                setIsCustomBudget(true);
+                if ([3000, 6000, 10000].includes(inputs.perPersonBudgetINR)) {
+                  setCustomBudgetStr('');
+                } else {
+                  setCustomBudgetStr(String(inputs.perPersonBudgetINR));
+                }
+              }}
+              className={`rounded-lg border px-2 py-3 text-xs sm:text-sm font-semibold transition-all ${
+                isCustomBudget || ![3000, 6000, 10000].includes(inputs.perPersonBudgetINR)
+                  ? 'border-teal-800 bg-teal-50 font-bold text-teal-950 shadow-sm'
+                  : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              Custom
+            </button>
           </div>
+
+          {(isCustomBudget || ![3000, 6000, 10000].includes(inputs.perPersonBudgetINR)) && (
+            <div className="mt-3 rounded-xl border border-teal-200 bg-teal-50/60 p-3.5 space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-800">
+                Custom amount per person (₹)
+                <div className="relative mt-1">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-sm font-bold text-slate-600">
+                    ₹
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="e.g. 4500"
+                    value={customBudgetStr}
+                    onChange={e => handleCustomBudgetChange(e.target.value)}
+                    onBlur={handleCustomBudgetBlur}
+                    className="block w-full rounded-lg border border-slate-300 pl-8 pr-3 py-2 text-sm font-bold text-slate-900 bg-white focus:border-teal-700 focus:outline-none focus:ring-1 focus:ring-teal-700"
+                  />
+                </div>
+              </label>
+              <p className="text-[11px] text-slate-500">
+                Enter whole-number budget from ₹500 to ₹1,00,000. Used for affordability warnings.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Party Size (if Group) */}

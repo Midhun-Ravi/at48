@@ -47,8 +47,9 @@ export function buildShareableParams(
   params.set('pace', inputs.pace);
   params.set('budget', String(inputs.perPersonBudgetINR));
 
-  if (inputs.drivingAdjustmentMinutes !== 0) {
-    params.set('adj', String(inputs.drivingAdjustmentMinutes));
+  const adj = inputs.destinationAdjustments?.[destinationId] ?? inputs.drivingAdjustmentMinutes ?? 0;
+  if (adj !== 0) {
+    params.set('adj', String(adj));
   }
 
   if (inputs.simulateDelayMinutes === 60) {
@@ -284,6 +285,7 @@ export function parseShareableTrip(
       selectedPitstopIds,
       organizerName: organizerName || undefined,
       planningMode,
+      destinationAdjustments: { [destinationId]: drivingAdjustmentMinutes },
     };
 
     return {

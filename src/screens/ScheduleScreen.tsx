@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Dispatch, SetStateAction } from 'react';
 import type { UserConstraints } from '../types';
 import { getDestination } from '../data/destinations';
 import { getCompatiblePitstops } from '../data/pitstops.js';
 import { evaluateFeasibility, parseIST } from '../engine/scheduler';
 import TripMap from '../components/TripMap';
+import { getPlaceImage } from '../data/images';
 import {
   buildTripSummaryText,
   buildWhatsAppShareUrl,
@@ -15,6 +16,7 @@ import {
   formatTimelineTime,
 } from '../utils/formatters';
 import {
+  buildShareableParams,
   buildShareableTripUrl,
   buildWhatsAppInvitationMessage,
   buildWhatsAppRSVPMessage,
@@ -26,6 +28,7 @@ type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserC
 
 export default function ScheduleScreen({ inputs, setInputs }: Props) {
   const { id } = useParams();
+  const nav = useNavigate();
   const [searchParams] = useSearchParams();
 
   // Parse shareable URL query parameters if present
@@ -184,6 +187,11 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
     setRsvpSent(true);
   };
 
+  const goToReviewScreen = () => {
+    const params = buildShareableParams(dest.id, currentInputs);
+    nav(`/review/${dest.id}?${params.toString()}`);
+  };
+
   const day1Start = r.timeline.find(t => t.day === 1)?.startTime;
   const day2Start = r.timeline.find(t => t.day === 2)?.startTime;
 
@@ -266,9 +274,9 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       )}
 
       <div>
-        <div className="text-sm font-semibold uppercase tracking-widest text-teal-700">Step 3 / 3</div>
+        <div className="text-sm font-semibold uppercase tracking-widest text-teal-700">Step 3 / 4</div>
         <h1 className="mt-1 text-3xl font-extrabold text-slate-900">{dest.name}: your weekend</h1>
-        <p className="mt-1 text-sm text-slate-600">Plan estimates in IST, not a live GPS tracker.</p>
+        <p className="mt-1 text-sm text-slate-600">Customize your stops, delays, and schedule in IST.</p>
       </div>
 
       {/* Informational Stay Zone Badge */}
@@ -342,27 +350,42 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
           Simulate +1 hour outbound delay
         </label>
 
-        {dest.activities.filter(a => a.isOptional).map(a => (
-          <label key={a.id} className="flex items-center gap-3 text-sm text-slate-700 cursor-pointer">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded text-teal-600 focus:ring-teal-500"
-              checked={!currentInputs.disabledActivityIds.includes(a.id)}
-              onChange={e =>
-                updateInputs(s => ({
-                  ...s,
-                  disabledActivityIds: e.target.checked
-                    ? s.disabledActivityIds.filter(i => i !== a.id)
-                    : [...s.disabledActivityIds, a.id],
-                }))
-              }
-            />
-            Include optional attraction: <strong>{a.name}</strong> ({formatDuration(a.durationMinutes)})
-          </label>
-        ))}
+        {dest.activities.filter(a => a.isOptional).map(a => {
+          const aImg = getPlaceImage(a.id);
+          return (
+            <label key={a.id} className="flex items-center gap-3 text-sm text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded text-teal-600 focus:ring-teal-500"
+                checked={!currentInputs.disabledActivityIds.includes(a.id)}
+                onChange={e =>
+                  updateInputs(s => ({
+                    ...s,
+                    disabledActivityIds: e.target.checked
+                      ? s.disabledActivityIds.filter(i => i !== a.id)
+                      : [...s.disabledActivityIds, a.id],
+                  }))
+                }
+              />
+              {aImg && (
+                <img
+                  src={aImg.src}
+                  alt={aImg.alt}
+                  className="h-8 w-8 rounded object-cover flex-shrink-0"
+                  onError={e => {
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
+                />
+              )}
+              <span>
+                Include optional attraction: <strong>{a.name}</strong> ({formatDuration(a.durationMinutes)})
+              </span>
+            </label>
+          );
+        })}
       </div>
 
-      {/* Curated Highway Pitstops Section */}
+      {/* Curated Highway Pitstops Section with Verified Thumbnail */}
       {compatibleStops.length > 0 && (
         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -381,6 +404,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
             {compatibleStops.map(stop => {
               const isSelected = selectedPitstopIds.includes(stop.id);
               const totalStopMinutes = stop.dwellMinutes + stop.detourMinutes;
+              const stopImg = getPlaceImage(stop.id);
 
               return (
                 <div
@@ -389,8 +413,27 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                     isSelected ? 'border-amber-400 bg-amber-50/50 shadow-sm' : 'border-slate-200 bg-slate-50/40 hover:bg-slate-50'
                   }`}
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
+                  <div className="flex gap-4 items-start">
+                    {/* Pitstop thumbnail with graceful fallback */}
+                    {stopImg ? (
+                      <div className="relative h-20 w-20 sm:h-24 sm:w-24 flex-shrink-0 overflow-hidden rounded-xl border border-amber-200 bg-amber-50 shadow-inner">
+                        <img
+                          src={stopImg.src}
+                          alt={stopImg.alt}
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                          onError={e => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex h-20 w-20 sm:h-24 sm:w-24 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100 text-3xl">
+                        ☕
+                      </div>
+                    )}
+
+                    <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <strong className="text-sm font-bold text-slate-900">{stop.name}</strong>
                         <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900">
@@ -482,6 +525,11 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                 const isDrive = entry.category === 'DRIVE';
                 const isActivity = entry.category === 'ACTIVITY';
                 const isPitstop = entry.category === 'PITSTOP';
+                const actImg = entry.activityId
+                  ? getPlaceImage(entry.activityId)
+                  : isPitstop
+                  ? getPlaceImage('maddur-tiffanys')
+                  : undefined;
 
                 return (
                   <div
@@ -498,25 +546,40 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                         : 'border-slate-200 bg-white'
                     }`}
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <strong className="text-slate-900">{entry.label}</strong>
-                      <span
-                        className={`rounded px-2 py-0.5 text-xs font-semibold ${
-                          isPitstop
-                            ? 'bg-amber-200 text-amber-900 font-bold'
-                            : isFree
-                            ? 'bg-emerald-100 text-emerald-800 font-bold'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        {entry.category}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex items-center justify-between text-xs text-slate-600">
-                      <span>
-                        {formatTimelineTime(entry.startTime)} → {formatTimelineTime(entry.endTime)}
-                      </span>
-                      <span className="font-semibold">{formatDuration(duration)}</span>
+                    <div className="flex items-center gap-3">
+                      {actImg && (
+                        <img
+                          src={actImg.src}
+                          alt={actImg.alt}
+                          loading="lazy"
+                          className="h-10 w-10 rounded-lg object-cover flex-shrink-0 border border-slate-200"
+                          onError={e => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <strong className="text-slate-900">{entry.label}</strong>
+                          <span
+                            className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                              isPitstop
+                                ? 'bg-amber-200 text-amber-900 font-bold'
+                                : isFree
+                                ? 'bg-emerald-100 text-emerald-800 font-bold'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {entry.category}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center justify-between text-xs text-slate-600">
+                          <span>
+                            {formatTimelineTime(entry.startTime)} → {formatTimelineTime(entry.endTime)}
+                          </span>
+                          <span className="font-semibold">{formatDuration(duration)}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
@@ -526,7 +589,29 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         );
       })}
 
-      {/* Invite Your Crew Section */}
+      {/* Primary CTA: Review My Trip Button */}
+      <div className="rounded-2xl border-2 border-emerald-600/30 bg-emerald-50/40 p-5 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Itinerary Complete?</h2>
+            <p className="text-xs text-slate-600">
+              Review your entire journey summary, budget breakdown, and share with your travel crew.
+            </p>
+          </div>
+          <span className="rounded-full bg-emerald-200/80 px-3 py-1 text-xs font-bold text-emerald-950">
+            Step 4 Next
+          </span>
+        </div>
+
+        <button
+          onClick={goToReviewScreen}
+          className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#0d6350] px-5 py-4 text-base font-bold text-white shadow-md hover:bg-[#0b4b3d] active:scale-[0.99] transition-all cursor-pointer"
+        >
+          Review My Trip →
+        </button>
+      </div>
+
+      {/* Invite Your Crew Section (Quick Share Tray) */}
       <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>

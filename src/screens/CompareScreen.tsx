@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { UserConstraints } from '../types';
 import { DESTINATIONS } from '../data/destinations';
 import { evaluateFeasibility } from '../engine/scheduler';
+import { formatDuration } from '../utils/formatters';
 
 type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserConstraints>> };
 export default function CompareScreen({ inputs, setInputs }: Props) {
@@ -17,7 +18,7 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
       <div><p className="font-semibold">Starting outside MG Road?</p><p className="text-sm text-slate-600">Adjust the estimated one-way drive for your origin; the adjustment applies to all four destinations.</p></div>
       <div className="flex items-center gap-3">
         <button aria-label="Subtract 15 minutes" className="rounded-lg border bg-white px-4 py-2 font-bold" disabled={inputs.drivingAdjustmentMinutes<=-60} onClick={()=>setInputs(s=>({...s,drivingAdjustmentMinutes:s.drivingAdjustmentMinutes-15}))}>−</button>
-        <span className="w-20 text-center font-bold">{inputs.drivingAdjustmentMinutes>0?'+':''}{inputs.drivingAdjustmentMinutes} min</span>
+        <span className="w-20 text-center font-bold">{formatDuration(inputs.drivingAdjustmentMinutes, true)}</span>
         <button aria-label="Add 15 minutes" className="rounded-lg border bg-white px-4 py-2 font-bold" disabled={inputs.drivingAdjustmentMinutes>=120} onClick={()=>setInputs(s=>({...s,drivingAdjustmentMinutes:s.drivingAdjustmentMinutes+15}))}>+</button>
       </div>
     </div>
@@ -29,9 +30,9 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
           <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-xl font-bold">{d.name}</h2><span className={`rounded-full px-3 py-1 text-xs font-bold ${color}`}>{r.rating}</span></div>
           <p className="text-xs text-slate-500">{d.routeName} · MG Road reference</p>
           <div className="grid grid-cols-2 gap-3 text-sm">
-            <p><span className="block text-xs text-slate-500">Round-trip driving</span><strong>{Math.round((r.outboundDriveMinutes+r.inboundDriveMinutes)/60*10)/10} h</strong></p>
-            <p><span className="block text-xs text-slate-500">Usable free time</span><strong>{r.destinationSlackMinutes} min</strong></p>
-            <p><span className="block text-xs text-slate-500">Return margin</span><strong>{r.returnDeadlineMarginMinutes} min</strong></p>
+            <p><span className="block text-xs text-slate-500">Round-trip driving</span><strong>{formatDuration(r.outboundDriveMinutes + r.inboundDriveMinutes)}</strong></p>
+            <p><span className="block text-xs text-slate-500">Usable free time</span><strong>{formatDuration(r.destinationSlackMinutes)}</strong></p>
+            <p><span className="block text-xs text-slate-500">Return margin</span><strong>{formatDuration(r.returnDeadlineMarginMinutes, true)}</strong></p>
             <p><span className="block text-xs text-slate-500">Est. cost/person</span><strong>₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}</strong></p>
           </div>
           <p className="text-sm text-slate-700">{r.ratingExplanation}</p>

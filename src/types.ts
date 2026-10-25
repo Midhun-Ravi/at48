@@ -20,6 +20,8 @@ export interface UserConstraints {
   simulateDelayMinutes: 0 | 60; // outbound only
   disabledActivityIds: string[]; // only optional activities may be disabled
   selectedPitstopIds?: string[]; // IDs of curated highway stops to include
+  organizerName?: string; // display name e.g. "Sujil" (max 40 chars)
+  planningMode?: 'solo' | 'group'; // default 'group'
 }
 
 export interface Activity {

@@ -20,6 +20,7 @@ const DEFAULTS: UserConstraints = {
   departureDateTime, returnDeadlineDateTime, pace: 'balanced',
   perPersonBudgetINR: 6000, partySize: 2, drivingAdjustmentMinutes: 0,
   simulateDelayMinutes: 0, disabledActivityIds: [], selectedPitstopIds: [],
+  organizerName: '', planningMode: 'group',
 };
 
 export default function App() {

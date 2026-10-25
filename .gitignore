@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.engine-dist/
+.vite/
+.vitest/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.vercel/

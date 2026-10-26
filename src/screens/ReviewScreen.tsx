@@ -82,8 +82,7 @@ export default function ReviewScreen({ inputs }: Props) {
   // Evaluate feasibility using the deterministic engine
   const r = evaluateFeasibility(dest, activeInputs);
 
-  const day1Start = r.timeline.find(t => t.day === 1)?.startTime;
-  const day2Start = r.timeline.find(t => t.day === 2)?.startTime;
+  const availableDays = Array.from(new Set(r.timeline.map(t => t.day))).sort((a, b) => a - b);
 
   const heroImage = getDestinationImage(dest.id);
   const compatibleStops = getCompatiblePitstops(dest.id);
@@ -424,10 +423,10 @@ export default function ReviewScreen({ inputs }: Props) {
           </span>
         </div>
 
-        {/* Day 1 & Day 2 Sections */}
-        {([1, 2] as const).map(day => {
+        {/* Day-by-Day Itinerary Cards (Dynamic 1 to 4 Days) */}
+        {availableDays.map(day => {
           const items = r.timeline.filter(t => t.day === day && t.category !== 'REST');
-          const dayDate = day === 1 ? day1Start : day2Start;
+          const dayDate = r.timeline.find(t => t.day === day)?.startTime;
           return (
             <div key={day} className="rounded-xl border border-slate-800 bg-[#15191F] p-4 space-y-3">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">

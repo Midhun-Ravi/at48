@@ -106,7 +106,7 @@ export interface TimetableEntry {
   label: string;
   startTime: string; // YYYY-MM-DDTHH:mm IST
   endTime: string;
-  day: 1 | 2;
+  day: number; // 1, 2, 3, or 4
   activityId?: string;
   isOptional?: boolean;
 }
@@ -125,7 +125,7 @@ export interface ConstraintViolation {
 
 export interface ActivityOutcome {
   activityId: string;
-  status: 'day1' | 'day2' | 'omitted' | 'unavailable';
+  status: 'day1' | 'day2' | 'day3' | 'day4' | 'omitted' | 'unavailable';
   reason?: string;
 }
 

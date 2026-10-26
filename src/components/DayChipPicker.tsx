@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { getCalendarDaysCount } from '../engine/scheduler';
 
 interface DayChipPickerProps {
   departureDateTime: string; // YYYY-MM-DDTHH:mm
@@ -86,11 +87,12 @@ export default function DayChipPicker({
     onChange(`${currentDepDate}T${currentDepTime}`, `${currentRetDate}T${timeStr}`);
   };
 
-  // Duration in hours
+  // Duration in hours & calendar days
   const startEpoch = Date.parse(`${currentDepDate}T${currentDepTime}:00Z`);
   const endEpoch = Date.parse(`${currentRetDate}T${currentRetTime}:00Z`);
   const durationHours = (endEpoch - startEpoch) / 3_600_000;
-  const isValidDuration = durationHours >= 18 && durationHours <= 60;
+  const numDays = getCalendarDaysCount(departureDateTime, returnDeadlineDateTime);
+  const isValidDuration = durationHours > 0 && numDays >= 1 && numDays <= 4;
 
   return (
     <div className="space-y-4 rounded-2xl border border-slate-700/60 bg-[#15191F] p-4 sm:p-5 text-slate-100 shadow-md">
@@ -205,13 +207,15 @@ export default function DayChipPicker({
         {isValidDuration ? (
           <span className="flex items-center gap-1.5 font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-2.5 py-0.5 rounded-full">
             <span>✓</span>
-            <span>{durationHours.toFixed(1)} hours (within 18–60h escape window)</span>
+            <span>
+              {numDays} calendar date{numDays > 1 ? 's' : ''} ({durationHours.toFixed(1)} hours)
+            </span>
           </span>
         ) : (
           <span className="font-semibold text-amber-300 bg-amber-950/40 border border-amber-500/30 px-2.5 py-0.5 rounded-full">
-            {durationHours < 18
-              ? `${durationHours.toFixed(1)}h (Minimum is 18h)`
-              : `${durationHours.toFixed(1)}h (Maximum is 60h)`}
+            {durationHours <= 0
+              ? 'Return time must be after departure'
+              : `${numDays} calendar dates (Maximum supported is 4 dates)`}
           </span>
         )}
       </div>

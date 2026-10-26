@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { Dispatch, SetStateAction } from 'react';
 import type { UserConstraints } from '../types';
-import { parseIST } from '../engine/scheduler';
+import { parseIST, getCalendarDaysCount } from '../engine/scheduler';
 import { cleanInputDisplayName, sanitizeDisplayName } from '../utils/tripShare';
 import ProgressBar from '../components/ProgressBar';
 import DayChipPicker from '../components/DayChipPicker';
@@ -39,10 +39,10 @@ export default function InputScreen({ inputs, setInputs }: Props) {
         throw new Error('Return time must be after departure time.');
       }
 
-      const delta = (retEpoch - depEpoch) / 3_600_000;
-      if (delta < 18 || delta > 60) {
+      const numDays = getCalendarDaysCount(inputs.departureDateTime, inputs.returnDeadlineDateTime);
+      if (numDays < 1 || numDays > 4) {
         throw new Error(
-          '@48 currently plans 18–60 hour escapes. Adjust your dates to continue—longer adventures are on our roadmap.'
+          'Please select travel dates spanning 1 to 4 calendar dates. Trips covering 5 or more calendar dates are outside this prototype.'
         );
       }
 

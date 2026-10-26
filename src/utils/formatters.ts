@@ -170,18 +170,17 @@ export function buildTripSummaryText({
     lines.push(``, `⚙️ *Trip Adjustments:*`, ...adjustments.map(a => `• ${a}`));
   }
 
-  // Key Timeline Itinerary
-  const day1Items = result.timeline.filter(t => t.day === 1 && t.category !== 'REST');
-  const day2Items = result.timeline.filter(t => t.day === 2 && t.category !== 'REST');
-
+  // Key Timeline Itinerary (Dynamic for 1 to 4 days)
+  const daysInTimeline = Array.from(new Set(result.timeline.map(t => t.day))).sort((a, b) => a - b);
   lines.push(``, `📍 *Itinerary Highlights:*`);
-  lines.push(`*Day 1:*`);
-  for (const item of day1Items) {
-    lines.push(`• ${formatTimelineTime(item.startTime)} - ${formatTimelineTime(item.endTime)}: ${item.label}`);
-  }
-  lines.push(`*Day 2:*`);
-  for (const item of day2Items) {
-    lines.push(`• ${formatTimelineTime(item.startTime)} - ${formatTimelineTime(item.endTime)}: ${item.label}`);
+  for (const d of daysInTimeline) {
+    const dayItems = result.timeline.filter(t => t.day === d && t.category !== 'REST');
+    if (dayItems.length > 0) {
+      lines.push(`*Day ${d}:*`);
+      for (const item of dayItems) {
+        lines.push(`• ${formatTimelineTime(item.startTime)} - ${formatTimelineTime(item.endTime)}: ${item.label}`);
+      }
+    }
   }
 
   // Warnings / Advisories

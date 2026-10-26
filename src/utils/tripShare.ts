@@ -1,6 +1,6 @@
 import { getDestination } from '../data/destinations.js';
 import { getCompatiblePitstops } from '../data/pitstops.js';
-import { parseIST } from '../engine/scheduler.js';
+import { parseIST, getCalendarDaysCount } from '../engine/scheduler.js';
 import { formatReadableDate, formatReadableDateTime } from './formatters.js';
 import type { PacePreference, UserConstraints } from '../types.js';
 
@@ -178,11 +178,12 @@ export function parseShareableTrip(
       return { valid: false, error: 'Return deadline must be after trip departure.' };
     }
 
-    const durationHours = (retEpoch - depEpoch) / 3_600_000;
-    if (durationHours < 12 || durationHours > 84) {
+    // Validate 1 to 4 calendar dates inclusive
+    const numDays = getCalendarDaysCount(dep, ret);
+    if (numDays < 1 || numDays > 4) {
       return {
         valid: false,
-        error: `Trip duration (${Math.round(durationHours)}h) is outside the supported weekend window of 12 to 84 hours.`,
+        error: `Trip window (${numDays} calendar dates) is outside the supported range of 1 to 4 calendar dates.`,
       };
     }
 

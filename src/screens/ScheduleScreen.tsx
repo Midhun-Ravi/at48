@@ -9,7 +9,6 @@ import TripMap from '../components/TripMap';
 import ProgressBar from '../components/ProgressBar';
 import { getPlaceImage } from '../data/images';
 import {
-  buildTripSummaryText,
   buildWhatsAppShareUrl,
   formatDuration,
   formatReadableDate,
@@ -19,7 +18,6 @@ import {
 import {
   buildShareableParams,
   buildShareableTripUrl,
-  buildWhatsAppInvitationMessage,
   buildWhatsAppRSVPMessage,
   cleanInputDisplayName,
   parseShareableTrip,
@@ -33,8 +31,8 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // Active day tab (1 or 2)
-  const [activeDay, setActiveDay] = useState<1 | 2>(1);
+  // Active day tab (1 to N)
+  const [activeDay, setActiveDay] = useState<number>(1);
 
   // Pitstop dietary filter: 'all' | 'veg' | 'non-veg'
   const [dietaryFilter, setDietaryFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
@@ -70,8 +68,6 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   // Active inputs: Reconstructed from URL if valid share link opened; otherwise use props from planning flow
   const initialInputs = parsedTrip?.valid ? parsedTrip.data.inputs : inputs;
   const [currentInputs, setCurrentInputs] = useState<UserConstraints>(initialInputs);
-  const [copied, setCopied] = useState('');
-  const [linkCopied, setLinkCopied] = useState('');
   const [guestName, setGuestName] = useState('');
   const [guestError, setGuestError] = useState('');
   const [rsvpSent, setRsvpSent] = useState(false);
@@ -91,6 +87,14 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
   // Re-evaluate feasibility dynamically using the scheduler engine
   const r = evaluateFeasibility(dest, currentInputs);
+  // Available days dynamically extracted from timeline entries
+  const availableDays = useMemo(() => {
+    const days = Array.from(new Set(r.timeline.map(t => t.day))).sort((a, b) => a - b);
+    return days.length > 0 ? days : [1];
+  }, [r.timeline]);
+
+  const currentActiveDay = availableDays.includes(activeDay) ? activeDay : availableDays[0] || 1;
+
   const compatibleStops = getCompatiblePitstops(dest.id);
   const selectedPitstopIds = currentInputs.selectedPitstopIds ?? [];
 
@@ -132,50 +136,6 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
     encodeURIComponent(dest.name + ', India') +
     '&travelmode=driving';
 
-  const summaryText = buildTripSummaryText({
-    destination: dest,
-    inputs: currentInputs,
-    result: r,
-    originUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
-  });
-
-  const copySummary = async () => {
-    try {
-      await navigator.clipboard.writeText(summaryText);
-      setCopied('Summary copied to clipboard!');
-    } catch {
-      setCopied('Select and copy from the preview below.');
-      window.prompt('Copy your @48 plan:', summaryText);
-    }
-  };
-
-  const shareViaWhatsApp = () => {
-    const url = buildWhatsAppShareUrl(summaryText);
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
-  const handleCopyTripLink = async () => {
-    const shareUrl = buildShareableTripUrl(dest.id, currentInputs);
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setLinkCopied('Trip invitation link copied to clipboard!');
-    } catch {
-      window.prompt('Copy trip link:', shareUrl);
-      setLinkCopied('Trip link ready to copy.');
-    }
-  };
-
-  const handleShareInviteWhatsApp = () => {
-    const shareUrl = buildShareableTripUrl(dest.id, currentInputs);
-    const msg = buildWhatsAppInvitationMessage({
-      destinationName: dest.name,
-      inputs: currentInputs,
-      tripUrl: shareUrl,
-    });
-    const url = buildWhatsAppShareUrl(msg);
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
   const handleGuestRSVP = () => {
     const trimmed = guestName.trim();
     if (!trimmed) {
@@ -204,8 +164,6 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
     nav(`/review/${dest.id}?${params.toString()}`);
   };
 
-  const day1Start = r.timeline.find(t => t.day === 1)?.startTime;
-  const day2Start = r.timeline.find(t => t.day === 2)?.startTime;
 
   return (
     <section className="mx-auto max-w-3xl space-y-6">
@@ -641,42 +599,37 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         </div>
       )}
 
-      {/* Sticky Day 1 / Day 2 Tabs */}
+      {/* Dynamic Day 1 .. Day N Tabs */}
       <div className="space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setActiveDay(1)}
-              className={`rounded-xl px-4 py-2 text-sm font-bold transition-colors cursor-pointer ${
-                activeDay === 1
-                  ? 'bg-[#2962FF] text-white shadow-md shadow-[#2962FF]/40'
-                  : 'bg-[#20252E] text-slate-400 hover:text-white'
-              }`}
-            >
-              Day 1 {day1Start && `· ${formatReadableDate(day1Start)}`}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveDay(2)}
-              className={`rounded-xl px-4 py-2 text-sm font-bold transition-colors cursor-pointer ${
-                activeDay === 2
-                  ? 'bg-[#2962FF] text-white shadow-md shadow-[#2962FF]/40'
-                  : 'bg-[#20252E] text-slate-400 hover:text-white'
-              }`}
-            >
-              Day 2 {day2Start && `· ${formatReadableDate(day2Start)}`}
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {availableDays.map(d => {
+              const dayStart = r.timeline.find(t => t.day === d)?.startTime;
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setActiveDay(d)}
+                  className={`rounded-xl px-4 py-2 text-sm font-bold transition-colors cursor-pointer ${
+                    currentActiveDay === d
+                      ? 'bg-[#2962FF] text-white shadow-md shadow-[#2962FF]/40'
+                      : 'bg-[#20252E] text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Day {d} {dayStart && `· ${formatReadableDate(dayStart)}`}
+                </button>
+              );
+            })}
           </div>
           <span className="text-xs text-slate-400">
-            {r.timeline.filter(t => t.day === activeDay).length} timeline blocks
+            {r.timeline.filter(t => t.day === currentActiveDay).length} timeline blocks
           </span>
         </div>
 
         {/* Selected Day Timeline List */}
         <div className="space-y-2.5">
           {r.timeline
-            .filter(t => t.day === activeDay)
+            .filter(t => t.day === currentActiveDay)
             .map(entry => {
               const duration = Math.round((parseIST(entry.endTime) - parseIST(entry.startTime)) / 60_000);
               const isFree = entry.category === 'FREE';
@@ -782,109 +735,8 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
           onClick={goToReviewScreen}
           className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#2962FF] px-6 py-4 text-base font-bold text-white shadow-lg shadow-[#2962FF]/40 hover:bg-blue-600 active:scale-[0.99] transition-all cursor-pointer"
         >
-          See My Trip →
+          Review My Trip →
         </button>
-      </div>
-
-      {/* Invite Your Crew Section (Quick Share Tray) */}
-      <div className="space-y-4 rounded-2xl border border-slate-800 bg-[#20252E] p-5 shadow-lg">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-base font-bold text-white">Invite Your Crew</h2>
-            <p className="text-xs text-slate-400">
-              Share this trip plan snapshot with friends via direct link or WhatsApp.
-            </p>
-          </div>
-          <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-3 py-1 text-xs font-bold text-blue-300">
-            Shareable Link
-          </span>
-        </div>
-
-        {/* Trip Snapshot Preview Box */}
-        <div className="rounded-xl border border-slate-700/60 bg-[#15191F] p-3.5 text-xs text-slate-300 space-y-1.5">
-          <div className="flex justify-between">
-            <span className="font-semibold text-slate-400">Destination:</span>
-            <span className="text-white font-bold">{dest.name}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-semibold text-slate-400">Travel Dates:</span>
-            <span className="text-white">
-              {formatReadableDateTime(currentInputs.departureDateTime)} →{' '}
-              {formatReadableDateTime(currentInputs.returnDeadlineDateTime)}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="font-semibold text-slate-400">Organizer:</span>
-            <span className="text-white">{organizerName || 'Trip Organizer'}</span>
-          </div>
-          {selectedPitstopIds.length > 0 && (
-            <div className="flex justify-between">
-              <span className="font-semibold text-slate-400">Highway Stop:</span>
-              <span className="font-medium text-amber-300">Maddur Tiffanys included</span>
-            </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 pt-1">
-          <button
-            onClick={handleShareInviteWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 font-bold text-white shadow-md hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
-          >
-            <span className="text-base">💬</span> Share Invite via WhatsApp
-          </button>
-          <button
-            onClick={handleCopyTripLink}
-            className="flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-[#292F39] px-4 py-3.5 font-bold text-slate-200 hover:text-white shadow-md hover:bg-slate-700 active:scale-[0.99] transition-all cursor-pointer"
-          >
-            <span className="text-base">🔗</span> Copy Trip Link
-          </button>
-        </div>
-
-        {linkCopied && (
-          <p role="status" className="text-center text-sm font-semibold text-blue-400 animate-fade-in">
-            ✓ {linkCopied}
-          </p>
-        )}
-      </div>
-
-      {/* Dynamic Summary Preview Card */}
-      <div className="space-y-3 rounded-2xl border border-slate-800 bg-[#20252E] p-5 shadow-lg">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-base font-bold text-white">Trip Summary Preview</h2>
-            <p className="text-xs text-slate-400">
-              Live preview updates instantly when you modify delays, pitstops, or optional activities.
-            </p>
-          </div>
-          <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-3 py-1 text-xs font-bold text-blue-300">
-            Live Output
-          </span>
-        </div>
-
-        <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-700/60 bg-[#15191F] p-4 font-mono text-xs text-slate-300 leading-relaxed">
-          {summaryText}
-        </pre>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 pt-1">
-          <button
-            onClick={shareViaWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 font-bold text-white shadow-md hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
-          >
-            <span className="text-base">💬</span> Share via WhatsApp
-          </button>
-          <button
-            onClick={copySummary}
-            className="flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-[#292F39] px-4 py-3.5 font-bold text-slate-200 hover:text-white shadow-md hover:bg-slate-700 active:scale-[0.99] transition-all cursor-pointer"
-          >
-            <span className="text-base">📋</span> Copy Summary
-          </button>
-        </div>
-
-        {copied && (
-          <p role="status" className="text-center text-sm font-semibold text-blue-400 animate-fade-in">
-            ✓ {copied}
-          </p>
-        )}
       </div>
 
       <a

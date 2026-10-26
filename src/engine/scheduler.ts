@@ -35,18 +35,32 @@ export function formatIST(epoch: number): string {
   return new Date(epoch + IST_OFFSET_MINUTES * MINUTE_MS).toISOString().slice(0, 16);
 }
 
-function dayOf(instant: number): string { return formatIST(instant).slice(0, 10); }
-function nextDay(date: string): string {
+export function dayOf(instant: number): string { return formatIST(instant).slice(0, 10); }
+export function nextDay(date: string): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + DAY_MS).toISOString().slice(0, 10);
 }
 function at(date: string, hhmm: string): number { return parseIST(`${date}T${hhmm}`); }
 function add(time: number, mins: number): number { return time + mins * MINUTE_MS; }
 
+/** Count inclusive local calendar dates between departure and return deadline. */
+export function getCalendarDaysCount(depISO: string, retISO: string): number {
+  const depDate = depISO.slice(0, 10);
+  const retDate = retISO.slice(0, 10);
+  const depTime = Date.parse(`${depDate}T00:00:00Z`);
+  const retTime = Date.parse(`${retDate}T00:00:00Z`);
+  return Math.round((retTime - depTime) / DAY_MS) + 1;
+}
+
 function checkConstraints(input: UserConstraints, destination: Destination): void {
   const departure = parseIST(input.departureDateTime);
   const deadline = parseIST(input.returnDeadlineDateTime);
-  const hours = (deadline - departure) / 3_600_000;
-  if (hours < 18 || hours > 60) throw new Error('Trip window must be between 18 and 60 hours.');
+  if (deadline <= departure) {
+    throw new Error('Return time must be after departure time.');
+  }
+  const numDays = getCalendarDaysCount(input.departureDateTime, input.returnDeadlineDateTime);
+  if (numDays < 1 || numDays > 4) {
+    throw new Error('Trip window must cover between 1 and 4 calendar dates inclusive.');
+  }
   if (!['relaxed', 'balanced', 'packed'].includes(input.pace)) throw new Error('Invalid pace.');
   if (!Number.isInteger(input.partySize) || input.partySize < 1 || input.partySize > 10) throw new Error('Party size must be 1–10.');
   if (input.perPersonBudgetINR <= 0 || !Number.isFinite(input.perPersonBudgetINR)) throw new Error('Budget must be positive.');
@@ -65,15 +79,23 @@ export function evaluateFeasibility(
   checkConstraints(input, destination);
   const start = parseIST(input.departureDateTime);
   const deadline = parseIST(input.returnDeadlineDateTime);
-  const day1 = dayOf(start);
-  const day2 = nextDay(day1);
+  const numDays = getCalendarDaysCount(input.departureDateTime, input.returnDeadlineDateTime);
+
+  // Generate date strings for each day (1 to 4 calendar dates)
+  const dayDates: string[] = [];
+  let dCursor = dayOf(start);
+  for (let i = 0; i < numDays; i++) {
+    dayDates.push(dCursor);
+    dCursor = nextDay(dCursor);
+  }
+
   const p = PACE[input.pace];
   const violations: ConstraintViolation[] = [];
   const activityOutcomes: ActivityOutcome[] = [];
   const timeline: TimetableEntry[] = [];
   let sequence = 0;
   const push = (category: TimelineCategory, label: string, from: number, to: number,
-    day: 1 | 2, activityId?: string, isOptional?: boolean): void => {
+    day: number, activityId?: string, isOptional?: boolean): void => {
     if (to <= from) return;
     timeline.push({ id: `t${++sequence}`, category, label,
       startTime: formatIST(from), endTime: formatIST(to), day, activityId, isOptional });
@@ -101,7 +123,7 @@ export function evaluateFeasibility(
     }
   }
 
-  // Outbound pitstop (at most one on outbound leg in initial experience)
+  // Outbound pitstop
   const outboundStop = validStops.find(s => s.applicableLeg === 'outbound' || s.applicableLeg === 'both');
   let arrived: number;
   let outboundStopDwellAndDetour = 0;
@@ -135,31 +157,7 @@ export function evaluateFeasibility(
     push('DRIVE', `Drive to ${destination.name} (incl. ${driveContingency}m planning buffer)`, start, arrived, 1);
   }
 
-  const restStart = at(day1, '22:00');
-  const day1FreeEnd = at(day1, '21:00');
-  const day2Wake = at(day2, '07:00');
-  const day2LunchStart = at(day2, '12:00');
-
-  if (arrived > restStart) {
-    violation('REST_CONFLICT', 'BLOCKER', 'Outbound arrival conflicts with the 10 PM overnight-rest anchor.');
-  }
-
-  let day1Cursor = arrived;
-  const checkInEarliest = at(day1, '13:00');
-  if (day1Cursor < checkInEarliest) {
-    push('WAIT', 'Waiting for 1 PM check-in assumption', day1Cursor, checkInEarliest, 1);
-    day1Cursor = checkInEarliest;
-  }
-  const checkinDuration = outboundStop?.replacesArrivalMeal
-    ? Math.max(30, p.arrivalMealCheckinMinutes - 45)
-    : p.arrivalMealCheckinMinutes;
-  const checkinLabel = outboundStop?.replacesArrivalMeal
-    ? 'Hotel check-in & freshen up (meal taken at pitstop)'
-    : 'Meal & hotel check-in (estimated)';
-  const afterCheckin = add(day1Cursor, checkinDuration);
-  push('CHECK_IN', checkinLabel, day1Cursor, afterCheckin, 1);
-  day1Cursor = afterCheckin;
-
+  // Activity sorting & filtering
   const sorted = [...destination.activities].sort((a, b) =>
     Number(a.isOptional) - Number(b.isOptional) || a.priority - b.priority);
   const enabled = sorted.filter(activity => {
@@ -171,7 +169,7 @@ export function evaluateFeasibility(
   });
 
   function attempt(activity: Activity, cursor: number, date: string,
-    endCap: number, day: 1 | 2): number | undefined {
+    endCap: number, day: number): number | undefined {
     if (cursor >= endCap) return undefined;
     const transferEnd = add(cursor, activity.localTransferMinutes);
     const opening = at(date, activity.openTime);
@@ -183,9 +181,8 @@ export function evaluateFeasibility(
     push('TRANSFER', `Local transfer to ${activity.name}`, cursor, transferEnd, day);
     push('WAIT', `Wait for ${activity.name} to open`, transferEnd, begin, day);
     push('ACTIVITY', activity.name, begin, finish, day, activity.id, activity.isOptional);
-    activityOutcomes.push({ activityId: activity.id, status: day === 1 ? 'day1' : 'day2' });
+    activityOutcomes.push({ activityId: activity.id, status: `day${day}` as any });
 
-    // Flag near-closing risk when visit concludes with under 30 minutes of margin before closing
     const closingMargin = Math.round((closing - finish) / MINUTE_MS);
     if (closingMargin < 30) {
       violation(
@@ -200,84 +197,214 @@ export function evaluateFeasibility(
   }
 
   const remaining: Activity[] = [];
-  for (const activity of enabled) {
-    const next = attempt(activity, day1Cursor, day1, day1FreeEnd, 1);
-    if (next === undefined) remaining.push(activity);
-    else day1Cursor = next;
-  }
+  let returnDeparture = 0;
 
-  // A deterministic dinner + rest anchor; durations from the selected pace.
-  const dinnerStart = day1FreeEnd;
-  const dinnerEnd = add(dinnerStart, p.eveningMealMinutes);
-  if (day1Cursor > dinnerStart) {
-    violation('REST_CONFLICT', 'BLOCKER', 'Day 1 activities/check-in extend past the evening meal anchor.');
-  }
-  push('MEAL', 'Dinner (estimated)', dinnerStart, dinnerEnd, 1);
-  if (dinnerEnd > restStart) {
-    violation('REST_CONFLICT', 'BLOCKER', 'Dinner exceeds the 10 PM sleep anchor.');
-  }
-  push('REST', 'Overnight rest', restStart, day2Wake, 1);
+  // ===== SINGLE-DAY ESCAPE (numDays === 1) =====
+  if (numDays === 1) {
+    const dayDate = dayDates[0];
+    const latestReturnDeparture = add(deadline, -inboundMinutes);
+    const preferredReturnDeparture = Math.min(at(dayDate, '17:00'), add(latestReturnDeparture, -120));
 
-  const latestReturnDeparture = add(deadline, -inboundMinutes);
-  const preferredReturnDeparture = Math.min(at(day2, '15:00'),
-    add(latestReturnDeparture, -120));
-  let day2Cursor = add(day2Wake, p.breakfastMinutes);
-  push('MEAL', 'Breakfast (estimated)', day2Wake, day2Cursor, 2);
+    let cursor = arrived;
 
-  // Lunch may follow a morning activity rather than forcing it to begin
-  // after a rigid noon anchor. Never overlap lunch and an attraction.
-  let day2LunchDone = false;
-  const lunchDuration = 45;
-  const takeLunch = (from: number): number => {
-    const lunchStart = Math.max(from, day2LunchStart);
-    const lunchEnd = add(lunchStart, lunchDuration);
-    push('MEAL', 'Lunch (estimated)', lunchStart, lunchEnd, 2);
-    day2LunchDone = true;
-    return lunchEnd;
-  };
-
-  for (const activity of remaining) {
-    // Required activity may consume the planned 120-minute return reserve, but
-    // it may NEVER extend past the actual hard return departure deadline.
-    const endCap = activity.isOptional ? preferredReturnDeparture : latestReturnDeparture;
-    const earliestStart = Math.max(add(day2Cursor, activity.localTransferMinutes), at(day2, activity.openTime));
-    if (!day2LunchDone && earliestStart >= day2LunchStart &&
-        add(Math.max(day2Cursor, day2LunchStart), lunchDuration) < endCap) {
-      day2Cursor = takeLunch(day2Cursor);
+    // Check if arrived is already past return departure deadline
+    if (arrived > latestReturnDeparture) {
+      violation('MISSED_DEADLINE', 'BLOCKER',
+        `Outbound drive arrives at ${formatIST(arrived).slice(11)}, which is already after the latest return departure time ${formatIST(latestReturnDeparture).slice(11)}.`);
     }
-    const next = attempt(activity, day2Cursor, day2, endCap, 2);
-    if (next === undefined) {
-      activityOutcomes.push({ activityId: activity.id,
+
+    // Attempt activities on same day
+    for (const activity of enabled) {
+      const next = attempt(activity, cursor, dayDate, latestReturnDeparture, 1);
+      if (next === undefined) {
+        remaining.push(activity);
+      } else {
+        cursor = next;
+      }
+    }
+
+    // Midday dining allowance if traveler is present during lunchtime
+    const noonStart = at(dayDate, '12:30');
+    if (arrived < noonStart && cursor < latestReturnDeparture) {
+      const lunchStart = Math.max(cursor, noonStart);
+      const lunchEnd = add(lunchStart, 45);
+      if (lunchEnd <= latestReturnDeparture) {
+        push('MEAL', 'Lunch (estimated)', lunchStart, lunchEnd, 1);
+        cursor = lunchEnd;
+      }
+    }
+
+    for (const activity of remaining) {
+      activityOutcomes.push({
+        activityId: activity.id,
         status: activity.isOptional ? 'omitted' : 'unavailable',
-        reason: 'Full visit cannot fit on Day 1 or Day 2 within the planning windows.' });
+        reason: 'Cannot fit within single-day trip schedule before return departure.',
+      });
+      if (!activity.isOptional) {
+        violation('REQUIRED_ACTIVITY_UNAVAILABLE', 'BLOCKER',
+          `${activity.name} cannot fit on same-day trip before return deadline; consider an overnight stay.`, activity.id);
+      }
+    }
+
+    returnDeparture = Math.max(preferredReturnDeparture, cursor);
+  }
+
+  // ===== MULTI-DAY ESCAPES (numDays >= 2) =====
+  else {
+    const day1 = dayDates[0];
+    const restStart1 = at(day1, '22:00');
+    const day1FreeEnd = at(day1, '21:00');
+
+    if (arrived > restStart1) {
+      violation('REST_CONFLICT', 'BLOCKER', 'Outbound arrival conflicts with the 10 PM overnight-rest anchor.');
+    }
+
+    let day1Cursor = arrived;
+    const checkInEarliest = at(day1, '13:00');
+    if (day1Cursor < checkInEarliest) {
+      push('WAIT', 'Waiting for 1 PM check-in assumption', day1Cursor, checkInEarliest, 1);
+      day1Cursor = checkInEarliest;
+    }
+    const checkinDuration = outboundStop?.replacesArrivalMeal
+      ? Math.max(30, p.arrivalMealCheckinMinutes - 45)
+      : p.arrivalMealCheckinMinutes;
+    const checkinLabel = outboundStop?.replacesArrivalMeal
+      ? 'Hotel check-in & freshen up (meal taken at pitstop)'
+      : 'Meal & hotel check-in (estimated)';
+    const afterCheckin = add(day1Cursor, checkinDuration);
+    push('CHECK_IN', checkinLabel, day1Cursor, afterCheckin, 1);
+    day1Cursor = afterCheckin;
+
+    // Day 1 activities
+    for (const activity of enabled) {
+      const next = attempt(activity, day1Cursor, day1, day1FreeEnd, 1);
+      if (next === undefined) remaining.push(activity);
+      else day1Cursor = next;
+    }
+
+    // Day 1 Dinner & Overnight Rest
+    const dinnerStart = day1FreeEnd;
+    const dinnerEnd = add(dinnerStart, p.eveningMealMinutes);
+    if (day1Cursor > dinnerStart) {
+      violation('REST_CONFLICT', 'BLOCKER', 'Day 1 activities/check-in extend past the evening meal anchor.');
+    }
+    push('MEAL', 'Dinner (estimated)', dinnerStart, dinnerEnd, 1);
+    if (dinnerEnd > restStart1) {
+      violation('REST_CONFLICT', 'BLOCKER', 'Dinner exceeds the 10 PM sleep anchor.');
+    }
+    const day2Wake = at(dayDates[1], '07:00');
+    push('REST', 'Overnight rest', restStart1, day2Wake, 1);
+
+    // ===== INTERMEDIATE DAYS (Days 2 to numDays - 1 for 3 or 4 day trips) =====
+    if (numDays > 2) {
+      for (let d = 2; d < numDays; d++) {
+        const curDate = dayDates[d - 1];
+        const nextDate = dayDates[d];
+        const wakeTime = at(curDate, '07:00');
+        const breakfastEnd = add(wakeTime, p.breakfastMinutes);
+        push('MEAL', 'Breakfast (estimated)', wakeTime, breakfastEnd, d);
+
+        let dCursorTime = breakfastEnd;
+        const lunchStart = at(curDate, '12:30');
+        const dFreeEnd = at(curDate, '21:00');
+        const dRestStart = at(curDate, '22:00');
+
+        // Attempt activities from remaining queue on this intermediate day
+        const stillRemaining: Activity[] = [];
+        for (const activity of remaining) {
+          const next = attempt(activity, dCursorTime, curDate, dFreeEnd, d);
+          if (next === undefined) {
+            stillRemaining.push(activity);
+          } else {
+            dCursorTime = next;
+          }
+        }
+        remaining.length = 0;
+        remaining.push(...stillRemaining);
+
+        // Schedule lunch on intermediate day
+        const actualLunchStart = Math.max(dCursorTime, lunchStart);
+        const actualLunchEnd = add(actualLunchStart, 45);
+        if (actualLunchEnd <= dFreeEnd) {
+          push('MEAL', 'Lunch (estimated)', actualLunchStart, actualLunchEnd, d);
+          dCursorTime = actualLunchEnd;
+        }
+
+        // Intermediate Day Dinner & Overnight Rest
+        const dDinnerEnd = add(dFreeEnd, p.eveningMealMinutes);
+        push('MEAL', 'Dinner (estimated)', dFreeEnd, dDinnerEnd, d);
+        const nextWake = at(nextDate, '07:00');
+        push('REST', 'Overnight rest', dRestStart, nextWake, d);
+      }
+    }
+
+    // ===== FINAL DAY (Day numDays) =====
+    const finalDay = numDays;
+    const finalDate = dayDates[finalDay - 1];
+    const finalWake = at(finalDate, '07:00');
+    const finalBreakfastEnd = add(finalWake, p.breakfastMinutes);
+    push('MEAL', 'Breakfast (estimated)', finalWake, finalBreakfastEnd, finalDay);
+
+    const latestReturnDeparture = add(deadline, -inboundMinutes);
+    const preferredReturnDeparture = Math.min(at(finalDate, '15:00'),
+      add(latestReturnDeparture, -120));
+
+    let finalCursor = finalBreakfastEnd;
+    let finalLunchDone = false;
+    const finalLunchDuration = 45;
+    const finalLunchStart = at(finalDate, '12:00');
+
+    const takeLunch = (from: number): number => {
+      const lStart = Math.max(from, finalLunchStart);
+      const lEnd = add(lStart, finalLunchDuration);
+      push('MEAL', 'Lunch (estimated)', lStart, lEnd, finalDay);
+      finalLunchDone = true;
+      return lEnd;
+    };
+
+    const finalRemaining: Activity[] = [];
+    for (const activity of remaining) {
+      const endCap = activity.isOptional ? preferredReturnDeparture : latestReturnDeparture;
+      const earliestStart = Math.max(add(finalCursor, activity.localTransferMinutes), at(finalDate, activity.openTime));
+      if (!finalLunchDone && earliestStart >= finalLunchStart &&
+          add(Math.max(finalCursor, finalLunchStart), finalLunchDuration) < endCap) {
+        finalCursor = takeLunch(finalCursor);
+      }
+      const next = attempt(activity, finalCursor, finalDate, endCap, finalDay);
+      if (next === undefined) {
+        finalRemaining.push(activity);
+      } else {
+        finalCursor = next;
+      }
+    }
+
+    for (const activity of finalRemaining) {
+      activityOutcomes.push({
+        activityId: activity.id,
+        status: activity.isOptional ? 'omitted' : 'unavailable',
+        reason: 'Full visit cannot fit within the planning windows across trip days.',
+      });
       if (!activity.isOptional) {
         const dataQualifier = activity.openingHoursEvidence.level === 'official'
           ? 'published opening hours' : 'unverified planning hours';
         violation('REQUIRED_ACTIVITY_UNAVAILABLE', 'BLOCKER',
-          `${activity.name} cannot fit on either day using ${dataQualifier}; verify before travel.`, activity.id);
+          `${activity.name} cannot fit using ${dataQualifier}; verify before travel.`, activity.id);
       }
-    } else {
-      day2Cursor = next;
     }
+
+    if (!finalLunchDone && preferredReturnDeparture > add(finalLunchStart, finalLunchDuration) &&
+        finalCursor < latestReturnDeparture) {
+      const lStart = Math.max(finalCursor, finalLunchStart);
+      if (add(lStart, finalLunchDuration) <= latestReturnDeparture) {
+        finalCursor = takeLunch(finalCursor);
+      }
+    }
+
+    returnDeparture = Math.max(preferredReturnDeparture, finalCursor);
   }
 
-  // If still at the destination past noon, reserve a real lunch period.
-  // If the traveler must leave before noon, a road stop is already covered
-  // by the declared driving contingency rather than double-counted.
-  if (!day2LunchDone && preferredReturnDeparture > add(day2LunchStart, lunchDuration) &&
-      day2Cursor < latestReturnDeparture) {
-    const lunchStart = Math.max(day2Cursor, day2LunchStart);
-    if (add(lunchStart, lunchDuration) <= latestReturnDeparture) {
-      day2Cursor = takeLunch(day2Cursor);
-    }
-  }
-
-  // A required late activity can push the preferred departure later, reducing
-  // the return margin. Optional removal does not automatically change the
-  // return margin unless the return leg's start truly changes.
-  const returnDeparture = Math.max(preferredReturnDeparture, day2Cursor);
-
-  // Return pitstop (if configured for return and distinct from outbound)
+  // ===== RETURN LEG (On Final Day) =====
+  const finalDayIndex = numDays;
   const returnStop = validStops.find(s => s.applicableLeg === 'return' || (s.applicableLeg === 'both' && s.id !== outboundStop?.id));
   let homeArrival: number;
 
@@ -296,19 +423,19 @@ export function evaluateFeasibility(
     const retLeg2Total = retLeg2Drive + retLeg2Buffer;
     homeArrival = add(retStopDeparture, retLeg2Total);
 
-    push('DRIVE', `Return drive towards Bengaluru (Leg 1, incl. ${retLeg1Buffer}m buffer)`, returnDeparture, retStopArrival, 2);
+    push('DRIVE', `Return drive towards Bengaluru (Leg 1, incl. ${retLeg1Buffer}m buffer)`, returnDeparture, retStopArrival, finalDayIndex);
     push(
       'PITSTOP',
       `${returnStop.name} (${returnStop.dwellMinutes}m dwell + ${returnStop.detourMinutes}m detour)`,
       retStopArrival,
       retStopDeparture,
-      2
+      finalDayIndex
     );
-    push('DRIVE', `Return to Bengaluru (Leg 2, incl. ${retLeg2Buffer}m buffer)`, retStopDeparture, homeArrival, 2);
+    push('DRIVE', `Return to Bengaluru (Leg 2, incl. ${retLeg2Buffer}m buffer)`, retStopDeparture, homeArrival, finalDayIndex);
   } else {
     homeArrival = add(returnDeparture, inboundMinutes);
     push('DRIVE', `Return to Bengaluru (incl. ${driveContingency}m planning buffer)`,
-      returnDeparture, homeArrival, 2);
+      returnDeparture, homeArrival, finalDayIndex);
   }
 
   const margin = Math.round((deadline - homeArrival) / MINUTE_MS);
@@ -317,6 +444,7 @@ export function evaluateFeasibility(
       `Estimated home arrival ${formatIST(homeArrival)} is ${-margin} minutes after the requested deadline.`);
   }
 
+  // Route restrictions check (e.g. Bandipur night curfew)
   if (destination.routeRestriction) {
     const r = destination.routeRestriction;
     const check = (legStart: number, offset: number, name: string) => {
@@ -340,8 +468,7 @@ export function evaluateFeasibility(
     check(returnDeparture, r.inboundCheckpointOffsetMinutes, 'Return');
   }
 
-  // Warn on important assumptions, while keeping verified opening-hour
-  // conflicts separate from assumed timing uncertainties.
+  // Advisories for assumption-level operating hours
   for (const activity of enabled) {
     if (activity.openingHoursEvidence.level === 'assumption') {
       violation('UNVERIFIED_OPENING_HOURS', 'ADVISORY',
@@ -349,9 +476,8 @@ export function evaluateFeasibility(
     }
   }
 
-  // Free leisure is the actual uncovered usable destination time, rather than
-  // the difference between home-arrival and the user's return deadline.
-  function makeFreeBlocks(from: number, to: number, day: 1 | 2): number {
+  // Free leisure blocks: generated per day for daytime unallocated hours
+  function makeFreeBlocks(from: number, to: number, day: number): number {
     if (to <= from) return 0;
     const occupied = timeline
       .filter(item => item.day === day && item.category !== 'FREE')
@@ -372,18 +498,35 @@ export function evaluateFeasibility(
     }
     return Math.round(free);
   }
-  const destinationSlackMinutes =
-    makeFreeBlocks(Math.max(arrived, at(day1, '07:00')), day1FreeEnd, 1) +
-    makeFreeBlocks(day2Wake, Math.min(returnDeparture, at(day2, '21:00')), 2);
+
+  let totalSlackMinutes = 0;
+  if (numDays === 1) {
+    totalSlackMinutes += makeFreeBlocks(Math.max(arrived, at(dayDates[0], '07:00')), returnDeparture, 1);
+  } else {
+    // Day 1
+    totalSlackMinutes += makeFreeBlocks(Math.max(arrived, at(dayDates[0], '07:00')), at(dayDates[0], '21:00'), 1);
+    // Intermediate days
+    for (let d = 2; d < numDays; d++) {
+      totalSlackMinutes += makeFreeBlocks(at(dayDates[d - 1], '07:00'), at(dayDates[d - 1], '21:00'), d);
+    }
+    // Final day
+    totalSlackMinutes += makeFreeBlocks(at(dayDates[numDays - 1], '07:00'), Math.min(returnDeparture, at(dayDates[numDays - 1], '21:00')), numDays);
+  }
+  const destinationSlackMinutes = totalSlackMinutes;
 
   timeline.sort((a, b) => parseIST(a.startTime) - parseIST(b.startTime));
 
   const ticketPerPerson = enabled
     .filter(activity => activityOutcomes.some(outcome => outcome.activityId === activity.id &&
-      (outcome.status === 'day1' || outcome.status === 'day2')))
+      outcome.status !== 'omitted' && outcome.status !== 'unavailable'))
     .reduce((sum, activity) => sum + activity.costPerPersonINR, 0);
+
+  // Number of overnight stays is (numDays - 1)
+  const numNights = Math.max(0, numDays - 1);
+  const hotelTotalINR = destination.approximateOneNightStayINR * numNights * Math.ceil(input.partySize / 2);
+
   const estimatedTripTotalINR = destination.approximateRoundTripFuelINR +
-    destination.approximateRoundTripTollsINR + destination.approximateOneNightStayINR +
+    destination.approximateRoundTripTollsINR + hotelTotalINR +
     ticketPerPerson * input.partySize;
   const estimatedCostPerPersonINR = Math.round(estimatedTripTotalINR / input.partySize);
   const isBudgetExceeded = estimatedCostPerPersonINR > input.perPersonBudgetINR;

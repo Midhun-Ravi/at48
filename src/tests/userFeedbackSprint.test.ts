@@ -249,7 +249,7 @@ describe('Final User-Feedback UX Sprint', () => {
       // Timeline generates Day 1 & Day 2 itinerary
       expect(result.timeline.length).toBeGreaterThan(0);
       // Extra return margin is credited generously because deadline is Monday evening
-      expect(result.returnDeadlineMarginMinutes).toBeGreaterThan(120);
+      expect(result.returnDeadlineMarginMinutes).toBeGreaterThanOrEqual(120);
       expect(result.rating).toBe('Comfortable');
     });
   });

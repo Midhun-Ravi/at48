@@ -177,22 +177,29 @@ describe('Trip URL State & Group Invitation Flow (Gate 4)', () => {
     );
     expect(badDate.valid).toBe(false);
 
-    // Window too short (< 12 hours)
-    const tooShort = parseShareableTrip(
-      new URLSearchParams({ dep: '2026-10-31T08:00', ret: '2026-10-31T12:00' }),
-      'mysuru'
-    );
-    expect(tooShort.valid).toBe(false);
-    if (!tooShort.valid) {
-      expect(tooShort.error).toContain('supported weekend window');
-    }
-
-    // Window too long (> 84 hours)
+    // Window covering more than 4 calendar dates (> 4 calendar dates)
     const tooLong = parseShareableTrip(
       new URLSearchParams({ dep: '2026-10-31T08:00', ret: '2026-11-10T20:00' }),
       'mysuru'
     );
     expect(tooLong.valid).toBe(false);
+    if (!tooLong.valid) {
+      expect(tooLong.error).toContain('outside the supported range of 1 to 4 calendar dates');
+    }
+
+    // Same-day trip (1 calendar date) is valid
+    const sameDay = parseShareableTrip(
+      new URLSearchParams({ dep: '2026-10-31T08:00', ret: '2026-10-31T20:00' }),
+      'mysuru'
+    );
+    expect(sameDay.valid).toBe(true);
+
+    // 4 calendar days trip (Friday to Monday) is valid
+    const fourDays = parseShareableTrip(
+      new URLSearchParams({ dep: '2026-10-30T07:00', ret: '2026-11-02T20:30' }),
+      'mysuru'
+    );
+    expect(fourDays.valid).toBe(true);
   });
 
   it('9. strips unsupported or destination-incompatible pitstop IDs', () => {

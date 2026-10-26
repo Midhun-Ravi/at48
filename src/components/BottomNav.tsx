@@ -3,66 +3,7 @@ import { Link, useLocation } from 'react-router';
 import { DESTINATIONS } from '../data/destinations';
 import { getDestinationImage } from '../data/images';
 import { getSavedTrips, deleteSavedTrip, type SavedTrip } from '../utils/savedTrips';
-
-// 8 Candidate Destinations in Curation (Grounded descriptions, honest Coming Soon status)
-const COMING_SOON_DESTINATIONS = [
-  {
-    id: 'kabini',
-    name: 'Kabini & Nagarhole',
-    route: 'Mysuru Corridor · ~215 km',
-    drive: '~5h',
-    highlights: 'Wildlife safari corridor, forest reserve border',
-  },
-  {
-    id: 'sakleshpur',
-    name: 'Sakleshpur',
-    route: 'NH 75 Hassan Highway · ~220 km',
-    drive: '~4.5h',
-    highlights: 'Manjarabad Star Fort, Western Ghats mist',
-  },
-  {
-    id: 'chikmagalur',
-    name: 'Chikmagalur',
-    route: 'Hassan Corridor · ~245 km',
-    drive: '~5h',
-    highlights: 'Mullayanagiri peak, coffee plantation estates',
-  },
-  {
-    id: 'yelagiri',
-    name: 'Yelagiri Hills',
-    route: 'NH 44 Krishnagiri Route · ~160 km',
-    drive: '~3.5h',
-    highlights: '14 hairpin bends, peaceful lake circuit',
-  },
-  {
-    id: 'wayanad',
-    name: 'Wayanad',
-    route: 'Bandipur Forest Corridor · ~275 km',
-    drive: '~6.5h',
-    highlights: 'Edakkal Caves, Chembra Peak viewpoint',
-  },
-  {
-    id: 'hampi',
-    name: 'Hampi',
-    route: 'NH 48 / NH 50 Chitradurga Route · ~340 km',
-    drive: '~7h',
-    highlights: 'Vijayanagara UNESCO ruins, Tungabhadra boulders',
-  },
-  {
-    id: 'puducherry',
-    name: 'Puducherry (Pondicherry)',
-    route: 'Krishnagiri / Tiruvannamalai · ~310 km',
-    drive: '~6.5h',
-    highlights: 'French Quarter promenade, Auroville',
-  },
-  {
-    id: 'shivanasamudra',
-    name: 'Shivanasamudra Falls',
-    route: 'Kanakapura Road / Malavalli · ~135 km',
-    drive: '~3h',
-    highlights: 'Gaganachukki & Bharachukki dual waterfalls',
-  },
-];
+import { CANDIDATE_DESTINATIONS } from '../engine/recommendations';
 
 export default function BottomNav() {
   const location = useLocation();
@@ -229,7 +170,7 @@ export default function BottomNav() {
                   </span>
                 </div>
                 <div className="grid gap-2.5 sm:grid-cols-2">
-                  {COMING_SOON_DESTINATIONS.map(c => (
+                  {CANDIDATE_DESTINATIONS.map(c => (
                     <div
                       key={c.id}
                       className="rounded-xl border border-slate-800 bg-[#20252E] p-3 text-xs space-y-1"
@@ -240,7 +181,7 @@ export default function BottomNav() {
                           In Curation
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-400">{c.route} ({c.drive})</p>
+                      <p className="text-[11px] text-slate-400">{c.routeName} ({c.approxDriveLabel})</p>
                       <p className="text-[10px] text-slate-500 leading-snug">{c.highlights}</p>
                     </div>
                   ))}

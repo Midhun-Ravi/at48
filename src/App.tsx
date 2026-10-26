@@ -6,6 +6,7 @@ import InputScreen from './screens/InputScreen';
 import CompareScreen from './screens/CompareScreen';
 import ScheduleScreen from './screens/ScheduleScreen';
 import ReviewScreen from './screens/ReviewScreen';
+import BottomNav from './components/BottomNav';
 
 function upcomingWeekend(): [string, string] {
   const nowIST = new Date(Date.now() + 330 * 60_000);
@@ -40,19 +41,27 @@ export default function App() {
   const [inputs, setInputs] = useState<UserConstraints>(DEFAULTS);
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="bg-[#0d352f] text-white sticky top-0 z-50 shadow-md">
+    <div className="min-h-screen bg-[#15191F] text-[#F5F7FA] flex flex-col font-sans selection:bg-[#2962FF] selection:text-white">
+      {/* Sticky Top Header */}
+      <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-[#15191F]/90 backdrop-blur-md shadow-lg">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:py-3.5">
-          <Link to="/" className="flex items-center gap-2.5 group">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500 font-black text-slate-950 text-base shadow-sm group-hover:bg-emerald-400 transition-colors">
-              @48
-            </span>
+          <Link to="/" className="flex items-center gap-3 group">
+            <img
+              src="/images/at48-logo.png"
+              alt="@48 Logo"
+              className="h-9 w-9 rounded-xl object-cover border border-slate-700/80 shadow-md group-hover:scale-105 transition-transform"
+            />
             <div className="flex flex-col">
-              <span className="text-lg font-black tracking-tight leading-none text-white">
-                @48
-              </span>
-              <span className="text-[10px] font-semibold tracking-wider text-emerald-300">
-                BENGALURU EDITION
+              <div className="flex items-baseline gap-2">
+                <span className="text-lg font-black tracking-tight leading-none text-white">
+                  @48
+                </span>
+                <span className="rounded bg-[#2962FF]/20 px-1.5 py-0.5 text-[9px] font-bold text-blue-400 border border-[#2962FF]/40 tracking-wider">
+                  BENGALURU EDITION
+                </span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                Road trips, without the guesswork.
               </span>
             </div>
           </Link>
@@ -60,13 +69,13 @@ export default function App() {
           <div className="flex items-center gap-3 sm:gap-5">
             <a
               href="/#how-it-works"
-              className="text-xs font-semibold text-emerald-100 hover:text-white transition-colors"
+              className="text-xs font-semibold text-slate-300 hover:text-white transition-colors"
             >
               How It Works
             </a>
             <Link
               to="/plan"
-              className="rounded-lg bg-emerald-500 px-3.5 py-1.5 text-xs font-bold text-slate-950 shadow-sm hover:bg-emerald-400 active:scale-95 transition-all"
+              className="rounded-xl bg-[#2962FF] px-4 py-2 text-xs font-bold text-white shadow-md shadow-[#2962FF]/40 hover:bg-blue-600 active:scale-95 transition-all"
             >
               Plan a Trip
             </Link>
@@ -74,7 +83,8 @@ export default function App() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-7">
+      {/* Main Content Area (pb-28 reserves space for floating bottom navigation) */}
+      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:py-8 pb-28">
         <Routes>
           <Route path="/" element={<HomeScreen />} />
           <Route path="/plan" element={<InputScreen inputs={inputs} setInputs={setInputs} />} />
@@ -84,9 +94,9 @@ export default function App() {
           <Route
             path="*"
             element={
-              <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center space-y-3">
-                <p className="text-base font-bold text-slate-800">Page not found.</p>
-                <Link to="/plan" className="inline-block text-sm font-semibold text-teal-700 underline">
+              <div className="rounded-2xl border border-slate-800 bg-[#20252E] p-8 text-center space-y-3">
+                <p className="text-base font-bold text-white">Page not found.</p>
+                <Link to="/plan" className="inline-block text-sm font-semibold text-blue-400 hover:underline">
                   Return to planning
                 </Link>
               </div>
@@ -95,9 +105,15 @@ export default function App() {
         </Routes>
       </main>
 
-      <footer className="mx-auto max-w-5xl px-4 pb-8 text-xs text-slate-500">
-        @48 provides planning estimates, not live traffic or booking information. Verify with Google Maps and attraction operators.
+      {/* Desktop Accessible Footer */}
+      <footer className="mx-auto w-full max-w-5xl px-4 pb-20 pt-4 text-center text-xs text-slate-500 border-t border-slate-800/60 hidden md:block">
+        <p>
+          @48 provides deterministic planning estimates from MG Road, Bengaluru. Always verify live highway conditions and attraction rules.
+        </p>
       </footer>
+
+      {/* Floating Rounded Bottom Navigation */}
+      <BottomNav />
     </div>
   );
 }

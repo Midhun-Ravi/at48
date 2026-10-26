@@ -48,7 +48,7 @@ function checkConstraints(input: UserConstraints, destination: Destination): voi
   const hours = (deadline - departure) / 3_600_000;
   if (hours < 18 || hours > 60) throw new Error('Trip window must be between 18 and 60 hours.');
   if (!['relaxed', 'balanced', 'packed'].includes(input.pace)) throw new Error('Invalid pace.');
-  if (!Number.isInteger(input.partySize) || input.partySize < 1 || input.partySize > 4) throw new Error('Party size must be 1–4.');
+  if (!Number.isInteger(input.partySize) || input.partySize < 1 || input.partySize > 10) throw new Error('Party size must be 1–10.');
   if (input.perPersonBudgetINR <= 0 || !Number.isFinite(input.perPersonBudgetINR)) throw new Error('Budget must be positive.');
   if (!Number.isInteger(input.drivingAdjustmentMinutes) || input.drivingAdjustmentMinutes < -60 ||
     input.drivingAdjustmentMinutes > 120 || input.drivingAdjustmentMinutes % 15 !== 0)

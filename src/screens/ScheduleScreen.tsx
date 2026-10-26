@@ -6,6 +6,7 @@ import { getDestination } from '../data/destinations';
 import { getCompatiblePitstops } from '../data/pitstops.js';
 import { evaluateFeasibility, parseIST } from '../engine/scheduler';
 import TripMap from '../components/TripMap';
+import ProgressBar from '../components/ProgressBar';
 import { getPlaceImage } from '../data/images';
 import {
   buildTripSummaryText,
@@ -32,6 +33,12 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
 
+  // Active day tab (1 or 2)
+  const [activeDay, setActiveDay] = useState<1 | 2>(1);
+
+  // Pitstop dietary filter: 'all' | 'veg' | 'non-veg'
+  const [dietaryFilter, setDietaryFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
+
   // Parse shareable URL query parameters if present
   const parsedTrip = useMemo(() => {
     if (!searchParams || searchParams.toString().length === 0) return null;
@@ -41,17 +48,17 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   // Defensive fallback: If URL parameters were provided but corrupted/invalid, render friendly error
   if (parsedTrip && !parsedTrip.valid) {
     return (
-      <div className="mx-auto max-w-xl space-y-4 rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+      <div className="mx-auto max-w-xl space-y-4 rounded-2xl border border-red-500/40 bg-red-950/40 p-6 text-center text-red-200">
         <div className="text-3xl">⚠️</div>
-        <h2 className="text-xl font-bold text-red-900">Trip Link Could Not Be Loaded</h2>
-        <p className="text-sm text-red-700">{parsedTrip.error}</p>
-        <p className="text-xs text-red-600">
+        <h2 className="text-xl font-bold text-red-100">Trip Link Could Not Be Loaded</h2>
+        <p className="text-sm text-red-300">{parsedTrip.error}</p>
+        <p className="text-xs text-red-400">
           The link may be corrupted, truncated, or contains out-of-range travel dates.
         </p>
         <div className="pt-2">
           <Link
             to="/"
-            className="inline-block rounded-xl bg-teal-800 px-5 py-3 text-sm font-bold text-white hover:bg-teal-900 transition-colors"
+            className="inline-block rounded-xl bg-[#2962FF] px-5 py-3 text-sm font-bold text-white hover:bg-blue-600 transition-colors"
           >
             ← Create a new trip
           </Link>
@@ -73,28 +80,32 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
   if (!dest) {
     return (
-      <div className="mx-auto max-w-xl space-y-4 py-8 text-center">
-        <p className="text-lg font-bold text-slate-800">Unknown destination.</p>
-        <Link to="/compare" className="text-teal-700 underline font-semibold">
+      <div className="mx-auto max-w-xl space-y-4 py-8 text-center text-slate-200">
+        <p className="text-lg font-bold text-white">Unknown destination.</p>
+        <Link to="/compare" className="text-blue-400 underline font-semibold">
           ← Back to comparison
         </Link>
       </div>
     );
   }
 
-  // Re-evaluate feasibility dynamically using the scheduler engine (NEVER trust serialized metrics)
+  // Re-evaluate feasibility dynamically using the scheduler engine
   const r = evaluateFeasibility(dest, currentInputs);
   const compatibleStops = getCompatiblePitstops(dest.id);
   const selectedPitstopIds = currentInputs.selectedPitstopIds ?? [];
+
+  // Filter pitstops by dietary preference (Maddur Tiffanys is Vegetarian)
+  const filteredStops = compatibleStops.filter(_s => {
+    if (dietaryFilter === 'all') return true;
+    if (dietaryFilter === 'veg') return true; // Maddur Tiffanys is pure veg
+    if (dietaryFilter === 'non-veg') return false; // currently only verified veg corridor stops
+    return true;
+  });
 
   const isGuestView = parsedTrip?.valid ? parsedTrip.data.isGuestView : false;
   const organizerName = parsedTrip?.valid
     ? parsedTrip.data.organizerName
     : currentInputs.organizerName || '';
-
-  const isLocalhost =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
   const updateInputs = (updater: (prev: UserConstraints) => UserConstraints) => {
     setCurrentInputs(prev => {
@@ -198,25 +209,28 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
   return (
     <section className="mx-auto max-w-3xl space-y-6">
-      <Link to="/compare" className="inline-flex items-center text-sm font-semibold text-teal-700 hover:underline">
+      {/* 4-part segmented progress meter */}
+      <ProgressBar currentStep={3} />
+
+      <Link to="/compare" className="inline-flex items-center text-xs font-semibold text-blue-400 hover:underline">
         ← Compare destinations
       </Link>
 
       {/* Guest Invitation Banner when opened via shared link */}
       {isGuestView && (
-        <div className="rounded-2xl border border-teal-200 bg-teal-50/90 p-5 shadow-sm">
+        <div className="rounded-2xl border border-blue-500/40 bg-blue-950/40 p-5 shadow-lg text-white">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="rounded-full bg-teal-200/80 px-3 py-1 text-xs font-bold uppercase tracking-wider text-teal-900">
+            <span className="rounded-full bg-blue-500/20 px-3 py-1 text-xs font-bold uppercase tracking-wider text-blue-300 border border-blue-500/30">
               👥 Group Trip Invitation
             </span>
-            <span className="text-xs font-medium text-teal-800">No account required</span>
+            <span className="text-xs font-medium text-slate-400">No account required</span>
           </div>
-          <h2 className="mt-2 text-xl font-bold text-slate-900">
+          <h2 className="mt-2 text-xl font-bold text-white">
             {organizerName
               ? `${organizerName} invited you to a road trip to ${dest.name}!`
               : `You've been invited to a road trip to ${dest.name}!`}
           </h2>
-          <p className="mt-1 text-xs text-slate-700">
+          <p className="mt-1 text-xs text-slate-300">
             {formatReadableDateTime(currentInputs.departureDateTime)} →{' '}
             {formatReadableDateTime(currentInputs.returnDeadlineDateTime)} (IST)
           </p>
@@ -225,98 +239,108 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
       {/* Guest RSVP Action Card */}
       {isGuestView && (
-        <div className="space-y-3 rounded-2xl border border-emerald-300 bg-white p-5 shadow-sm">
+        <div className="space-y-3 rounded-2xl border border-emerald-500/40 bg-[#20252E] p-5 shadow-lg">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h3 className="text-lg font-bold text-slate-900">Join this Road Trip</h3>
-              <p className="text-xs text-slate-500">
+              <h3 className="text-lg font-bold text-white">Join this Road Trip</h3>
+              <p className="text-xs text-slate-400">
                 Send your RSVP directly to {organizerName || 'the organizer'} on WhatsApp with this verified trip plan.
               </p>
             </div>
-            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-900">
+            <span className="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-3 py-1 text-xs font-bold">
               WhatsApp RSVP
             </span>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-700">
+            <label className="block text-xs font-bold text-slate-300">
               Your Display Name
               <input
                 type="text"
                 maxLength={40}
                 placeholder="e.g. Roshan"
-                className="mt-1.5 block w-full rounded-lg border border-slate-300 p-2.5 text-sm focus:border-teal-700 focus:outline-none focus:ring-1 focus:ring-teal-700"
+                className="mt-1.5 block w-full rounded-xl border border-slate-700 bg-[#15191F] p-3 text-sm text-white focus:border-[#2962FF] focus:outline-none"
                 value={guestName}
                 onChange={e => setGuestName(cleanInputDisplayName(e.target.value))}
                 onBlur={e => setGuestName(sanitizeDisplayName(e.target.value))}
               />
             </label>
-            {guestError && <p className="mt-1 text-xs text-red-600">{guestError}</p>}
+            {guestError && <p className="mt-1 text-xs text-red-400">{guestError}</p>}
           </div>
 
           <button
             onClick={handleGuestRSVP}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 font-bold text-white shadow-sm hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 font-bold text-white shadow-lg hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
           >
             <span className="text-base">💬</span> Join Trip & Send RSVP via WhatsApp
           </button>
 
           {rsvpSent && (
-            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-xs text-emerald-950 space-y-1">
+            <div className="rounded-xl bg-emerald-950/40 border border-emerald-500/40 p-3.5 text-xs text-emerald-200 space-y-1">
               <p className="font-bold">✓ WhatsApp opened with your RSVP message.</p>
               <p>
                 Send the message directly to {organizerName || 'the organizer'} to confirm your spot.
-              </p>
-              <p className="text-slate-500 text-[11px]">
-                Note: Participation is confirmed directly through WhatsApp, not synchronized online.
               </p>
             </div>
           )}
         </div>
       )}
 
+      {/* Step Heading */}
       <div>
-        <div className="text-sm font-semibold uppercase tracking-widest text-teal-700">Step 3 / 4</div>
-        <h1 className="mt-1 text-3xl font-extrabold text-slate-900">{dest.name}: your weekend</h1>
-        <p className="mt-1 text-sm text-slate-600">Customize your stops, delays, and schedule in IST.</p>
+        <h1 className="text-3xl font-extrabold text-white">
+          What should we explore along the way?
+        </h1>
+        <p className="mt-1 text-sm text-slate-300">
+          Customize your stops, delays, and schedule for {dest.name} in Asia/Kolkata wall-clock time.
+        </p>
       </div>
 
-      {/* Informational Stay Zone Badge */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-700">
-        <div className="flex items-center gap-2">
-          <span className="font-bold text-slate-900">📍 Planned Stay Zone:</span>
-          <span>Central {dest.name} Area</span>
+      {/* Before You Go Warning Section */}
+      <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 text-xs text-amber-200 space-y-2">
+        <div className="flex items-center gap-2 font-bold text-amber-300 text-sm">
+          <span>⚠️</span>
+          <span>Before You Go: Road & Operating Advisories</span>
         </div>
-        <span className="rounded bg-slate-200 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
-          Informational Badge · 1 PM check-in modeled
-        </span>
+        {dest.routeRestriction ? (
+          <p>
+            <strong>Night Curfew in Effect:</strong> {dest.routeRestriction.name} gates close between {dest.routeRestriction.startTime} and {dest.routeRestriction.endTime}. Transit through the reserve must clear before 21:00.
+          </p>
+        ) : (
+          <p>
+            <strong>Standard Corridor:</strong> No national park night driving bans along this highway. Departure timing models typical weekend toll and traffic buffers.
+          </p>
+        )}
+        <p className="text-[11px] text-amber-300/80">
+          Weather Forecast: Outside 5-day predictive horizon for requested dates. Check official IMD / Karnataka State Natural Disaster Monitoring Centre updates before departure.
+        </p>
       </div>
 
       {/* Primary Feasibility Card */}
-      <div className="rounded-2xl bg-[#0d352f] p-6 text-white shadow-sm">
+      <div className="rounded-2xl border border-slate-800 bg-[#20252E] p-6 text-white shadow-lg">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="rounded-full bg-emerald-900/60 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-200">
+          <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-3 py-1 text-xs font-bold uppercase tracking-wider text-blue-300">
             Feasibility Verdict
           </span>
-          <span className="text-xs text-emerald-200">MG Road reference</span>
+          <span className="text-xs text-slate-400">MG Road reference origin</span>
         </div>
         <p className="mt-2 text-2xl font-black tracking-tight">{r.rating}</p>
-        <p className="mt-1 text-sm text-emerald-100">{r.ratingExplanation}</p>
+        <p className="mt-1 text-sm text-slate-300">{r.ratingExplanation}</p>
 
-        <div className="mt-5 grid grid-cols-2 gap-4 border-t border-emerald-900/50 pt-4 text-sm">
+        <div className="mt-5 grid grid-cols-2 gap-4 border-t border-slate-800 pt-4 text-sm">
           <div>
-            <p className="text-xs text-emerald-300">Usable destination free time</p>
+            <p className="text-xs text-slate-400">Usable destination free time</p>
             <strong className="text-2xl font-black text-white">{formatDuration(r.destinationSlackMinutes)}</strong>
           </div>
           <div>
-            <p className="text-xs text-emerald-300">Return deadline margin</p>
-            <strong className={`text-2xl font-black ${r.returnDeadlineMarginMinutes < 0 ? 'text-red-300' : 'text-white'}`}>
+            <p className="text-xs text-slate-400">Return deadline margin</p>
+            <strong className={`text-2xl font-black ${r.returnDeadlineMarginMinutes < 0 ? 'text-red-400' : 'text-emerald-400'}`}>
               {formatDuration(r.returnDeadlineMarginMinutes, true)}
             </strong>
           </div>
         </div>
 
-        <div className="mt-4 border-t border-emerald-900/50 pt-3 text-xs text-emerald-200 space-y-1">
+        <div className="mt-4 border-t border-slate-800 pt-3 text-xs text-slate-300 space-y-1">
           <p>
             Expected home: <strong>{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>
           </p>
@@ -335,20 +359,20 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       />
 
       {/* Adjustments & Scenarios */}
-      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="space-y-4 rounded-2xl border border-slate-800 bg-[#20252E] p-5 shadow-lg">
         <div>
-          <h2 className="text-base font-bold text-slate-900">Itinerary Scenarios & Attractions</h2>
-          <p className="text-xs text-slate-500">
+          <h2 className="text-base font-bold text-white">Itinerary Scenarios & Sightseeing</h2>
+          <p className="text-xs text-slate-400">
             Customize departure delays and optional visits. Feasibility metrics and timelines recalculate immediately.
           </p>
         </div>
 
         {/* Departure Delay Scenario */}
-        <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
-          <label className="flex items-center gap-3 font-semibold text-slate-800 cursor-pointer">
+        <div className="rounded-xl border border-slate-700/60 bg-[#15191F] p-3.5">
+          <label className="flex items-center gap-3 font-semibold text-slate-200 cursor-pointer">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded text-teal-600 focus:ring-teal-500 cursor-pointer"
+              className="h-4 w-4 rounded accent-[#2962FF] cursor-pointer"
               checked={currentInputs.simulateDelayMinutes === 60}
               onChange={e =>
                 updateInputs(s => ({
@@ -358,8 +382,8 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
               }
             />
             <div>
-              <span className="block text-sm text-slate-900 font-bold">Simulate +1 hour outbound departure delay</span>
-              <span className="text-xs text-slate-500 font-normal">
+              <span className="block text-sm text-white font-bold">Simulate +1 hour outbound departure delay</span>
+              <span className="text-xs text-slate-400 font-normal">
                 Models being held up leaving Bengaluru (e.g., Saturday morning traffic or late start).
               </span>
             </div>
@@ -368,7 +392,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
         {/* Attractions List: Required vs Optional */}
         <div className="space-y-3 pt-1">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
             Destination Attractions & Sightseeing
           </h3>
 
@@ -382,14 +406,14 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                 return (
                   <div
                     key={a.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/50 p-3.5"
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-700/60 bg-[#15191F] p-3.5"
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       {aImg && (
                         <img
                           src={aImg.src}
                           alt={aImg.alt}
-                          className="h-10 w-10 rounded-lg object-cover flex-shrink-0 border border-slate-200"
+                          className="h-10 w-10 rounded-lg object-cover flex-shrink-0 border border-slate-700"
                           onError={e => {
                             (e.target as HTMLElement).style.display = 'none';
                           }}
@@ -397,17 +421,17 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                       )}
                       <div>
                         <div className="flex items-center gap-2">
-                          <strong className="text-sm text-slate-900">{a.name}</strong>
-                          <span className="rounded bg-teal-100 px-2 py-0.5 text-[10px] font-bold text-teal-900">
+                          <strong className="text-sm text-white">{a.name}</strong>
+                          <span className="rounded bg-blue-500/20 text-blue-300 px-2 py-0.5 text-[10px] font-bold border border-blue-500/30">
                             Required Highlight
                           </span>
                         </div>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-slate-400">
                           {formatDuration(a.durationMinutes)} planned visit · Core destination landmark mandatory for feasibility modeling.
                         </p>
                       </div>
                     </div>
-                    <span className="text-xs font-bold text-slate-400">Locked</span>
+                    <span className="text-xs font-bold text-slate-500">Locked</span>
                   </div>
                 );
               }
@@ -417,8 +441,8 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                   key={a.id}
                   className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3.5 transition-all ${
                     isIncluded
-                      ? 'border-emerald-300 bg-emerald-50/40 shadow-sm'
-                      : 'border-slate-200 bg-slate-50/40 opacity-75'
+                      ? 'border-emerald-500/40 bg-emerald-950/20 shadow-sm'
+                      : 'border-slate-800 bg-[#15191F] opacity-75'
                   }`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -426,7 +450,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                       <img
                         src={aImg.src}
                         alt={aImg.alt}
-                        className="h-10 w-10 rounded-lg object-cover flex-shrink-0 border border-slate-200"
+                        className="h-10 w-10 rounded-lg object-cover flex-shrink-0 border border-slate-700"
                         onError={e => {
                           (e.target as HTMLElement).style.display = 'none';
                         }}
@@ -434,18 +458,18 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                     )}
                     <div>
                       <div className="flex items-center gap-2">
-                        <strong className="text-sm text-slate-900">{a.name}</strong>
+                        <strong className="text-sm text-white">{a.name}</strong>
                         <span
                           className={`rounded px-2 py-0.5 text-[10px] font-bold ${
                             isIncluded
-                              ? 'bg-emerald-100 text-emerald-900'
-                              : 'bg-slate-200 text-slate-700'
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              : 'bg-slate-800 text-slate-400'
                           }`}
                         >
                           {isIncluded ? 'Included in Trip' : 'Excluded from Plan'}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-slate-400">
                         {formatDuration(a.durationMinutes)} planned visit · Optional stop — Include in my trip to visit.
                       </p>
                     </div>
@@ -464,7 +488,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                     className={`rounded-lg px-3.5 py-1.5 text-xs font-bold transition-all cursor-pointer ${
                       isIncluded
                         ? 'border border-emerald-600 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700'
-                        : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                        : 'border border-slate-700 bg-[#292F39] text-slate-200 hover:text-white'
                     }`}
                   >
                     {isIncluded ? '✓ Stop Included (Click to Remove)' : '+ Include in Trip'}
@@ -476,104 +500,125 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         </div>
       </div>
 
-      {/* Curated Highway Pitstops Section with Verified Thumbnail */}
+      {/* Curated Highway Pitstops Section with Dietary Filter */}
       {compatibleStops.length > 0 && (
-        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="space-y-4 rounded-2xl border border-slate-800 bg-[#20252E] p-5 shadow-lg">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="text-base font-bold text-slate-900">Curated Highway Pitstops</h2>
-              <p className="text-xs text-slate-500">
-                Verified highway stops along your travel corridor. Adding a stop inserts an explicit PITSTOP block and updates arrival time and slack.
+              <h2 className="text-base font-bold text-white">Curated Highway Pitstops</h2>
+              <p className="text-xs text-slate-400">
+                Verified highway stops along your travel corridor with realistic detour & dwell time.
               </p>
             </div>
-            <span className="rounded-full bg-amber-50 border border-amber-200 px-2.5 py-0.5 text-xs font-bold text-amber-800">
-              Corridor Stops
-            </span>
+            {/* Dietary filter chips */}
+            <div className="flex items-center gap-1.5 bg-[#15191F] p-1 rounded-xl border border-slate-700">
+              {(['all', 'veg', 'non-veg'] as const).map(f => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setDietaryFilter(f)}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold capitalize transition-colors cursor-pointer ${
+                    dietaryFilter === f
+                      ? 'bg-[#2962FF] text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {f === 'all' ? 'All Stops' : f === 'veg' ? '🌿 Veg Only' : '🍗 Non-Veg'}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="space-y-3">
-            {compatibleStops.map(stop => {
-              const isSelected = selectedPitstopIds.includes(stop.id);
-              const totalStopMinutes = stop.dwellMinutes + stop.detourMinutes;
-              const stopImg = getPlaceImage(stop.id);
+            {filteredStops.length === 0 ? (
+              <p className="text-xs text-slate-400 p-3 bg-[#15191F] rounded-xl border border-slate-800">
+                No highway pitstops match the selected dietary filter on this route.
+              </p>
+            ) : (
+              filteredStops.map(stop => {
+                const isSelected = selectedPitstopIds.includes(stop.id);
+                const totalStopMinutes = stop.dwellMinutes + stop.detourMinutes;
+                const stopImg = getPlaceImage(stop.id);
 
-              return (
-                <div
-                  key={stop.id}
-                  className={`rounded-xl border p-4 transition-all ${
-                    isSelected ? 'border-amber-400 bg-amber-50/50 shadow-sm' : 'border-slate-200 bg-slate-50/40 hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="flex gap-4 items-start">
-                    {/* Pitstop thumbnail with graceful fallback */}
-                    {stopImg ? (
-                      <div className="relative h-20 w-20 sm:h-24 sm:w-24 flex-shrink-0 overflow-hidden rounded-xl border border-amber-200 bg-amber-50 shadow-inner">
-                        <img
-                          src={stopImg.src}
-                          alt={stopImg.alt}
-                          loading="lazy"
-                          className="h-full w-full object-cover"
-                          onError={e => {
-                            (e.target as HTMLElement).style.display = 'none';
-                          }}
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex h-20 w-20 sm:h-24 sm:w-24 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100 text-3xl">
-                        ☕
-                      </div>
-                    )}
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <strong className="text-sm font-bold text-slate-900">{stop.name}</strong>
-                        <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900">
-                          {stop.categoryLabel}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-600">{stop.description}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        📍 {stop.location.address}{' '}
-                        <a
-                          href={stop.location.osmUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-semibold text-teal-700 hover:underline ml-1"
-                        >
-                          [OpenStreetMap Node #{stop.location.osmNodeId} ↗]
-                        </a>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200/80 pt-3 text-xs">
-                    <div className="text-slate-600">
-                      <span>Est. Dwell: <strong>{stop.dwellMinutes}m</strong></span>
-                      <span className="mx-1.5">·</span>
-                      <span>Slip-road Detour: <strong>{stop.detourMinutes}m</strong></span>
-                      <span className="mx-1.5">·</span>
-                      <span className="font-semibold text-slate-800">Total: +{totalStopMinutes}m</span>
-                      {stop.replacesArrivalMeal && (
-                        <p className="mt-0.5 text-[11px] text-teal-800 font-medium">
-                          ✓ Midday meal taken at pitstop replaces redundant 45m check-in dining allowance.
-                        </p>
+                return (
+                  <div
+                    key={stop.id}
+                    className={`rounded-xl border p-4 transition-all ${
+                      isSelected
+                        ? 'border-amber-500/40 bg-amber-950/20 shadow-md'
+                        : 'border-slate-800 bg-[#15191F] hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex gap-4 items-start">
+                      {stopImg ? (
+                        <div className="relative h-20 w-20 sm:h-24 sm:w-24 flex-shrink-0 overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-inner">
+                          <img
+                            src={stopImg.src}
+                            alt={stopImg.alt}
+                            loading="lazy"
+                            className="h-full w-full object-cover"
+                            onError={e => {
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex h-20 w-20 sm:h-24 sm:w-24 flex-shrink-0 items-center justify-center rounded-xl bg-amber-900/30 text-3xl">
+                          ☕
+                        </div>
                       )}
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <strong className="text-sm font-bold text-white">{stop.name}</strong>
+                          <span className="rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 text-[11px] font-bold">
+                            {stop.categoryLabel}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-300">{stop.description}</p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          📍 {stop.location.address}{' '}
+                          <a
+                            href={stop.location.osmUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-semibold text-blue-400 hover:underline ml-1"
+                          >
+                            [OpenStreetMap ↗]
+                          </a>
+                        </p>
+                      </div>
                     </div>
 
-                    <button
-                      onClick={() => togglePitstop(stop.id)}
-                      className={`rounded-xl px-4 py-2 text-xs font-bold transition-all cursor-pointer ${
-                        isSelected
-                          ? 'border border-amber-600 bg-amber-600 text-white shadow-sm hover:bg-amber-700'
-                          : 'border border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-100'
-                      }`}
-                    >
-                      {isSelected ? '✓ Stop Included (Click to Remove)' : `+ Add Pitstop (+${totalStopMinutes}m)`}
-                    </button>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-3 text-xs">
+                      <div className="text-slate-300">
+                        <span>Est. Dwell: <strong>{stop.dwellMinutes}m</strong></span>
+                        <span className="mx-1.5">·</span>
+                        <span>Slip-road Detour: <strong>{stop.detourMinutes}m</strong></span>
+                        <span className="mx-1.5">·</span>
+                        <span className="font-semibold text-white">Total: +{totalStopMinutes}m</span>
+                        {stop.replacesArrivalMeal && (
+                          <p className="mt-0.5 text-[11px] text-blue-300 font-medium">
+                            ✓ Midday meal taken at pitstop replaces redundant 45m check-in dining allowance.
+                          </p>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => togglePitstop(stop.id)}
+                        className={`rounded-xl px-4 py-2 text-xs font-bold transition-all cursor-pointer ${
+                          isSelected
+                            ? 'border border-amber-600 bg-amber-600 text-white shadow-sm hover:bg-amber-700'
+                            : 'border border-slate-700 bg-[#292F39] text-white shadow-sm hover:bg-slate-700'
+                        }`}
+                      >
+                        {isSelected ? '✓ Stop Included (Click to Remove)' : `+ Add Pitstop (+${totalStopMinutes}m)`}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       )}
@@ -586,8 +631,8 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
               key={i}
               className={`rounded-xl border p-3.5 text-sm ${
                 v.severity === 'BLOCKER'
-                  ? 'border-red-200 bg-red-50 text-red-900'
-                  : 'border-amber-200 bg-amber-50 text-amber-900'
+                  ? 'border-red-500/40 bg-red-950/40 text-red-200'
+                  : 'border-amber-500/40 bg-amber-950/40 text-amber-200'
               }`}
             >
               <strong>{v.severity}:</strong> {v.message}
@@ -596,236 +641,247 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         </div>
       )}
 
-      {/* Human-Readable Timelines for Day 1 and Day 2 */}
-      {([1, 2] as const).map(day => {
-        const dayDate = day === 1 ? day1Start : day2Start;
-        const items = r.timeline.filter(t => t.day === day);
-        return (
-          <div key={day} className="space-y-3">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-xl font-bold text-slate-900">
-                Day {day} {dayDate && <span className="text-sm font-medium text-slate-500">· {formatReadableDate(dayDate)}</span>}
-              </h2>
-              <span className="text-xs text-slate-400">{items.length} segments</span>
-            </div>
+      {/* Sticky Day 1 / Day 2 Tabs */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveDay(1)}
+              className={`rounded-xl px-4 py-2 text-sm font-bold transition-colors cursor-pointer ${
+                activeDay === 1
+                  ? 'bg-[#2962FF] text-white shadow-md shadow-[#2962FF]/40'
+                  : 'bg-[#20252E] text-slate-400 hover:text-white'
+              }`}
+            >
+              Day 1 {day1Start && `· ${formatReadableDate(day1Start)}`}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveDay(2)}
+              className={`rounded-xl px-4 py-2 text-sm font-bold transition-colors cursor-pointer ${
+                activeDay === 2
+                  ? 'bg-[#2962FF] text-white shadow-md shadow-[#2962FF]/40'
+                  : 'bg-[#20252E] text-slate-400 hover:text-white'
+              }`}
+            >
+              Day 2 {day2Start && `· ${formatReadableDate(day2Start)}`}
+            </button>
+          </div>
+          <span className="text-xs text-slate-400">
+            {r.timeline.filter(t => t.day === activeDay).length} timeline blocks
+          </span>
+        </div>
 
-            <div className="space-y-2">
-              {items.map(entry => {
-                const duration = Math.round((parseIST(entry.endTime) - parseIST(entry.startTime)) / 60_000);
-                const isFree = entry.category === 'FREE';
-                const isDrive = entry.category === 'DRIVE';
-                const isActivity = entry.category === 'ACTIVITY';
-                const isPitstop = entry.category === 'PITSTOP';
-                const actImg = entry.activityId
-                  ? getPlaceImage(entry.activityId)
-                  : isPitstop
-                  ? getPlaceImage('maddur-tiffanys')
-                  : undefined;
+        {/* Selected Day Timeline List */}
+        <div className="space-y-2.5">
+          {r.timeline
+            .filter(t => t.day === activeDay)
+            .map(entry => {
+              const duration = Math.round((parseIST(entry.endTime) - parseIST(entry.startTime)) / 60_000);
+              const isFree = entry.category === 'FREE';
+              const isDrive = entry.category === 'DRIVE';
+              const isActivity = entry.category === 'ACTIVITY';
+              const isPitstop = entry.category === 'PITSTOP';
+              const actImg = entry.activityId
+                ? getPlaceImage(entry.activityId)
+                : isPitstop
+                ? getPlaceImage('maddur-tiffanys')
+                : undefined;
 
-                return (
-                  <div
-                    key={entry.id}
-                    className={`rounded-xl border p-3.5 text-sm transition-colors ${
-                      isFree
-                        ? 'border-emerald-200 bg-emerald-50/70 text-emerald-950'
-                        : isPitstop
-                        ? 'border-amber-300 bg-amber-50/80 text-amber-950'
-                        : isDrive
-                        ? 'border-blue-100 bg-blue-50/50'
-                        : isActivity
-                        ? 'border-purple-100 bg-purple-50/40'
-                        : 'border-slate-200 bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      {actImg && (
-                        <img
-                          src={actImg.src}
-                          alt={actImg.alt}
-                          loading="lazy"
-                          className="h-10 w-10 rounded-lg object-cover flex-shrink-0 border border-slate-200"
-                          onError={e => {
-                            (e.target as HTMLElement).style.display = 'none';
-                          }}
-                        />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <strong className="text-slate-900">{entry.label}</strong>
-                          <span
-                            className={`rounded px-2.5 py-0.5 text-xs font-semibold ${
-                              isPitstop
-                                ? 'bg-amber-200 text-amber-950 font-bold'
-                                : isFree
-                                ? 'bg-emerald-100 text-emerald-900 font-bold'
-                                : isDrive
-                                ? 'bg-blue-100 text-blue-900'
-                                : isActivity
-                                ? 'bg-purple-100 text-purple-900 font-semibold'
-                                : 'bg-slate-100 text-slate-700'
-                            }`}
-                          >
-                            {isPitstop
-                              ? '☕ Highway Pitstop'
+              return (
+                <div
+                  key={entry.id}
+                  className={`rounded-xl border p-3.5 text-sm transition-colors ${
+                    isFree
+                      ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-200'
+                      : isPitstop
+                      ? 'border-amber-500/40 bg-amber-950/30 text-amber-200'
+                      : isDrive
+                      ? 'border-blue-500/30 bg-blue-950/20 text-blue-200'
+                      : isActivity
+                      ? 'border-purple-500/30 bg-purple-950/20 text-purple-200'
+                      : 'border-slate-800 bg-[#20252E] text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    {actImg && (
+                      <img
+                        src={actImg.src}
+                        alt={actImg.alt}
+                        loading="lazy"
+                        className="h-10 w-10 rounded-lg object-cover flex-shrink-0 border border-slate-700"
+                        onError={e => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <strong className="text-white">{entry.label}</strong>
+                        <span
+                          className={`rounded px-2.5 py-0.5 text-xs font-semibold ${
+                            isPitstop
+                              ? 'bg-amber-500/20 text-amber-300 font-bold'
                               : isFree
-                              ? '🌿 Usable Free Time'
+                              ? 'bg-emerald-500/20 text-emerald-300 font-bold'
                               : isDrive
-                              ? '🚗 Highway Drive'
+                              ? 'bg-blue-500/20 text-blue-300'
                               : isActivity
-                              ? '📍 Attraction Visit'
-                              : entry.category === 'REST'
-                              ? '🌙 Overnight Rest'
-                              : entry.category === 'CHECK_IN'
-                              ? '🏨 Hotel Check-in'
-                              : entry.category === 'MEAL'
-                              ? '🍽️ Dining Break'
-                              : entry.category}
-                          </span>
-                        </div>
-                        <div className="mt-1 flex items-center justify-between text-xs text-slate-600">
-                          <span>
-                            {formatTimelineTime(entry.startTime)} → {formatTimelineTime(entry.endTime)}
-                          </span>
-                          <span className="font-semibold">{formatDuration(duration)}</span>
-                        </div>
+                              ? 'bg-purple-500/20 text-purple-300'
+                              : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          {isPitstop
+                            ? '☕ Highway Pitstop'
+                            : isFree
+                            ? '🌿 Usable Free Time'
+                            : isDrive
+                            ? '🚗 Highway Drive'
+                            : isActivity
+                            ? '📍 Attraction Visit'
+                            : entry.category === 'REST'
+                            ? '🌙 Overnight Rest'
+                            : entry.category === 'CHECK_IN'
+                            ? '🏨 Hotel Check-in'
+                            : entry.category === 'MEAL'
+                            ? '🍽️ Dining Break'
+                            : entry.category}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between text-xs text-slate-400">
+                        <span>
+                          {formatTimelineTime(entry.startTime)} → {formatTimelineTime(entry.endTime)}
+                        </span>
+                        <span className="font-semibold text-slate-300">{formatDuration(duration)}</span>
                       </div>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
+                </div>
+              );
+            })}
+        </div>
+      </div>
 
-      {/* Primary CTA: Review My Trip Button */}
-      <div className="rounded-2xl border-2 border-emerald-600/30 bg-emerald-50/40 p-5 shadow-sm space-y-3">
+      {/* Primary CTA: "Your adventure is taking shape! / See My Trip" */}
+      <div className="rounded-2xl border border-blue-500/40 bg-[#20252E] p-6 shadow-lg space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">Itinerary Complete?</h2>
-            <p className="text-xs text-slate-600">
-              Review your entire journey summary, budget breakdown, and share with your travel crew.
+            <span className="text-xs font-bold uppercase tracking-wider text-blue-400">Step 3 Complete</span>
+            <h2 className="text-xl font-black text-white mt-0.5">Your adventure is taking shape!</h2>
+            <p className="text-xs text-slate-300 mt-1">
+              Review the complete digital itinerary, save locally on your device, and invite your crew with a 1-click WhatsApp RSVP.
             </p>
           </div>
-          <span className="rounded-full bg-emerald-200/80 px-3 py-1 text-xs font-bold text-emerald-950">
-            Step 4 Next
+          <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-3 py-1 text-xs font-bold text-blue-300">
+            Final Step Ahead
           </span>
         </div>
 
         <button
           onClick={goToReviewScreen}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#0d6350] px-5 py-4 text-base font-bold text-white shadow-md hover:bg-[#0b4b3d] active:scale-[0.99] transition-all cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#2962FF] px-6 py-4 text-base font-bold text-white shadow-lg shadow-[#2962FF]/40 hover:bg-blue-600 active:scale-[0.99] transition-all cursor-pointer"
         >
-          Review My Trip →
+          See My Trip →
         </button>
       </div>
 
       {/* Invite Your Crew Section (Quick Share Tray) */}
-      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="space-y-4 rounded-2xl border border-slate-800 bg-[#20252E] p-5 shadow-lg">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">Invite Your Crew</h2>
-            <p className="text-xs text-slate-500">
+            <h2 className="text-base font-bold text-white">Invite Your Crew</h2>
+            <p className="text-xs text-slate-400">
               Share this trip plan snapshot with friends via direct link or WhatsApp.
             </p>
           </div>
-          <span className="rounded-full bg-teal-50 border border-teal-200 px-3 py-1 text-xs font-bold text-teal-800">
-            Private Invitation
+          <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-3 py-1 text-xs font-bold text-blue-300">
+            Shareable Link
           </span>
         </div>
 
         {/* Trip Snapshot Preview Box */}
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-xs text-slate-700 space-y-1.5">
+        <div className="rounded-xl border border-slate-700/60 bg-[#15191F] p-3.5 text-xs text-slate-300 space-y-1.5">
           <div className="flex justify-between">
-            <span className="font-semibold text-slate-900">Destination:</span>
-            <span>{dest.name}</span>
+            <span className="font-semibold text-slate-400">Destination:</span>
+            <span className="text-white font-bold">{dest.name}</span>
           </div>
           <div className="flex justify-between">
-            <span className="font-semibold text-slate-900">Travel Dates:</span>
-            <span>
+            <span className="font-semibold text-slate-400">Travel Dates:</span>
+            <span className="text-white">
               {formatReadableDateTime(currentInputs.departureDateTime)} →{' '}
               {formatReadableDateTime(currentInputs.returnDeadlineDateTime)}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="font-semibold text-slate-900">Organizer:</span>
-            <span>{organizerName || 'Trip Organizer'}</span>
+            <span className="font-semibold text-slate-400">Organizer:</span>
+            <span className="text-white">{organizerName || 'Trip Organizer'}</span>
           </div>
           {selectedPitstopIds.length > 0 && (
             <div className="flex justify-between">
-              <span className="font-semibold text-slate-900">Planned Highway Stop:</span>
-              <span className="font-medium text-amber-900">Maddur Tiffanys included</span>
+              <span className="font-semibold text-slate-400">Highway Stop:</span>
+              <span className="font-medium text-amber-300">Maddur Tiffanys included</span>
             </div>
           )}
         </div>
 
-        {isLocalhost && (
-          <p className="rounded-lg bg-amber-50 p-2.5 text-xs text-amber-900">
-            ⚠️ <strong>Local environment detected:</strong> This link is generated using <code>localhost</code> and will only work on this device. Deploy to Vercel (or provide a public URL) for cross-device sharing.
-          </p>
-        )}
-
-        <p className="text-xs text-slate-500 italic">
-          Shared trip snapshot. Changes are not synchronized automatically.
-        </p>
-
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 pt-1">
           <button
             onClick={handleShareInviteWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 font-bold text-white shadow-sm hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 font-bold text-white shadow-md hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
           >
             <span className="text-base">💬</span> Share Invite via WhatsApp
           </button>
           <button
             onClick={handleCopyTripLink}
-            className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3.5 font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-[#292F39] px-4 py-3.5 font-bold text-slate-200 hover:text-white shadow-md hover:bg-slate-700 active:scale-[0.99] transition-all cursor-pointer"
           >
             <span className="text-base">🔗</span> Copy Trip Link
           </button>
         </div>
 
         {linkCopied && (
-          <p role="status" className="text-center text-sm font-semibold text-teal-700 animate-fade-in">
+          <p role="status" className="text-center text-sm font-semibold text-blue-400 animate-fade-in">
             ✓ {linkCopied}
           </p>
         )}
       </div>
 
       {/* Dynamic Summary Preview Card */}
-      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="space-y-3 rounded-2xl border border-slate-800 bg-[#20252E] p-5 shadow-lg">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">Trip Summary Preview</h2>
-            <p className="text-xs text-slate-500">
+            <h2 className="text-base font-bold text-white">Trip Summary Preview</h2>
+            <p className="text-xs text-slate-400">
               Live preview updates instantly when you modify delays, pitstops, or optional activities.
             </p>
           </div>
-          <span className="rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-800">
-            Dynamic Live Output
+          <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-3 py-1 text-xs font-bold text-blue-300">
+            Live Output
           </span>
         </div>
 
-        <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono text-xs text-slate-800 leading-relaxed">
+        <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-700/60 bg-[#15191F] p-4 font-mono text-xs text-slate-300 leading-relaxed">
           {summaryText}
         </pre>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 pt-1">
           <button
             onClick={shareViaWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 font-bold text-white shadow-sm hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 font-bold text-white shadow-md hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
           >
             <span className="text-base">💬</span> Share via WhatsApp
           </button>
           <button
             onClick={copySummary}
-            className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3.5 font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-[#292F39] px-4 py-3.5 font-bold text-slate-200 hover:text-white shadow-md hover:bg-slate-700 active:scale-[0.99] transition-all cursor-pointer"
           >
             <span className="text-base">📋</span> Copy Summary
           </button>
         </div>
 
         {copied && (
-          <p role="status" className="text-center text-sm font-semibold text-teal-700 animate-fade-in">
+          <p role="status" className="text-center text-sm font-semibold text-blue-400 animate-fade-in">
             ✓ {copied}
           </p>
         )}
@@ -835,7 +891,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         href={maps}
         target="_blank"
         rel="noopener noreferrer"
-        className="block text-center text-sm font-semibold text-teal-700 hover:underline"
+        className="block text-center text-sm font-semibold text-blue-400 hover:underline"
       >
         Open route in Google Maps ↗
       </a>

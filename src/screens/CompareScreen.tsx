@@ -1,12 +1,28 @@
 import { Link } from 'react-router';
 import type { Dispatch, SetStateAction } from 'react';
-import type { UserConstraints } from '../types';
+import type { UserConstraints, PacePreference } from '../types';
 import { DESTINATIONS } from '../data/destinations';
 import { evaluateFeasibility } from '../engine/scheduler';
 import { formatDuration } from '../utils/formatters';
 import { getDestinationImage } from '../data/images';
+import ProgressBar from '../components/ProgressBar';
 
 type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserConstraints>> };
+
+const PACE_EXPLANATIONS: Record<PacePreference, { title: string; desc: string }> = {
+  relaxed: {
+    title: 'Relaxed Pace',
+    desc: 'Schedules only top-priority highlights. Reserves 90m for arrival & check-in, 60m for breakfast, and ample free time.',
+  },
+  balanced: {
+    title: 'Balanced Pace (Recommended)',
+    desc: 'Schedules key signature landmarks with sensible 75m arrival meal, 45m breakfast, and reliable travel buffers.',
+  },
+  packed: {
+    title: 'Packed Pace',
+    desc: 'Maximizes attraction visits fitting within operating hours. Uses compact 60m check-in and 30m meals. Watch for fatigue.',
+  },
+};
 
 export default function CompareScreen({ inputs, setInputs }: Props) {
   const adjustments = inputs.destinationAdjustments ?? {};
@@ -24,31 +40,72 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
     }));
   };
 
+  const handlePaceChange = (pace: PacePreference) => {
+    setInputs(prev => ({ ...prev, pace }));
+  };
+
   return (
-    <section className="space-y-5">
+    <section className="space-y-6">
+      {/* 4-part segmented progress meter */}
+      <ProgressBar currentStep={2} />
+
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-widest text-teal-700">Step 2 / 4</p>
-          <h1 className="mt-1 text-3xl font-extrabold text-slate-900">Your reality check</h1>
-          <p className="mt-1 text-slate-600">
-            Four destinations, one real weekend. Usable destination time computed deterministically.
+          <h1 className="text-3xl font-extrabold text-white">
+            Where should we escape to?
+          </h1>
+          <p className="mt-1 text-sm text-slate-300">
+            Four destinations, one real weekend. Usable destination leisure computed deterministically.
           </p>
         </div>
-        <Link to="/" className="text-sm font-semibold text-teal-700 hover:underline">
-          ← Edit dates
+        <Link to="/plan" className="text-xs font-semibold text-blue-400 hover:underline">
+          ← Edit dates & budget
         </Link>
       </div>
 
+      {/* Travel Pace Selector (Moved from Page 1 with dynamic explanation) */}
+      <div className="rounded-2xl border border-slate-800 bg-[#20252E] p-4 sm:p-5 shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Travel Pace
+          </span>
+          <span className="text-xs font-bold text-blue-400">
+            {PACE_EXPLANATIONS[inputs.pace].title}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          {(['relaxed', 'balanced', 'packed'] as const).map(p => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => handlePaceChange(p)}
+              className={`rounded-xl border py-2.5 px-3 text-xs sm:text-sm capitalize font-bold transition-all cursor-pointer ${
+                inputs.pace === p
+                  ? 'border-[#2962FF] bg-[#2962FF] text-white shadow-md shadow-[#2962FF]/40'
+                  : 'border-slate-700 bg-[#15191F] text-slate-300 hover:border-slate-600'
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+
+        <p className="text-xs text-slate-300 leading-relaxed bg-[#15191F] p-3 rounded-xl border border-slate-800">
+          ℹ️ {PACE_EXPLANATIONS[inputs.pace].desc}
+        </p>
+      </div>
+
       {/* Baseline disclosure banner */}
-      <div className="flex items-center gap-3 rounded-xl border border-teal-200 bg-teal-50/70 p-4 text-xs text-teal-950">
+      <div className="flex items-center gap-3 rounded-2xl border border-blue-900/40 bg-blue-950/20 p-4 text-xs text-slate-300">
         <span className="text-base flex-shrink-0">📍</span>
         <p className="leading-relaxed">
-          <strong>Baseline disclosure:</strong> Driving times are planning estimates from MG Road, Bengaluru—not live traffic or your current location. Adjust each destination card independently below if your starting area requires more or less driving time.
+          <strong>Baseline disclosure:</strong> Driving times are planning estimates from MG Road, Bengaluru with 20% safety contingency. Adjust each destination card independently below if your starting area requires more or less driving time.
         </p>
       </div>
 
       {/* Destination comparison cards */}
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-2">
         {DESTINATIONS.map(d => {
           const adj = getAdj(d.id);
           const destInputs: UserConstraints = {
@@ -60,131 +117,142 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
 
           const ratingBadgeColor =
             r.rating === 'Comfortable'
-              ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+              ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40'
               : r.rating === 'Tight'
-              ? 'bg-amber-100 text-amber-900 border border-amber-300'
-              : 'bg-red-100 text-red-900 border border-red-300';
+              ? 'bg-amber-950/60 text-amber-300 border border-amber-500/40'
+              : 'bg-red-950/60 text-red-300 border border-red-500/40';
 
           return (
             <article
               key={d.id}
-              className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
+              className="flex flex-col justify-between rounded-2xl border border-slate-800 bg-[#20252E] p-5 shadow-lg transition-all hover:border-slate-700"
             >
-              {/* Destination Hero Photograph with Fixed Aspect Ratio */}
-              <div className="relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-slate-100 shadow-inner">
-                {img ? (
-                  <img
-                    src={img.src}
-                    alt={img.alt}
-                    loading="lazy"
-                    className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-                    onError={e => {
-                      (e.target as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-teal-900/10 text-3xl">
-                    🏞️
-                  </div>
-                )}
-                {/* Photo attribution badge */}
-                {img && (
-                  <div className="absolute bottom-2 right-2 rounded bg-black/65 px-2 py-0.5 text-[10px] text-white/95 backdrop-blur-sm pointer-events-none">
-                    Photo: {img.author} · {img.license}
-                  </div>
-                )}
-              </div>
+              <div className="space-y-4">
+                {/* Destination Hero Photograph with Fixed Aspect Ratio */}
+                <div className="relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-slate-900 shadow-inner">
+                  {img ? (
+                    <img
+                      src={img.src}
+                      alt={img.alt}
+                      loading="lazy"
+                      className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
+                      onError={e => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-slate-800 text-3xl">
+                      🏞️
+                    </div>
+                  )}
+                  {img && (
+                    <div className="absolute bottom-2 right-2 rounded bg-black/75 px-2 py-0.5 text-[10px] text-white/95 backdrop-blur-sm pointer-events-none">
+                      Photo: {img.author} · {img.license}
+                    </div>
+                  )}
+                </div>
 
-              {/* Title & Feasibility Rating */}
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-xl font-bold text-slate-900">{d.name}</h2>
-                <span className={`rounded-full px-3 py-1 text-xs font-bold ${ratingBadgeColor}`}>
-                  {r.rating}
-                </span>
-              </div>
+                {/* Title & Feasibility Rating */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-xl font-bold text-white">{d.name}</h2>
+                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${ratingBadgeColor}`}>
+                    {r.rating}
+                  </span>
+                </div>
 
-              <p className="text-xs text-slate-500">
-                {d.routeName} · {d.oneWayDistanceKm} km one-way · MG Road reference
-              </p>
+                <p className="text-xs font-semibold text-blue-400">
+                  {d.routeName} · {d.oneWayDistanceKm} km
+                </p>
 
-              {/* Independent Destination Driving Adjustment Control */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <div className="flex items-center justify-between gap-2">
+                {/* Feasibility Metrics Box */}
+                <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#15191F] p-3 text-xs border border-slate-800">
                   <div>
-                    <span className="block text-xs font-bold text-slate-800">Adjust driving estimate</span>
-                    <span className="text-[11px] text-slate-500">One-way origin offset</span>
+                    <span className="text-[11px] text-slate-400 block">Usable Leisure Time</span>
+                    <strong className="text-base text-white">
+                      {formatDuration(r.destinationSlackMinutes)}
+                    </strong>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      aria-label={`Decrease drive time for ${d.name} by 15 minutes`}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white font-bold text-slate-700 shadow-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                      disabled={adj <= -60}
-                      onClick={() => updateAdj(d.id, -15)}
+                  <div>
+                    <span className="text-[11px] text-slate-400 block">Return Deadline Margin</span>
+                    <strong
+                      className={`text-base ${
+                        r.returnDeadlineMarginMinutes >= 60
+                          ? 'text-emerald-400'
+                          : r.returnDeadlineMarginMinutes >= 0
+                          ? 'text-amber-400'
+                          : 'text-red-400'
+                      }`}
                     >
-                      −
-                    </button>
-                    <span className="w-14 text-center text-xs font-black text-slate-900">
-                      {formatDuration(adj, true)}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={`Increase drive time for ${d.name} by 15 minutes`}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white font-bold text-slate-700 shadow-sm hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                      disabled={adj >= 120}
-                      onClick={() => updateAdj(d.id, 15)}
-                    >
-                      +
-                    </button>
+                      {formatDuration(r.returnDeadlineMarginMinutes)}
+                    </strong>
                   </div>
                 </div>
+
+                {/* Driving Time & Adjustment */}
+                <div className="space-y-2 rounded-xl bg-[#15191F] p-3 text-xs border border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-slate-400 block">Estimated One-Way Drive:</span>
+                      <strong className="text-sm text-white">
+                        {formatDuration(r.outboundDriveMinutes)}
+                      </strong>
+                      <span className="text-[10px] text-slate-500 block">
+                        (Baseline: {formatDuration(d.baselineOneWayDriveMinutes)} + 20% buffer{adj !== 0 ? ` ${adj > 0 ? `+${adj}` : adj}m adj` : ''})
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => updateAdj(d.id, -15)}
+                        disabled={adj <= -60}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#292F39] text-xs font-bold text-slate-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        title="Reduce driving time by 15m"
+                      >
+                        −15
+                      </button>
+                      <span className="w-10 text-center text-xs font-bold text-blue-400">
+                        {adj > 0 ? `+${adj}m` : adj < 0 ? `${adj}m` : '0m'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => updateAdj(d.id, 15)}
+                        disabled={adj >= 120}
+                        className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#292F39] text-xs font-bold text-slate-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        title="Add 15m extra driving buffer"
+                      >
+                        +15
+                      </button>
+                    </div>
+                  </div>
+
+                  <details className="text-[11px] text-slate-400 pt-1 border-t border-slate-800">
+                    <summary className="cursor-pointer text-blue-400 hover:underline">
+                      Why adjust driving time? ▼
+                    </summary>
+                    <p className="mt-1 text-slate-300 leading-relaxed">
+                      Baseline driving assumes departure from Central Bengaluru (MG Road). If you're starting from Whitefield or North Bengaluru, add +30m to +45m to reflect city traffic before hitting the highway.
+                    </p>
+                  </details>
+                </div>
+
+                {/* Night Curfew Warning if Applicable */}
+                {d.routeRestriction && (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-950/30 p-2.5 text-xs text-amber-200">
+                    ⚠️ <strong>Night Curfew:</strong> {d.routeRestriction.name} ({d.routeRestriction.startTime}–{d.routeRestriction.endTime} closure).
+                  </div>
+                )}
               </div>
 
-              {/* Metric Grid */}
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <p>
-                  <span className="block text-xs text-slate-500">Round-trip driving</span>
-                  <strong className="text-slate-900">
-                    {formatDuration(r.outboundDriveMinutes + r.inboundDriveMinutes)}
-                  </strong>
-                </p>
-                <p>
-                  <span className="block text-xs text-slate-500">Usable free time</span>
-                  <strong className="text-slate-900">{formatDuration(r.destinationSlackMinutes)}</strong>
-                </p>
-                <p>
-                  <span className="block text-xs text-slate-500">Return margin</span>
-                  <strong
-                    className={
-                      r.returnDeadlineMarginMinutes < 0 ? 'text-red-600 font-bold' : 'text-slate-900'
-                    }
-                  >
-                    {formatDuration(r.returnDeadlineMarginMinutes, true)}
-                  </strong>
-                </p>
-                <p>
-                  <span className="block text-xs text-slate-500">Est. cost/person</span>
-                  <strong className="text-slate-900">
-                    ₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}
-                  </strong>
-                </p>
+              {/* Action Button */}
+              <div className="mt-5 pt-3 border-t border-slate-800">
+                <Link
+                  to={`/schedule/${d.id}`}
+                  className="block w-full text-center rounded-xl bg-[#2962FF] py-3 text-sm font-bold text-white shadow-md shadow-[#2962FF]/40 hover:bg-blue-600 active:scale-[0.99] transition-all cursor-pointer"
+                >
+                  Customize Schedule →
+                </Link>
               </div>
-
-              <p className="text-xs text-slate-600 leading-relaxed">{r.ratingExplanation}</p>
-
-              {r.isBudgetExceeded && (
-                <p className="rounded-lg bg-amber-50 p-2 text-xs font-semibold text-amber-900">
-                  Above Budget — non-blocking warning
-                </p>
-              )}
-
-              <Link
-                to={`/schedule/${d.id}`}
-                onClick={() => setInputs(prev => ({ ...prev, drivingAdjustmentMinutes: adj }))}
-                className="mt-auto block rounded-xl bg-[#0d6350] px-4 py-3.5 text-center text-sm font-bold text-white shadow-sm hover:bg-[#0b4b3d] active:scale-[0.99] transition-all"
-              >
-                View Timeline →
-              </Link>
             </article>
           );
         })}

@@ -11,14 +11,19 @@ export const CURRENT_SCHEMA_VERSION = 1;
 export const SUPPORTED_DESTINATIONS = ['mysuru', 'ooty', 'coorg-madikeri', 'nandi-hills'] as const;
 export type SupportedDestinationId = typeof SUPPORTED_DESTINATIONS[number];
 
-/** Sanitize an organizer or guest display name (strip tags, control characters, trim, limit length). */
-export function sanitizeDisplayName(name: string | null | undefined): string {
+/** Clean an input display name while user is actively typing (strips tags & control chars, limits length, preserves typing spaces). */
+export function cleanInputDisplayName(name: string | null | undefined): string {
   if (!name) return '';
   return name
     .replace(/<[^>]*>/g, '') // remove HTML tags
     .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // remove control chars
-    .trim()
     .slice(0, MAX_NAME_LENGTH);
+}
+
+/** Sanitize an organizer or guest display name for final submission/URLs (strips tags, control characters, trims whitespace, limits length). */
+export function sanitizeDisplayName(name: string | null | undefined): string {
+  if (!name) return '';
+  return cleanInputDisplayName(name).trim();
 }
 
 /** Build compact URLSearchParams for sharing trip state without serializing derived calculations. */
@@ -197,18 +202,16 @@ export function parseShareableTrip(
     else if (rawPace === 'packed') pace = 'packed';
     else if (rawPace === 'moderate' || rawPace === 'balanced') pace = 'balanced';
 
-    // 5. Budget per person
-    const rawBudget = (searchParams.get('budget') || '').toLowerCase();
+    // 5. Budget per person (supports presets and custom whole-number amounts from ₹500 to ₹100,000)
+    const rawBudget = (searchParams.get('budget') || '').toLowerCase().trim();
     let perPersonBudgetINR = 6000;
     if (rawBudget === '3000' || rawBudget === 'backpacker') perPersonBudgetINR = 3000;
     else if (rawBudget === '6000' || rawBudget === 'moderate') perPersonBudgetINR = 6000;
     else if (rawBudget === '10000' || rawBudget === 'comfort') perPersonBudgetINR = 10000;
-    else {
-      const parsedBudget = parseInt(rawBudget, 10);
-      if (!Number.isNaN(parsedBudget)) {
-        if (parsedBudget <= 4000) perPersonBudgetINR = 3000;
-        else if (parsedBudget <= 8000) perPersonBudgetINR = 6000;
-        else perPersonBudgetINR = 10000;
+    else if (rawBudget) {
+      const parsedBudget = parseInt(rawBudget.replace(/^₹/, ''), 10);
+      if (!Number.isNaN(parsedBudget) && parsedBudget >= 500 && parsedBudget <= 100000) {
+        perPersonBudgetINR = Math.round(parsedBudget);
       }
     }
 

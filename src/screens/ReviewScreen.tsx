@@ -4,13 +4,17 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { UserConstraints } from '../types';
 import { getDestination } from '../data/destinations';
 import { getCompatiblePitstops } from '../data/pitstops.js';
-import { evaluateFeasibility } from '../engine/scheduler';
+import { evaluateFeasibility, parseIST } from '../engine/scheduler';
 import { getDestinationImage, getPlaceImage } from '../data/images';
+import ProgressBar from '../components/ProgressBar';
+import { saveTrip } from '../utils/savedTrips';
 import {
   buildTripSummaryText,
   buildWhatsAppShareUrl,
   formatDuration,
+  formatReadableDate,
   formatReadableDateTime,
+  formatTimelineTime,
 } from '../utils/formatters';
 import {
   buildShareableParams,
@@ -26,6 +30,7 @@ export default function ReviewScreen({ inputs }: Props) {
   const [searchParams] = useSearchParams();
 
   const [toastMessage, setToastMessage] = useState('');
+  const [savedSuccess, setSavedSuccess] = useState(false);
 
   // Parse shareable query parameters if present
   const parsedTrip = useMemo(() => {
@@ -36,17 +41,17 @@ export default function ReviewScreen({ inputs }: Props) {
   // Defensive fallback if invalid or corrupted URL parameters
   if (parsedTrip && !parsedTrip.valid) {
     return (
-      <div className="mx-auto max-w-xl space-y-4 rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+      <div className="mx-auto max-w-xl space-y-4 rounded-2xl border border-red-500/40 bg-red-950/40 p-6 text-center text-red-200">
         <div className="text-3xl">⚠️</div>
-        <h2 className="text-xl font-bold text-red-900">Trip Link Could Not Be Loaded</h2>
-        <p className="text-sm text-red-700">{parsedTrip.error}</p>
-        <p className="text-xs text-red-600">
+        <h2 className="text-xl font-bold text-red-100">Trip Link Could Not Be Loaded</h2>
+        <p className="text-sm text-red-300">{parsedTrip.error}</p>
+        <p className="text-xs text-red-400">
           The link may be corrupted, truncated, or contains out-of-range travel dates.
         </p>
         <div className="pt-2">
           <Link
             to="/"
-            className="inline-block rounded-xl bg-teal-800 px-5 py-3 text-sm font-bold text-white hover:bg-teal-900 transition-colors"
+            className="inline-block rounded-xl bg-[#2962FF] px-5 py-3 text-sm font-bold text-white hover:bg-blue-600 transition-colors"
           >
             ← Create a new trip
           </Link>
@@ -58,9 +63,9 @@ export default function ReviewScreen({ inputs }: Props) {
   const dest = getDestination(id ?? '');
   if (!dest) {
     return (
-      <div className="mx-auto max-w-xl space-y-4 py-8 text-center">
-        <p className="text-lg font-bold text-slate-800">Unknown destination.</p>
-        <Link to="/compare" className="text-teal-700 underline font-semibold">
+      <div className="mx-auto max-w-xl space-y-4 py-8 text-center text-slate-200">
+        <p className="text-lg font-bold text-white">Unknown destination.</p>
+        <Link to="/compare" className="text-blue-400 underline font-semibold">
           ← Back to comparison
         </Link>
       </div>
@@ -74,8 +79,11 @@ export default function ReviewScreen({ inputs }: Props) {
     : activeInputs.organizerName || '';
   const isGroup = (activeInputs.planningMode ?? 'group') === 'group';
 
-  // Evaluate feasibility using the exact deterministic engine (NEVER re-implement or mock)
+  // Evaluate feasibility using the deterministic engine
   const r = evaluateFeasibility(dest, activeInputs);
+
+  const day1Start = r.timeline.find(t => t.day === 1)?.startTime;
+  const day2Start = r.timeline.find(t => t.day === 2)?.startTime;
 
   const heroImage = getDestinationImage(dest.id);
   const compatibleStops = getCompatiblePitstops(dest.id);
@@ -135,38 +143,57 @@ export default function ReviewScreen({ inputs }: Props) {
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  const isLocalhost =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const handleSaveTrip = () => {
+    const shareUrl = buildShareableTripUrl(dest.id, activeInputs);
+    saveTrip({
+      destinationId: dest.id,
+      destinationName: dest.name,
+      routeName: dest.routeName,
+      departureDateTime: activeInputs.departureDateTime,
+      returnDeadlineDateTime: activeInputs.returnDeadlineDateTime,
+      pace: activeInputs.pace,
+      partySize: activeInputs.partySize,
+      perPersonBudgetINR: activeInputs.perPersonBudgetINR,
+      planningMode: activeInputs.planningMode,
+      organizerName: activeInputs.organizerName,
+      shareUrl,
+    });
+    setSavedSuccess(true);
+    showToast('Trip saved to this device! Reopen anytime from "My Trip".');
+  };
+
+  const googleMapsDirectionsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent('MG Road, Bengaluru')}&destination=${encodeURIComponent(dest.name + ', India')}&travelmode=driving`;
 
   return (
     <section className="mx-auto max-w-3xl space-y-6">
+      {/* 4-part segmented progress meter */}
+      <ProgressBar currentStep={4} />
+
       {/* Top Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
           to={editUrl}
-          className="inline-flex items-center text-sm font-semibold text-teal-700 hover:underline"
+          className="inline-flex items-center text-xs font-semibold text-blue-400 hover:underline"
         >
-          ← Edit Itinerary
+          ← Edit Itinerary (Screen 3)
         </Link>
-        <span className="rounded-full bg-teal-50 border border-teal-200 px-3 py-1 text-xs font-bold text-teal-800">
-          Ready to Share
+        <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-3 py-1 text-xs font-bold text-blue-300">
+          Ready to Hit the Road
         </span>
       </div>
 
       {/* Screen Title */}
       <div>
-        <div className="text-sm font-semibold uppercase tracking-widest text-teal-700">Step 4 / 4</div>
-        <h1 className="mt-1 text-3xl font-extrabold text-slate-900">Review & Share Your Trip</h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Everything is set! Check your final itinerary snapshot and share with your travel crew.
+        <h1 className="text-3xl font-extrabold text-white">Ready to hit the road?</h1>
+        <p className="mt-1 text-sm text-slate-300">
+          Everything is set! Check your final itinerary snapshot, save on this device, and share with your crew.
         </p>
       </div>
 
       {/* Section A: Trip Overview Hero Card */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-2xl border border-slate-800 bg-[#20252E] shadow-lg">
         {/* Destination Hero Photo with Fixed Aspect Ratio */}
-        <div className="relative aspect-[16/9] sm:aspect-[21/9] w-full bg-slate-100 overflow-hidden">
+        <div className="relative aspect-[16/9] sm:aspect-[21/9] w-full bg-slate-900 overflow-hidden">
           {heroImage ? (
             <img
               src={heroImage.src}
@@ -178,20 +205,20 @@ export default function ReviewScreen({ inputs }: Props) {
               }}
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center bg-teal-900/10 text-4xl">
+            <div className="flex h-full w-full items-center justify-center bg-slate-800 text-4xl">
               🏞️
             </div>
           )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
           <div className="absolute bottom-3 left-4 right-4 flex items-end justify-between text-white">
             <div>
-              <span className="rounded-full bg-emerald-500/80 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider backdrop-blur-sm">
+              <span className="rounded-full bg-[#2962FF] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider backdrop-blur-sm">
                 {isGroup ? 'Group Escape' : 'Solo Road Trip'}
               </span>
               <h2 className="mt-1 text-2xl sm:text-3xl font-black">{dest.name}</h2>
             </div>
             {heroImage && (
-              <span className="text-[10px] text-white/80 bg-black/50 px-2 py-0.5 rounded backdrop-blur-sm">
+              <span className="text-[10px] text-white/80 bg-black/60 px-2 py-0.5 rounded backdrop-blur-sm">
                 Photo: {heroImage.author} · {heroImage.license}
               </span>
             )}
@@ -199,190 +226,80 @@ export default function ReviewScreen({ inputs }: Props) {
         </div>
 
         {/* Core Trip Parameters Grid */}
-        <div className="p-5 sm:p-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs border-t border-slate-100 bg-slate-50/50">
+        <div className="p-5 sm:p-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs border-t border-slate-800 bg-[#15191F]">
           <div>
-            <span className="block text-slate-500 font-medium">Organizer</span>
-            <strong className="text-sm font-bold text-slate-900">
+            <span className="block text-slate-400 font-medium">Organizer</span>
+            <strong className="text-sm font-bold text-white">
               {organizerName || (isGroup ? 'Trip Organizer' : 'Solo Traveler')}
             </strong>
           </div>
           <div>
-            <span className="block text-slate-500 font-medium">Party Size</span>
-            <strong className="text-sm font-bold text-slate-900">
+            <span className="block text-slate-400 font-medium">Party Size</span>
+            <strong className="text-sm font-bold text-white">
               {activeInputs.partySize} {activeInputs.partySize === 1 ? 'traveler' : 'travelers'}
             </strong>
           </div>
           <div>
-            <span className="block text-slate-500 font-medium">Travel Pace</span>
-            <strong className="text-sm font-bold text-slate-900 capitalize">
+            <span className="block text-slate-400 font-medium">Travel Pace</span>
+            <strong className="text-sm font-bold text-white capitalize">
               {activeInputs.pace}
             </strong>
           </div>
           <div>
-            <span className="block text-slate-500 font-medium">Target Budget</span>
-            <strong className="text-sm font-bold text-slate-900">
+            <span className="block text-slate-400 font-medium">Target Budget</span>
+            <strong className="text-sm font-bold text-white">
               ₹{activeInputs.perPersonBudgetINR.toLocaleString('en-IN')}/person
             </strong>
           </div>
         </div>
 
         {/* Travel Window Times */}
-        <div className="p-5 sm:p-6 border-t border-slate-200 grid sm:grid-cols-2 gap-4 text-sm">
-          <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-            <span className="block text-xs font-semibold uppercase text-teal-800">Leave Bengaluru</span>
-            <strong className="mt-1 block text-slate-900">
+        <div className="p-5 sm:p-6 border-t border-slate-800 grid sm:grid-cols-2 gap-4 text-sm bg-[#20252E]">
+          <div className="rounded-xl border border-slate-700 bg-[#15191F] p-3.5">
+            <span className="block text-xs font-semibold uppercase text-blue-400">Leave Bengaluru</span>
+            <strong className="mt-1 block text-white">
               {formatReadableDateTime(activeInputs.departureDateTime)} (IST)
             </strong>
-            <span className="text-xs text-slate-500">Origin: MG Road reference</span>
+            <span className="text-xs text-slate-400">Origin: MG Road reference corridor</span>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-            <span className="block text-xs font-semibold uppercase text-teal-800">Must Be Home By</span>
-            <strong className="mt-1 block text-slate-900">
+          <div className="rounded-xl border border-slate-700 bg-[#15191F] p-3.5">
+            <span className="block text-xs font-semibold uppercase text-blue-400">Must Be Home By</span>
+            <strong className="mt-1 block text-white">
               {formatReadableDateTime(activeInputs.returnDeadlineDateTime)} (IST)
             </strong>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-slate-400">
               Expected arrival: {formatReadableDateTime(r.homeArrivalTime)}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Section B: Route & Planning Highlights */}
-      <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
-        <h2 className="text-lg font-bold text-slate-900">Route & Planning Assumptions</h2>
-
-        <div className="grid gap-3 text-xs sm:grid-cols-2">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-1">
-            <span className="font-semibold text-slate-700">Driving Corridor:</span>
-            <p className="text-slate-900 font-medium">{dest.routeName}</p>
-            <p className="text-slate-500">{dest.oneWayDistanceKm} km each way from MG Road</p>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-1">
-            <span className="font-semibold text-slate-700">Origin Adjustment:</span>
-            <p className="text-slate-900 font-medium">
-              {activeInputs.drivingAdjustmentMinutes === 0
-                ? '0m (Standard MG Road baseline)'
-                : `${formatDuration(activeInputs.drivingAdjustmentMinutes, true)} one-way adjustment`}
-            </p>
-            <p className="text-slate-500">
-              {activeInputs.simulateDelayMinutes === 60
-                ? '⚠️ Outbound +1h delay simulation active'
-                : '✓ On-time outbound departure'}
-            </p>
-          </div>
-        </div>
-
-        {/* Selected Pitstop Highlight */}
-        {selectedStops.length > 0 ? (
-          <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-              <span className="font-bold text-amber-950 text-xs uppercase tracking-wider">
-                ☕ Selected Highway Pitstop
-              </span>
-              <span className="rounded bg-amber-200 px-2 py-0.5 text-[11px] font-bold text-amber-900">
-                PITSTOP Block Included
-              </span>
-            </div>
-            {selectedStops.map(stop => {
-              const stopImg = getPlaceImage(stop.id);
-              return (
-                <div key={stop.id} className="flex gap-3 items-center">
-                  {stopImg && (
-                    <img
-                      src={stopImg.src}
-                      alt={stopImg.alt}
-                      className="h-14 w-14 rounded-lg object-cover flex-shrink-0 border border-amber-200"
-                    />
-                  )}
-                  <div className="text-xs text-amber-950">
-                    <strong className="block text-sm">{stop.name}</strong>
-                    <p className="text-slate-700 mt-0.5">
-                      Est. Dwell: {stop.dwellMinutes}m · Detour: {stop.detourMinutes}m (+{stop.dwellMinutes + stop.detourMinutes}m total)
-                    </p>
-                    {stop.replacesArrivalMeal && (
-                      <p className="text-[11px] text-teal-800 font-medium mt-0.5">
-                        ✓ Replaces redundant 45m hotel arrival lunch allowance.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-            Direct journey (no highway pitstops selected).
-          </p>
-        )}
-
-        {/* Attraction summary */}
-        <div>
-          <span className="block text-xs font-bold text-slate-800 mb-2">Planned Attractions:</span>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {dest.activities.map(a => {
-              const isSkipped = activeInputs.disabledActivityIds.includes(a.id);
-              const aImg = getPlaceImage(a.id);
-              return (
-                <div
-                  key={a.id}
-                  className={`flex items-center gap-3 rounded-lg border p-2.5 text-xs ${
-                    isSkipped ? 'border-slate-200 bg-slate-100/60 opacity-60' : 'border-slate-200 bg-slate-50'
-                  }`}
-                >
-                  {aImg && (
-                    <img
-                      src={aImg.src}
-                      alt={aImg.alt}
-                      className="h-10 w-10 rounded-md object-cover flex-shrink-0"
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <strong className="block text-slate-900 truncate">{a.name}</strong>
-                    <span className="text-slate-500">
-                      {isSkipped ? 'Optional attraction skipped' : `${formatDuration(a.durationMinutes)} planned visit`}
-                    </span>
-                  </div>
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                      isSkipped ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-800'
-                    }`}
-                  >
-                    {isSkipped ? 'Skipped' : 'Included'}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Section C: Feasibility Result Card */}
-      <div className="rounded-2xl bg-[#0d352f] p-6 text-white shadow-sm space-y-4">
+      {/* Section B: Feasibility Verdict Card */}
+      <div className="rounded-2xl border border-slate-800 bg-[#20252E] p-6 text-white shadow-lg space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="rounded-full bg-emerald-900/60 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-200">
+          <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-3 py-1 text-xs font-bold uppercase tracking-wider text-blue-300">
             Feasibility Verdict
           </span>
-          <span className="text-xs text-emerald-200">MG Road reference</span>
+          <span className="text-xs text-slate-400">MG Road reference</span>
         </div>
 
         <div>
           <p className="text-3xl font-black tracking-tight">{r.rating}</p>
-          <p className="mt-1 text-sm text-emerald-100">{r.ratingExplanation}</p>
+          <p className="mt-1 text-sm text-slate-300">{r.ratingExplanation}</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 border-t border-emerald-900/50 pt-4 text-sm">
+        <div className="grid grid-cols-2 gap-4 border-t border-slate-800 pt-4 text-sm">
           <div>
-            <p className="text-xs text-emerald-300">Usable destination free time</p>
+            <p className="text-xs text-slate-400">Usable destination free time</p>
             <strong className="text-2xl font-black text-white">
               {formatDuration(r.destinationSlackMinutes)}
             </strong>
           </div>
           <div>
-            <p className="text-xs text-emerald-300">Return deadline margin</p>
+            <p className="text-xs text-slate-400">Return deadline margin</p>
             <strong
               className={`text-2xl font-black ${
-                r.returnDeadlineMarginMinutes < 0 ? 'text-red-300' : 'text-white'
+                r.returnDeadlineMarginMinutes < 0 ? 'text-red-400' : 'text-emerald-400'
               }`}
             >
               {formatDuration(r.returnDeadlineMarginMinutes, true)}
@@ -390,7 +307,7 @@ export default function ReviewScreen({ inputs }: Props) {
           </div>
         </div>
 
-        <div className="border-t border-emerald-900/50 pt-3 text-xs text-emerald-200 space-y-1">
+        <div className="border-t border-slate-800 pt-3 text-xs text-slate-300 space-y-1">
           <p>
             Expected home: <strong>{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>
           </p>
@@ -398,109 +315,248 @@ export default function ReviewScreen({ inputs }: Props) {
             Estimated cost: <strong>₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person</strong> (₹{r.estimatedTripTotalINR.toLocaleString('en-IN')} total for party of {activeInputs.partySize})
           </p>
         </div>
+      </div>
 
-        {/* Violations / Advisories if any */}
-        {r.violations.length > 0 && (
-          <div className="border-t border-emerald-900/50 pt-3 space-y-2">
-            {r.violations.map((v, i) => (
-              <div
-                key={i}
-                className={`rounded-lg p-2.5 text-xs font-medium ${
-                  v.severity === 'BLOCKER'
-                    ? 'bg-red-950/80 text-red-200 border border-red-800'
-                    : 'bg-amber-950/80 text-amber-200 border border-amber-800'
-                }`}
-              >
-                <strong>{v.severity}:</strong> {v.message}
+      {/* Section C: Route & Stop Highlights with External Links */}
+      <div className="space-y-4 rounded-2xl border border-slate-800 bg-[#20252E] p-5 sm:p-6 shadow-lg">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-white">Route & Landmark Destinations</h2>
+          <a
+            href={googleMapsDirectionsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-bold text-blue-400 hover:underline"
+          >
+            Open in Google Maps ↗
+          </a>
+        </div>
+
+        {/* Selected Pitstop Highlight */}
+        {selectedStops.length > 0 && (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-950/20 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <span className="font-bold text-amber-300 text-xs uppercase tracking-wider">
+                ☕ Highway Pitstop
+              </span>
+              <span className="rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 text-[11px] font-bold">
+                Maddur Tiffanys
+              </span>
+            </div>
+            {selectedStops.map(stop => (
+              <div key={stop.id} className="flex gap-3 items-center">
+                <div className="text-xs text-slate-300 flex-1">
+                  <strong className="block text-sm text-white">{stop.name}</strong>
+                  <p className="text-slate-400 mt-0.5">
+                    Est. Dwell: {stop.dwellMinutes}m · Detour: {stop.detourMinutes}m (+{stop.dwellMinutes + stop.detourMinutes}m total)
+                  </p>
+                </div>
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.name)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-lg bg-[#292F39] px-3 py-1.5 text-xs font-bold text-blue-300 hover:text-white transition-colors"
+                >
+                  Directions ↗
+                </a>
               </div>
             ))}
           </div>
         )}
+
+        {/* Planned Attractions */}
+        <div className="space-y-2">
+          <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
+            Planned Attractions & Landmarks
+          </span>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {dest.activities.map(a => {
+              const isSkipped = activeInputs.disabledActivityIds.includes(a.id);
+              const aImg = getPlaceImage(a.id);
+              return (
+                <div
+                  key={a.id}
+                  className={`flex items-center gap-3 rounded-xl border p-2.5 text-xs ${
+                    isSkipped ? 'border-slate-800 bg-[#15191F]/60 opacity-60' : 'border-slate-700 bg-[#15191F]'
+                  }`}
+                >
+                  {aImg && (
+                    <img
+                      src={aImg.src}
+                      alt={aImg.alt}
+                      className="h-10 w-10 rounded-lg object-cover flex-shrink-0"
+                    />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <strong className="block text-white truncate">{a.name}</strong>
+                    <span className="text-slate-400">
+                      {isSkipped ? 'Skipped' : `${formatDuration(a.durationMinutes)} planned visit`}
+                    </span>
+                  </div>
+                  {!isSkipped && (
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a.name + ', ' + dest.name)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded bg-[#292F39] px-2 py-1 text-[10px] font-bold text-blue-400 hover:text-white transition-colors"
+                      title="Search landmark on Google Maps"
+                    >
+                      Map ↗
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
-      {/* Section D: Summary Preview Card */}
-      <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm">
+      {/* Section D: Day-by-Day Itinerary Review Card */}
+      <div className="space-y-5 rounded-2xl border border-slate-800 bg-[#20252E] p-5 sm:p-6 shadow-lg">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">Trip Summary Text</h2>
-            <p className="text-xs text-slate-500">
-              Formatted plain-text overview ready for messaging and itinerary notes.
+            <h2 className="text-base font-bold text-white">Day-by-Day Itinerary Review</h2>
+            <p className="text-xs text-slate-400">
+              Hour-by-hour breakdown of highway driving, stops, and leisure windows.
             </p>
           </div>
-          <span className="rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-800">
-            Snapshot
+          <span className="rounded-full bg-blue-500/20 border border-blue-500/30 px-3 py-1 text-xs font-bold text-blue-300">
+            Verified Engine Schedule
           </span>
         </div>
 
-        <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono text-xs text-slate-800 leading-relaxed">
-          {summaryText}
-        </pre>
+        {/* Day 1 & Day 2 Sections */}
+        {([1, 2] as const).map(day => {
+          const items = r.timeline.filter(t => t.day === day && t.category !== 'REST');
+          const dayDate = day === 1 ? day1Start : day2Start;
+          return (
+            <div key={day} className="rounded-xl border border-slate-800 bg-[#15191F] p-4 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <h3 className="text-sm font-extrabold text-white uppercase tracking-wide">
+                  Day {day} {dayDate && <span className="text-xs font-normal text-slate-400 lowercase">· {formatReadableDate(dayDate)}</span>}
+                </h3>
+                <span className="text-[11px] font-semibold text-slate-500">
+                  {items.length} segments
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {items.map(item => {
+                  const isPitstop = item.category === 'PITSTOP';
+                  const isFree = item.category === 'FREE';
+                  const isDrive = item.category === 'DRIVE';
+                  const isActivity = item.category === 'ACTIVITY';
+                  const duration = Math.round((parseIST(item.endTime) - parseIST(item.startTime)) / 60_000);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`flex items-center justify-between gap-3 rounded-lg border p-2.5 text-xs transition-colors ${
+                        isFree
+                          ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-200 font-medium'
+                          : isPitstop
+                          ? 'border-amber-500/40 bg-amber-950/30 text-amber-200 font-semibold'
+                          : isDrive
+                          ? 'border-blue-500/30 bg-blue-950/20 text-blue-200'
+                          : isActivity
+                          ? 'border-purple-500/30 bg-purple-950/20 text-purple-200'
+                          : 'border-slate-800 bg-[#20252E] text-slate-200'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <span className="font-semibold text-white">{item.label}</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0 text-slate-400">
+                        <span>
+                          {formatTimelineTime(item.startTime)} - {formatTimelineTime(item.endTime)}
+                        </span>
+                        <span className="font-bold text-slate-300">({formatDuration(duration)})</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Expandable Plain-Text Preview for Copying */}
+        <details className="group border-t border-slate-800 pt-3">
+          <summary className="cursor-pointer text-xs font-bold text-blue-400 hover:text-blue-300 select-none flex items-center justify-between">
+            <span>Show plain-text messaging preview</span>
+            <span className="group-open:rotate-180 transition-transform">▼</span>
+          </summary>
+          <div className="mt-3">
+            <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-800 bg-[#15191F] p-4 text-xs text-slate-300 font-mono leading-relaxed">
+              {summaryText}
+            </pre>
+          </div>
+        </details>
       </div>
 
-      {/* Section E: Sharing & Review Actions */}
-      <div className="space-y-4 rounded-2xl border border-teal-300 bg-white p-5 sm:p-6 shadow-sm">
+      {/* Section E: Save & Share Actions */}
+      <div className="space-y-4 rounded-2xl border border-blue-500/40 bg-[#20252E] p-5 sm:p-6 shadow-lg">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Share Trip With Friends</h2>
-          <p className="text-xs text-slate-500">
-            Invite your crew to view this interactive snapshot or send readable WhatsApp text.
+          <h2 className="text-base font-bold text-white">Save & Share Trip</h2>
+          <p className="text-xs text-slate-400">
+            Save this itinerary to your browser storage, or share with your crew via WhatsApp.
           </p>
         </div>
 
-        {isLocalhost && (
-          <p className="rounded-lg bg-amber-50 p-2.5 text-xs text-amber-900">
-            ⚠️ <strong>Local environment detected:</strong> Links generated on localhost will only work on this machine. Deploy to Vercel for cross-device links.
-          </p>
-        )}
+        {/* Primary Action Buttons: Save My Trip & Copy Share Link */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            onClick={handleSaveTrip}
+            className={`w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-sm font-bold text-white shadow-md transition-all cursor-pointer ${
+              savedSuccess
+                ? 'bg-emerald-600 hover:bg-emerald-700'
+                : 'bg-[#2962FF] hover:bg-blue-600'
+            }`}
+          >
+            <span>{savedSuccess ? '✓' : '💾'}</span>
+            <span>{savedSuccess ? 'Saved to My Trip!' : 'Save My Trip (This Device)'}</span>
+          </button>
 
-        <p className="text-xs text-slate-500 italic">
-          Shared trip snapshot. Changes are not synchronized automatically.
-        </p>
+          <button
+            onClick={handleCopyTripLink}
+            className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-[#292F39] py-3.5 px-4 text-sm font-bold text-white shadow-md hover:bg-slate-700 active:scale-[0.99] transition-all cursor-pointer"
+          >
+            <span>🔗</span>
+            <span>Share Trip (Copy Link)</span>
+          </button>
+        </div>
 
-        {/* Primary CTA */}
-        <button
-          onClick={handleCopyTripLink}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#0d6350] px-5 py-4 text-base font-bold text-white shadow-md hover:bg-[#0b4b3d] active:scale-[0.99] transition-all cursor-pointer"
-        >
-          <span>🔗</span> Share Trip With Friends (Copy Link)
-        </button>
-
-        {/* Secondary Actions */}
+        {/* WhatsApp Sharing Actions */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
           <button
             onClick={handleShareInviteWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-3.5 py-3 text-xs font-bold text-white shadow-sm hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-3.5 py-3 text-xs font-bold text-white shadow-md hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
           >
             <span>💬</span> WhatsApp Invite
           </button>
           <button
             onClick={handleCopySummary}
-            className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-xs font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-[#15191F] px-3.5 py-3 text-xs font-bold text-slate-200 hover:text-white shadow-sm hover:bg-slate-800 active:scale-[0.99] transition-all cursor-pointer"
           >
-            <span>📋</span> Copy Summary Text
+            <span>📋</span> Copy Text Summary
           </button>
           <button
             onClick={handleShareSummaryWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-xs font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-[#15191F] px-3.5 py-3 text-xs font-bold text-slate-200 hover:text-white shadow-sm hover:bg-slate-800 active:scale-[0.99] transition-all cursor-pointer"
           >
             <span>💬</span> WhatsApp Summary
           </button>
         </div>
 
-        {/* Edit My Trip Back Link */}
-        <div className="pt-2 text-center border-t border-slate-100">
-          <Link
-            to={editUrl}
-            className="inline-flex items-center gap-1 text-sm font-semibold text-teal-800 hover:underline"
-          >
-            ← Edit My Trip (return to Screen 3)
-          </Link>
-        </div>
+        {/* Local Storage Disclosure */}
+        <p className="text-[11px] text-slate-400 bg-[#15191F] p-3 rounded-xl border border-slate-800 leading-relaxed">
+          ℹ️ <strong>Account-Free Storage:</strong> "Save My Trip" bookmarks your plan locally in this browser. No login or account required. Clearing browser cache will remove it. To share across devices or with your crew, use the WhatsApp invitation link.
+        </p>
 
         {/* Toast confirmation feedback */}
         {toastMessage && (
           <p
             role="status"
-            className="text-center text-sm font-semibold text-teal-700 animate-fade-in py-1"
+            className="text-center text-sm font-semibold text-blue-400 animate-fade-in py-1"
           >
             ✓ {toastMessage}
           </p>

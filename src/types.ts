@@ -14,8 +14,8 @@ export interface UserConstraints {
   departureDateTime: string; // YYYY-MM-DDTHH:mm interpreted as IST
   returnDeadlineDateTime: string; // YYYY-MM-DDTHH:mm interpreted as IST
   pace: PacePreference;
-  perPersonBudgetINR: number; // preset 3000 | 6000 | 10000
-  partySize: number; // default 2; UI may keep this fixed
+  perPersonBudgetINR: number; // ₹1,000 to ₹30,000 (or custom ₹500 to ₹1,00,000)
+  partySize: number; // 1 to 10 (solo is 1, group is 2 to 10)
   drivingAdjustmentMinutes: number; // -60 through +120, multiples of 15
   simulateDelayMinutes: 0 | 60; // outbound only
   disabledActivityIds: string[]; // only optional activities may be disabled

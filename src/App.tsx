@@ -7,6 +7,7 @@ import CompareScreen from './screens/CompareScreen';
 import ScheduleScreen from './screens/ScheduleScreen';
 import ReviewScreen from './screens/ReviewScreen';
 import BottomNav from './components/BottomNav';
+import ScrollToTop from './components/ScrollToTop';
 
 function upcomingWeekend(): [string, string] {
   const nowIST = new Date(Date.now() + 330 * 60_000);
@@ -42,6 +43,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F4F9FC] text-[#193953] flex flex-col font-sans selection:bg-[#176EA8] selection:text-white">
+      <ScrollToTop />
       {/* Sticky Top Header */}
       <header className="sticky top-0 z-40 border-b border-[#E1ECF2] bg-white/95 backdrop-blur-md shadow-xs">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:py-3.5">

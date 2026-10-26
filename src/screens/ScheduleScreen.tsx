@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Dispatch, SetStateAction } from 'react';
 import type { CustomPlannedActivity, UserConstraints } from '../types';
 import { getDestination } from '../data/destinations';
+import { getDestinationGuide } from '../data/destinationGuides';
 import { getCompatiblePitstops } from '../data/pitstops.js';
 import { evaluateFeasibility, parseIST } from '../engine/scheduler';
 import TripMap from '../components/TripMap';
@@ -50,6 +51,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   const [planFormName, setPlanFormName] = useState('');
   const [planFormDuration, setPlanFormDuration] = useState(60);
   const [planFormCost, setPlanFormCost] = useState(0);
+  const [planCategory, setPlanCategory] = useState<'food' | 'sightseeing' | 'shopping' | 'walks' | 'relaxation' | 'custom'>('food');
 
   // Parse shareable URL query parameters if present
   const parsedTrip = useMemo(() => {
@@ -152,7 +154,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
     });
   };
 
-  // Free-Time Custom Activity Handlers (Gate 4)
+  // Free-Time Custom Activity Handlers (Gate 4 & Gate 6)
   const openPlanSlotModal = (slot: { day: number; startTime: string; endTime: string }, editActivity?: CustomPlannedActivity) => {
     const maxDur = Math.round((parseIST(slot.endTime) - parseIST(slot.startTime)) / 60_000);
     setPlanningSlot({
@@ -166,10 +168,12 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       setPlanFormName(editActivity.name);
       setPlanFormDuration(editActivity.durationMinutes);
       setPlanFormCost(editActivity.costPerPersonINR || 0);
+      setPlanCategory('custom');
     } else {
       setPlanFormName('');
-      setPlanFormDuration(Math.min(90, maxDur));
+      setPlanFormDuration(Math.min(60, maxDur));
       setPlanFormCost(0);
+      setPlanCategory('food');
     }
   };
 
@@ -868,45 +872,197 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
               </button>
             </div>
 
-            {/* Quick Suggestions */}
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-[#5A7184] mb-1.5">
-                Quick Suggested Ideas
+            {/* Categorized Options Selector (Gate 6) */}
+            <div className="space-y-3">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-[#5A7184]">
+                Choose Activity Category
               </label>
-              <div className="grid grid-cols-2 gap-2 text-xs">
+
+              {/* Category Filter Chips */}
+              <div className="flex flex-wrap gap-1.5 pb-1">
                 {[
-                  { name: 'Resort Pool & Spa Relaxation', mins: 60, cost: 0 },
-                  { name: 'Sunset Coffee & Scenic Walk', mins: 60, cost: 200 },
-                  { name: 'Local Souvenir Market & Street Food', mins: 90, cost: 300 },
-                  { name: 'Cultural Heritage Walk', mins: 90, cost: 150 },
-                ].map((sugg, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => {
-                      setPlanFormName(sugg.name);
-                      setPlanFormDuration(Math.min(planningSlot.maxDuration, sugg.mins));
-                      setPlanFormCost(sugg.cost);
-                    }}
-                    className="rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-2.5 text-left hover:border-[#176EA8]/40 hover:bg-[#DDF0F6] transition-all cursor-pointer"
-                  >
-                    <strong className="block text-[#193953]">{sugg.name}</strong>
-                    <span className="text-[10px] text-[#5A7184]">{sugg.mins}m · {sugg.cost ? `₹${sugg.cost}` : 'Free'}</span>
-                  </button>
-                ))}
+                  { id: 'food', label: '🍽️ Food & Cafés' },
+                  { id: 'sightseeing', label: '🏛️ Sightseeing' },
+                  { id: 'shopping', label: '🛍️ Shopping' },
+                  { id: 'walks', label: '🌲 Scenic Walks' },
+                  { id: 'relaxation', label: '🌿 Relaxation' },
+                  { id: 'custom', label: '✏️ Custom Input' },
+                ].map(cat => {
+                  const isSel = planCategory === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setPlanCategory(cat.id as typeof planCategory)}
+                      className={`rounded-xl px-2.5 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+                        isSel
+                          ? 'bg-[#176EA8] text-white shadow-2xs'
+                          : 'bg-[#F4F9FC] border border-[#E1ECF2] text-[#5A7184] hover:border-[#176EA8]/40 hover:text-[#193953]'
+                      }`}
+                    >
+                      {cat.label}
+                    </button>
+                  );
+                })}
               </div>
+
+              {/* Category Presets (Realistic, No Fabricated Prices) */}
+              {planCategory !== 'custom' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {(
+                    (planCategory === 'food'
+                      ? [
+                          {
+                            name: 'Traditional Regional Lunch / Thali',
+                            mins: 60,
+                            desc: 'Wholesome vegetarian thali or authentic regional lunch spread.',
+                          },
+                          {
+                            name: 'Local Breakfast & Heritage Tiffin (Dosa & Coffee)',
+                            mins: 45,
+                            desc: 'Iconic heritage tiffin room stop for crispy dosas and filter coffee.',
+                          },
+                          {
+                            name: 'Plantation / Specialty Coffee Café Stop',
+                            mins: 45,
+                            desc: 'Scenic café break featuring freshly brewed local coffee & light snacks.',
+                          },
+                          {
+                            name: 'Casual Local Cuisine Dinner',
+                            mins: 60,
+                            desc: 'Relaxed dinner exploring regional dishes in a comfortable local setting.',
+                          },
+                        ]
+                      : planCategory === 'sightseeing'
+                      ? [
+                          {
+                            name: 'Historic Heritage Walk & Architecture',
+                            mins: 60,
+                            desc: 'Explore historic quarters, colonial bungalows, or heritage streetscapes.',
+                          },
+                          {
+                            name: 'Panoramic Hilltop Viewpoint',
+                            mins: 45,
+                            desc: 'Short trip to an elevated scenic overlook for landscape photography.',
+                          },
+                          {
+                            name: 'Sacred Temple / Cultural Landmark Visit',
+                            mins: 45,
+                            desc: 'Peaceful exploration of local architecture, courtyards and traditions.',
+                          },
+                        ]
+                      : planCategory === 'shopping'
+                      ? [
+                          {
+                            name: 'Spice, Tea & Coffee Plantation Bazaar',
+                            mins: 45,
+                            desc: 'Sample and purchase fresh estate spices, cardamom, tea leaves & coffee.',
+                          },
+                          {
+                            name: 'Local Artisan Handicrafts & Silks',
+                            mins: 60,
+                            desc: 'Authentic regional textiles, sandalwood carvings, pottery and souvenirs.',
+                          },
+                        ]
+                      : planCategory === 'walks'
+                      ? [
+                          {
+                            name: 'Golden Hour Sunset Promenade',
+                            mins: 45,
+                            desc: 'Scenic walk along ridge trails or lakeside paths during sunset.',
+                          },
+                          {
+                            name: 'Botanical Garden & Nature Trail',
+                            mins: 60,
+                            desc: 'Shaded walking path through flora, tea gardens, and lush greenery.',
+                          },
+                        ]
+                      : [
+                          {
+                            name: 'Resort Pool & Balcony Downtime',
+                            mins: 90,
+                            desc: 'Unwind at stay with fresh tea, reading, or quiet poolside relaxation.',
+                          },
+                          {
+                            name: 'Traditional Ayurvedic Wellness Session',
+                            mins: 60,
+                            desc: 'Natural herbal rejuvenation treatment or steam bath.',
+                          },
+                        ]
+                    )
+                  ).map((sugg, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        setPlanFormName(sugg.name);
+                        setPlanFormDuration(Math.min(planningSlot.maxDuration, sugg.mins));
+                        setPlanFormCost(0);
+                      }}
+                      className="rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3 text-left hover:border-[#176EA8]/50 hover:bg-[#DDF0F6] transition-all cursor-pointer group"
+                    >
+                      <div className="flex items-start justify-between gap-1">
+                        <strong className="block text-xs font-bold text-[#193953] group-hover:text-[#176EA8]">
+                          {sugg.name}
+                        </strong>
+                        <span className="text-[10px] font-semibold text-[#176EA8] bg-white border border-[#BAE3F1] rounded-md px-1.5 py-0.5 whitespace-nowrap">
+                          {sugg.mins}m
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-[#5A7184] leading-snug">
+                        {sugg.desc}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Custom Input Form */}
+            {/* Destination Curated Ideas (from Timing-Aware Guide) */}
+            {(() => {
+              const guide = getDestinationGuide(dest.id, availableDays.length, currentInputs.pace);
+              if (!guide || guide.freeTimeIdeas.length === 0) return null;
+              return (
+                <div className="space-y-2 pt-2 border-t border-[#E1ECF2]">
+                  <span className="block text-xs font-semibold uppercase tracking-wider text-[#176EA8]">
+                    🌟 Curated Ideas for {dest.name}
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    {guide.freeTimeIdeas.map((idea, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          setPlanFormName(idea.title);
+                          setPlanFormDuration(Math.min(planningSlot.maxDuration, idea.durationMins));
+                          setPlanFormCost(0);
+                        }}
+                        className="rounded-xl border border-[#BAE3F1] bg-[#DDF0F6]/40 p-2.5 text-left hover:border-[#176EA8] hover:bg-[#DDF0F6] transition-all cursor-pointer"
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <strong className="text-xs text-[#193953] truncate">{idea.title}</strong>
+                          <span className="text-[10px] text-[#176EA8] font-bold">{idea.durationMins}m</span>
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-[#5A7184] line-clamp-2 leading-tight">
+                          {idea.description}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Activity Details / Fine-Tuning Form */}
             <div className="space-y-3 pt-2 border-t border-[#E1ECF2]">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-[#193953]">
-                  Activity Name
+                  Activity Title
                 </label>
                 <input
                   type="text"
                   maxLength={60}
-                  placeholder="e.g. Ayurvedic Massage, Boat Ride, Cafe Hop"
+                  placeholder="e.g. Traditional Thali Lunch, Ayurvedic Massage, Evening Walk"
                   value={planFormName}
                   onChange={e => setPlanFormName(e.target.value)}
                   className="mt-1 block w-full rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3 text-sm text-[#193953] focus:border-[#176EA8] focus:bg-white focus:outline-none"
@@ -927,7 +1083,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                     onChange={e => setPlanFormDuration(parseInt(e.target.value, 10) || 15)}
                     className="mt-1 block w-full rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3 text-sm text-[#193953] focus:border-[#176EA8] focus:bg-white focus:outline-none"
                   />
-                  <span className="text-[10px] text-[#5A7184]">Max: {planningSlot.maxDuration}m available</span>
+                  <span className="text-[10px] text-[#5A7184]">Max: {planningSlot.maxDuration}m slot available</span>
                 </div>
 
                 <div>
@@ -942,13 +1098,13 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                     onChange={e => setPlanFormCost(Math.max(0, parseInt(e.target.value, 10) || 0))}
                     className="mt-1 block w-full rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3 text-sm text-[#193953] focus:border-[#176EA8] focus:bg-white focus:outline-none"
                   />
-                  <span className="text-[10px] text-[#5A7184]">Optional ticket/entry fee</span>
+                  <span className="text-[10px] text-[#5A7184]">Optional ticket/meal budget</span>
                 </div>
               </div>
 
               {/* Live Remaining Free Time Calculation */}
               <div className="rounded-xl bg-[#DDF0F6] border border-[#176EA8]/20 p-2.5 text-xs text-[#193953] flex items-center justify-between">
-                <span>Remaining usable free time:</span>
+                <span>Remaining usable free time in this slot:</span>
                 <strong className="text-sm text-[#176EA8]">
                   {formatDuration(Math.max(0, planningSlot.maxDuration - planFormDuration))}
                 </strong>

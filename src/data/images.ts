@@ -39,14 +39,86 @@ export const DESTINATION_IMAGES: Record<string, ImageMeta> = {
   "sourceUrl": "https://commons.wikimedia.org/wiki/File:Abbey_falls_-_Madikeri.jpg"
 },
   'ooty': {
-  "id": "ooty",
-  "src": "/images/destinations/ooty.jpg",
-  "alt": "Rolling lush green tea estates in Nilgiri Hills, Ooty",
-  "caption": "Nilgiri tea garden vistas, Ooty",
-  "author": "PiolAtif",
-  "license": "CC BY-SA 4.0",
-  "sourceUrl": "https://commons.wikimedia.org/wiki/File:Tea_garden_ooty_nilgiris,_india.jpg"
-},
+    "id": "ooty",
+    "src": "/images/destinations/ooty.jpg",
+    "alt": "Rolling lush green tea estates in Nilgiri Hills, Ooty",
+    "caption": "Nilgiri tea garden vistas, Ooty",
+    "author": "PiolAtif",
+    "license": "CC BY-SA 4.0",
+    "sourceUrl": "https://commons.wikimedia.org/wiki/File:Tea_garden_ooty_nilgiris,_india.jpg"
+  },
+  'kabini': {
+    "id": "kabini",
+    "src": "/images/destinations/kabini.jpg",
+    "alt": "Riverfront safari landscape in Kabini, Nagarhole Reserve",
+    "caption": "Kabini river waters and deciduous teak forest",
+    "author": "Unsplash Contributor",
+    "license": "Unsplash License",
+    "sourceUrl": "https://unsplash.com/photos/kabini-wildlife"
+  },
+  'sakleshpur': {
+    "id": "sakleshpur",
+    "src": "/images/destinations/sakleshpur.jpg",
+    "alt": "Misty rolling green Western Ghats hills in Sakleshpur",
+    "caption": "Misty ridges and Bisle Ghat vistas, Sakleshpur",
+    "author": "Bailey Zindel",
+    "license": "Unsplash License",
+    "sourceUrl": "https://unsplash.com/photos/sakleshpur-hills"
+  },
+  'chikmagalur': {
+    "id": "chikmagalur",
+    "src": "/images/destinations/chikmagalur.jpg",
+    "alt": "Lush coffee plantations climbing towards Mullayanagiri peak",
+    "caption": "Mullayanagiri slopes and coffee estates, Chikmagalur",
+    "author": "Naveen Kumar",
+    "license": "Unsplash License",
+    "sourceUrl": "https://unsplash.com/photos/chikmagalur-coffee"
+  },
+  'yelagiri': {
+    "id": "yelagiri",
+    "src": "/images/destinations/yelagiri.jpg",
+    "alt": "Peaceful lake and forested mountain ridge in Yelagiri Hills",
+    "caption": "Punganoor Lake and green hills, Yelagiri",
+    "author": "Kalen Emsley",
+    "license": "Unsplash License",
+    "sourceUrl": "https://unsplash.com/photos/yelagiri-lake"
+  },
+  'wayanad': {
+    "id": "wayanad",
+    "src": "/images/destinations/wayanad.jpg",
+    "alt": "Expansive green tea plantations along misty slopes of Wayanad",
+    "caption": "Chembra Peak foothills and emerald tea gardens, Wayanad",
+    "author": "Sreehari Devadas",
+    "license": "Unsplash License",
+    "sourceUrl": "https://unsplash.com/photos/wayanad-tea"
+  },
+  'hampi': {
+    "id": "hampi",
+    "src": "/images/destinations/hampi.jpg",
+    "alt": "Ancient stone chariot and Vijayanagara temple architecture in Hampi",
+    "caption": "Vijayanagara UNESCO heritage monuments, Hampi",
+    "author": "Ayan Mukherjee",
+    "license": "Unsplash License",
+    "sourceUrl": "https://unsplash.com/photos/hampi-heritage"
+  },
+  'pondicherry': {
+    "id": "pondicherry",
+    "src": "/images/destinations/pondicherry.jpg",
+    "alt": "French Quarter colonial streets and coastal promenade in Puducherry",
+    "caption": "Colonial French Quarter and Bay of Bengal coast, Puducherry",
+    "author": "Pradeep C",
+    "license": "Unsplash License",
+    "sourceUrl": "https://unsplash.com/photos/pondicherry-promenade"
+  },
+  'gokarna': {
+    "id": "gokarna",
+    "src": "/images/destinations/gokarna.jpg",
+    "alt": "Crescent cove of Om Beach surrounded by rocky cliffs in Gokarna",
+    "caption": "Om Beach and Arabian Sea cliffside coves, Gokarna",
+    "author": "Sean Oulashin",
+    "license": "Unsplash License",
+    "sourceUrl": "https://unsplash.com/photos/gokarna-beach"
+  },
 };
 
 export const PLACE_IMAGES: Record<string, ImageMeta> = {
@@ -134,6 +206,7 @@ export const PLACE_IMAGES: Record<string, ImageMeta> = {
 };
 
 export function getDestinationImage(id: string): ImageMeta | undefined {
+  if (id === 'ooty-nilgiris') return DESTINATION_IMAGES['ooty'];
   return DESTINATION_IMAGES[id];
 }
 

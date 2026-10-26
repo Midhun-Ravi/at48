@@ -1,6 +1,7 @@
 import { Link } from 'react-router';
 import { DESTINATIONS } from '../data/destinations';
 import { getDestinationImage } from '../data/images';
+import TrustNote from '../components/TrustNote';
 
 export default function HomeScreen() {
   const heroImage = getDestinationImage('coorg-madikeri');
@@ -220,19 +221,8 @@ export default function HomeScreen() {
         </div>
       </section>
 
-      {/* Transparency & Disclaimer Box */}
-      <section className="rounded-2xl border border-[#BAE3F1] bg-[#F0F6FA] p-6 text-xs text-[#193953] space-y-2 leading-relaxed">
-        <div className="flex items-center gap-2 font-bold text-[#176EA8] text-sm">
-          <span>ℹ️</span>
-          <span>Transparency & Planning Scope</span>
-        </div>
-        <p>
-          <strong>Planning estimates only:</strong> @48 models weekend road trips originating from MG Road, Bengaluru with declared highway corridors and conservative 20% travel buffers. It does <em>not</em> claim live GPS routing, live traffic forecasting, or hotel availability.
-        </p>
-        <p>
-          <strong>Supported window:</strong> Escapes between 1 and 4 calendar dates. Operating hours and night-driving restrictions (such as Bandipur National Park) are validated against published operator rules. Always verify road conditions before departing.
-        </p>
-      </section>
+      {/* Compact Expandable Trust Note (Gate 7) */}
+      <TrustNote />
 
       {/* Bottom CTA Banner */}
       <section className="rounded-2xl border border-[#E1ECF2] bg-white text-[#193953] p-8 text-center space-y-4 shadow-sm">

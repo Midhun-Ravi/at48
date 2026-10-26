@@ -28,7 +28,7 @@ export default function BottomNav() {
       {/* Floating Bottom Navigation Bar */}
       <nav
         aria-label="Mobile Navigation"
-        className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[92%] max-w-md rounded-2xl border border-[#E1ECF2] bg-white/95 backdrop-blur-md px-3 py-2 shadow-xl"
+        className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[92%] max-w-md rounded-2xl border border-[#E1ECF2] bg-white/95 backdrop-blur-md px-3 py-2 shadow-xl mb-[env(safe-area-inset-bottom)]"
       >
         <div className="flex items-center justify-around">
           {/* Home */}
@@ -165,8 +165,8 @@ export default function BottomNav() {
 
               <div>
                 <div className="flex items-center gap-2 mb-2 pt-2 border-t border-[#E1ECF2]">
-                  <span className="text-xs font-bold uppercase tracking-wider text-amber-800">
-                    8 Corridors In Curation (Coming Soon)
+                  <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">
+                    More escapes to explore (8 Curated Destinations)
                   </span>
                 </div>
                 <div className="grid gap-2.5 sm:grid-cols-2">
@@ -177,8 +177,8 @@ export default function BottomNav() {
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-[#193953]">{c.name}</span>
-                        <span className="rounded bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 text-[9px] font-semibold">
-                          In Curation
+                        <span className="rounded bg-[#DDF0F6] text-[#176EA8] border border-[#BAE3F1] px-1.5 py-0.5 text-[9px] font-bold">
+                          Trip Inspiration
                         </span>
                       </div>
                       <p className="text-[11px] text-[#5A7184]">{c.routeName} ({c.approxDriveLabel})</p>

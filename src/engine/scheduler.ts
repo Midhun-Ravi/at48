@@ -506,17 +506,19 @@ export function evaluateFeasibility(
       let winCursor = win.begin;
       const winEnd = win.end;
 
-      // Find matching custom activity for this slot (by slotStart or next available)
-      const matchingIdx = dayCustoms.findIndex(ca => {
-        if (!ca.durationMinutes || ca.durationMinutes <= 0) return false;
-        if (ca.slotStart) {
-          const caEpoch = parseIST(ca.slotStart);
-          return caEpoch >= win.begin && caEpoch < win.end;
-        }
-        return true;
-      });
+      // Find matching custom activities for this slot (by slotStart or next available)
+      while (dayCustoms.length > 0 && winEnd > winCursor) {
+        const matchingIdx = dayCustoms.findIndex(ca => {
+          if (!ca.durationMinutes || ca.durationMinutes <= 0) return false;
+          if (ca.slotStart) {
+            const caEpoch = parseIST(ca.slotStart);
+            return caEpoch >= winCursor && caEpoch < winEnd;
+          }
+          return true;
+        });
 
-      if (matchingIdx !== -1 && winEnd > winCursor) {
+        if (matchingIdx === -1) break;
+
         const [matching] = dayCustoms.splice(matchingIdx, 1);
         // Also remove from outer customActivities
         const outerIdx = customActivities.indexOf(matching);

@@ -84,67 +84,69 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
 
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white">
+          <h1 className="text-3xl font-extrabold text-[#193953]">
             Where should we escape to?
           </h1>
-          <p className="mt-1 text-sm text-slate-300">
-            Intelligent recommendations for your <strong className="text-white">{numDays} calendar date(s)</strong> ({durationHours} hours). Usable leisure and return margins computed deterministically.
+          <p className="mt-1 text-sm text-[#5A7184]">
+            Intelligent recommendations for your <strong className="text-[#193953]">{numDays} calendar date(s)</strong> ({durationHours} hours). Usable leisure and return margins computed deterministically.
           </p>
         </div>
-        <Link to="/plan" className="text-xs font-semibold text-blue-400 hover:underline">
+        <Link to="/plan" className="text-xs font-semibold text-[#176EA8] hover:underline">
           ← Edit dates & budget
         </Link>
       </div>
 
       {/* Travel Pace Selector (with dynamic explanation) */}
-      <div className="rounded-2xl border border-slate-800 bg-[#20252E] p-4 sm:p-5 shadow-lg space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Travel Pace
+      <div className="rounded-2xl border border-[#E1ECF2] bg-white p-4 sm:p-5 shadow-sm space-y-3">
+        <div>
+          <span className="text-xs font-semibold uppercase tracking-wider text-[#5A7184]">
+            Travel Pace Preference
           </span>
-          <span className="text-xs font-bold text-blue-400">
-            {PACE_EXPLANATIONS[inputs.pace].title}
-          </span>
+          <p className="text-xs text-[#5A7184] mt-0.5">
+            Adjusts allocated duration at attractions, arrival dining times, and morning departure schedules.
+          </p>
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          {(['relaxed', 'balanced', 'packed'] as const).map(p => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => handlePaceChange(p)}
-              className={`rounded-xl border py-2.5 px-3 text-xs sm:text-sm capitalize font-bold transition-all cursor-pointer ${
-                inputs.pace === p
-                  ? 'border-[#2962FF] bg-[#2962FF] text-white shadow-md shadow-[#2962FF]/40'
-                  : 'border-slate-700 bg-[#15191F] text-slate-300 hover:border-slate-600'
-              }`}
-            >
-              {p}
-            </button>
-          ))}
+          {(['relaxed', 'balanced', 'packed'] as const).map(p => {
+            const isSelected = activeInputs.pace === p;
+            return (
+              <button
+                key={p}
+                type="button"
+                onClick={() => handlePaceChange(p)}
+                className={`rounded-xl border px-3 py-2.5 text-xs font-bold capitalize transition-all cursor-pointer ${
+                  isSelected
+                    ? 'border-[#176EA8] bg-[#176EA8] text-white shadow-xs'
+                    : 'border-[#E1ECF2] bg-[#F4F9FC] text-[#5A7184] hover:border-slate-300 hover:text-[#193953]'
+                }`}
+              >
+                {p === 'relaxed' ? '🌿 Relaxed' : p === 'balanced' ? '⚖️ Balanced' : '⚡ Packed'}
+              </button>
+            );
+          })}
         </div>
 
-        <p className="text-xs text-slate-300 leading-relaxed bg-[#15191F] p-3 rounded-xl border border-slate-800">
-          ℹ️ {PACE_EXPLANATIONS[inputs.pace].desc}
-        </p>
+        {/* Dynamic Contextual Pace Explanation Banner */}
+        <div className="rounded-xl bg-[#DDF0F6] border border-[#176EA8]/20 p-3 text-xs text-[#193953] leading-relaxed">
+          <strong className="text-[#176EA8]">{PACE_EXPLANATIONS[activeInputs.pace].title}:</strong>{' '}
+          {PACE_EXPLANATIONS[activeInputs.pace].desc}
+        </div>
       </div>
 
-      {/* Baseline disclosure banner */}
-      <div className="flex items-center gap-3 rounded-2xl border border-blue-900/40 bg-blue-950/20 p-4 text-xs text-slate-300">
-        <span className="text-base flex-shrink-0">📍</span>
-        <p className="leading-relaxed">
-          <strong>Baseline disclosure:</strong> Driving times are planning estimates from MG Road, Bengaluru with 20% safety contingency. Adjust each destination card independently below if your starting area requires more or less driving time.
-        </p>
-      </div>
-
-      {/* Verified Destination Comparison Cards (Sorted by Duration-Aware Recommendation) */}
+      {/* Verified Destination Comparison Cards (Ranked Deterministically) */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-white">
-            Verified Itineraries ({verifiedRecs.length})
-          </h2>
-          <span className="text-xs text-slate-400">
-            Ranked for {numDays}-day getaway
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E1ECF2] pb-2">
+          <div>
+            <h2 className="text-lg font-bold text-[#193953]">
+              Verified Weekend Destinations ({verifiedRecs.length} Schedulable)
+            </h2>
+            <p className="text-xs text-[#5A7184]">
+              Ranked dynamically by usable daylight leisure time and comfortable return buffers.
+            </p>
+          </div>
+          <span className="rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-800">
+            ✓ Deterministic Calculations
           </span>
         </div>
 
@@ -152,87 +154,83 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
           {verifiedRecs.map(rec => {
             const d = rec.destination!;
             const r = rec.feasibility!;
-            const adj = getAdj(d.id);
             const img = getDestinationImage(d.id);
-
-            const ratingBadgeColor =
-              r.rating === 'Comfortable'
-                ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40'
-                : r.rating === 'Tight'
-                ? 'bg-amber-950/60 text-amber-300 border border-amber-500/40'
-                : 'bg-red-950/60 text-red-300 border border-red-500/40';
+            const adj = getAdj(d.id);
 
             return (
               <article
                 key={d.id}
-                className="flex flex-col justify-between rounded-2xl border border-slate-800 bg-[#20252E] p-5 shadow-lg transition-all hover:border-slate-700"
+                className="flex flex-col justify-between rounded-2xl border border-[#E1ECF2] bg-white p-5 shadow-sm transition-all hover:shadow-md"
               >
                 <div className="space-y-4">
-                  {/* Destination Hero Photograph with Fixed Aspect Ratio */}
-                  <div className="relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-slate-900 shadow-inner">
-                    {img ? (
+                  {/* Card Header with Badges */}
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-xl font-black text-[#193953]">{d.name}</h3>
+                          {rec.tierLabel && (
+                            <span className="rounded-md bg-[#176EA8] text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                              {rec.tierLabel}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#5A7184] mt-0.5">{d.routeName}</p>
+                      </div>
+
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-bold border ${
+                          r.rating === 'Comfortable'
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                            : r.rating === 'Tight'
+                            ? 'bg-amber-50 border-amber-200 text-amber-800'
+                            : 'bg-red-50 border-red-200 text-red-800'
+                        }`}
+                      >
+                        {r.rating}
+                      </span>
+                    </div>
+
+                    {rec.whyRecommended && (
+                      <p className="mt-2 text-xs font-semibold text-[#176EA8] bg-[#DDF0F6] px-2.5 py-1 rounded-lg">
+                        {rec.whyRecommended}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Destination Photography */}
+                  {img && (
+                    <div className="relative h-44 w-full overflow-hidden rounded-xl bg-slate-100 shadow-inner">
                       <img
                         src={img.src}
                         alt={img.alt}
                         loading="lazy"
                         className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-                        onError={e => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
                       />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-slate-800 text-3xl">
-                        🏞️
-                      </div>
-                    )}
-                    {img && (
-                      <div className="absolute bottom-2 right-2 rounded bg-black/75 px-2 py-0.5 text-[10px] text-white/95 backdrop-blur-sm pointer-events-none">
-                        Photo: {img.author} · {img.license}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Title & Badges */}
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h2 className="text-xl font-bold text-white">{d.name}</h2>
-                      <div className="flex items-center gap-1.5">
-                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${rec.tierBadgeClass}`}>
-                          {rec.tierLabel}
-                        </span>
-                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${ratingBadgeColor}`}>
-                          {r.rating}
-                        </span>
+                      <div className="absolute bottom-2 left-2 rounded-md bg-black/60 backdrop-blur-xs px-2 py-0.5 text-[10px] font-medium text-white">
+                        📍 {d.oneWayDistanceKm} km from Bengaluru (MG Road)
                       </div>
                     </div>
-                    <p className="text-xs font-semibold text-blue-400">
-                      {d.routeName} · {d.oneWayDistanceKm} km
-                    </p>
-                  </div>
+                  )}
 
-                  {/* Why Recommended Callout */}
-                  <div className="rounded-xl border border-blue-900/30 bg-blue-950/20 p-3 text-xs text-slate-300 leading-relaxed">
-                    <strong className="text-blue-300 block mb-0.5">Why this fits your trip:</strong>
-                    {rec.whyRecommended}
-                  </div>
-
-                  {/* Feasibility Metrics Box */}
-                  <div className="grid grid-cols-2 gap-2 rounded-xl bg-[#15191F] p-3 text-xs border border-slate-800">
+                  {/* Key Metrics Grid */}
+                  <div className="grid grid-cols-2 gap-3 rounded-xl bg-[#F4F9FC] p-3 text-xs border border-[#E1ECF2]">
                     <div>
-                      <span className="text-[11px] text-slate-400 block">Usable Leisure Time</span>
-                      <strong className="text-base text-white">
+                      <span className="text-[#5A7184] block">Usable Leisure Time:</span>
+                      <strong className="text-base text-[#193953]">
                         {formatDuration(r.destinationSlackMinutes)}
                       </strong>
                     </div>
+
                     <div>
-                      <span className="text-[11px] text-slate-400 block">Return Deadline Margin</span>
+                      <span className="text-[#5A7184] block">Return Deadline Margin:</span>
                       <strong
                         className={`text-base ${
                           r.returnDeadlineMarginMinutes >= 60
-                            ? 'text-emerald-400'
+                            ? 'text-emerald-700'
                             : r.returnDeadlineMarginMinutes >= 0
-                            ? 'text-amber-400'
-                            : 'text-red-400'
+                            ? 'text-amber-700'
+                            : 'text-red-700'
                         }`}
                       >
                         {formatDuration(r.returnDeadlineMarginMinutes)}
@@ -241,14 +239,14 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                   </div>
 
                   {/* Driving Time & Adjustment */}
-                  <div className="space-y-2 rounded-xl bg-[#15191F] p-3 text-xs border border-slate-800">
+                  <div className="space-y-2 rounded-xl bg-[#F4F9FC] p-3 text-xs border border-[#E1ECF2]">
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-slate-400 block">Estimated One-Way Drive:</span>
-                        <strong className="text-sm text-white">
+                        <span className="text-[#5A7184] block">Estimated One-Way Drive:</span>
+                        <strong className="text-sm text-[#193953]">
                           {formatDuration(r.outboundDriveMinutes)}
                         </strong>
-                        <span className="text-[10px] text-slate-500 block">
+                        <span className="text-[10px] text-[#5A7184] block">
                           (Baseline: {formatDuration(d.baselineOneWayDriveMinutes)} + 20% buffer{adj !== 0 ? ` ${adj > 0 ? `+${adj}` : adj}m adj` : ''})
                         </span>
                       </div>
@@ -258,19 +256,19 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                           type="button"
                           onClick={() => updateAdj(d.id, -15)}
                           disabled={adj <= -60}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#292F39] text-xs font-bold text-slate-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white border border-[#E1ECF2] text-xs font-bold text-[#193953] hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
                           title="Reduce driving time by 15m"
                         >
                           −15
                         </button>
-                        <span className="w-10 text-center text-xs font-bold text-blue-400">
+                        <span className="w-10 text-center text-xs font-bold text-[#176EA8]">
                           {adj > 0 ? `+${adj}m` : adj < 0 ? `${adj}m` : '0m'}
                         </span>
                         <button
                           type="button"
                           onClick={() => updateAdj(d.id, 15)}
                           disabled={adj >= 120}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#292F39] text-xs font-bold text-slate-300 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white border border-[#E1ECF2] text-xs font-bold text-[#193953] hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
                           title="Add 15m extra driving buffer"
                         >
                           +15
@@ -278,11 +276,11 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                       </div>
                     </div>
 
-                    <details className="text-[11px] text-slate-400 pt-1 border-t border-slate-800">
-                      <summary className="cursor-pointer text-blue-400 hover:underline">
+                    <details className="text-[11px] text-[#5A7184] pt-1 border-t border-[#E1ECF2]">
+                      <summary className="cursor-pointer text-[#176EA8] hover:underline">
                         Why adjust driving time? ▼
                       </summary>
-                      <p className="mt-1 text-slate-300 leading-relaxed">
+                      <p className="mt-1 text-[#5A7184] leading-relaxed">
                         Baseline driving assumes departure from Central Bengaluru (MG Road). If you're starting from Whitefield or North Bengaluru, add +30m to +45m to reflect city traffic before hitting the highway.
                       </p>
                     </details>
@@ -290,17 +288,17 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
 
                   {/* Night Curfew Warning if Applicable */}
                   {d.routeRestriction && (
-                    <div className="rounded-xl border border-amber-500/30 bg-amber-950/30 p-2.5 text-xs text-amber-200">
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
                       ⚠️ <strong>Night Curfew:</strong> {d.routeRestriction.name} ({d.routeRestriction.startTime}–{d.routeRestriction.endTime} closure).
                     </div>
                   )}
                 </div>
 
                 {/* Action Button */}
-                <div className="mt-5 pt-3 border-t border-slate-800">
+                <div className="mt-5 pt-3 border-t border-[#E1ECF2]">
                   <Link
                     to={`/schedule/${d.id}?${buildShareableParams(d.id, activeInputs).toString()}`}
-                    className="block w-full text-center rounded-xl bg-[#2962FF] py-3 text-sm font-bold text-white shadow-md shadow-[#2962FF]/40 hover:bg-blue-600 active:scale-[0.99] transition-all cursor-pointer"
+                    className="block w-full text-center rounded-xl bg-[#176EA8] py-3 text-sm font-bold text-white shadow-sm hover:bg-[#135a8a] active:scale-[0.99] transition-all cursor-pointer"
                   >
                     Customize Schedule →
                   </Link>
@@ -311,44 +309,48 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
         </div>
       </div>
 
-      {/* Candidate Destinations in Curation Section */}
-      <div className="space-y-4 rounded-2xl border border-slate-800 bg-[#20252E] p-5 sm:p-6 shadow-lg">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+      {/* Candidate Destinations in Curation Section (Gate 2: Compact Responsive List Rows) */}
+      <div className="space-y-4 rounded-2xl border border-[#E1ECF2] bg-white p-5 sm:p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E1ECF2] pb-3">
           <div>
-            <h2 className="text-base font-bold text-white">
+            <h2 className="text-base font-bold text-[#193953]">
               Destinations in Curation ({candidateRecs.length} Upcoming)
             </h2>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-[#5A7184]">
               Undergoing editorial field verification. Route geometries mapped from Bengaluru; verified schedules coming soon.
             </p>
           </div>
-          <span className="rounded-full bg-slate-800 border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-300">
+          <span className="rounded-full bg-[#F4F9FC] border border-[#E1ECF2] px-3 py-1 text-xs font-semibold text-[#5A7184]">
             Field Verification
           </span>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Compact, responsive list rows */}
+        <div className="divide-y divide-[#E1ECF2]">
           {candidateRecs.map(c => (
             <div
               key={c.id}
-              className="flex flex-col justify-between rounded-xl border border-slate-800 bg-[#15191F] p-3.5 text-xs space-y-2.5"
+              className="py-3.5 first:pt-1 last:pb-1 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
             >
-              <div>
-                <div className="flex items-start justify-between gap-1">
-                  <strong className="text-sm font-bold text-white">{c.name}</strong>
-                  <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 flex-shrink-0">
+              <div className="space-y-1 min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <strong className="text-sm font-bold text-[#193953]">{c.name}</strong>
+                  <span className="text-xs text-[#5A7184]">· {c.routeName}</span>
+                  <span className="rounded bg-[#F4F9FC] border border-[#E1ECF2] px-2 py-0.5 text-[11px] font-semibold text-[#176EA8]">
                     {c.approxDriveLabel}
                   </span>
                 </div>
-                <span className="block text-[11px] text-blue-400 mt-0.5">{c.routeName}</span>
-                <p className="mt-2 text-slate-300 text-[11px] leading-relaxed">
+                <p className="text-xs text-[#5A7184] leading-relaxed">
                   {c.highlights}
+                </p>
+                <p className="text-[10px] text-[#5A7184]/80 italic">
+                  * Travel time is an indicative estimate; subject to traffic & road conditions.
                 </p>
               </div>
 
-              <div className="pt-2 border-t border-slate-800/80">
-                <span className="inline-block rounded-md bg-amber-950/40 border border-amber-500/30 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
-                  In Curation · Insufficient Verified Data
+              <div className="flex-shrink-0 sm:text-right">
+                <span className="inline-block rounded-md bg-amber-50 border border-amber-200 px-2.5 py-1 text-[11px] font-bold text-amber-800 whitespace-nowrap">
+                  In Curation — Insufficient Verified Data
                 </span>
               </div>
             </div>

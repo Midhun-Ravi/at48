@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import L from 'leaflet';
 import type { LatLngBoundsExpression } from 'leaflet';
-import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet';
+import { CircleMarker, MapContainer, Popup, TileLayer, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 import type { Destination, FeasibilityResult, UserConstraints } from '../types';
-import { getPlacesForDestination } from '../data/routePlaces';
-import { formatTimelineTime } from '../utils/formatters';
+import { getPlacesForDestination, type RoutePlace } from '../data/routePlaces';
+import { formatDuration, formatTimelineTime } from '../utils/formatters';
 
 interface TripMapProps {
   destination: Destination;
@@ -15,9 +15,17 @@ interface TripMapProps {
   onTogglePitstop?: (pitstopId: string) => void;
 }
 
+interface RouteState {
+  status: 'idle' | 'loading' | 'success' | 'fallback';
+  geometry: Array<[number, number]> | null;
+  distanceKm: number | null;
+  durationMinutes: number | null;
+  error?: string;
+}
+
 /**
  * Bounds fitter that automatically updates the Leaflet viewport
- * whenever the selected destination or stops change.
+ * whenever the selected destination, stops, or route geometry changes.
  */
 function MapFitter({ bounds }: { bounds: LatLngBoundsExpression }) {
   const map = useMap();
@@ -37,12 +45,101 @@ export default function TripMap({
 }: TripMapProps) {
   const [tileError, setTileError] = useState(false);
   const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
+  const [routeState, setRouteState] = useState<RouteState>({
+    status: 'idle',
+    geometry: null,
+    distanceKm: null,
+    durationMinutes: null,
+  });
 
   const places = useMemo(() => getPlacesForDestination(destination.id), [destination.id]);
   const selectedPitstops = inputs.selectedPitstopIds ?? [];
 
-  // Calculate bounding box for all relevant markers
+  // Determine key ordered waypoints: origin -> selected pitstops -> destination
+  const waypoints = useMemo<RoutePlace[]>(() => {
+    const list: RoutePlace[] = [];
+    const origin = places.find(p => p.type === 'origin');
+    if (origin) list.push(origin);
+
+    for (const stopId of selectedPitstops) {
+      const stop = places.find(p => p.pitstopId === stopId);
+      if (stop) list.push(stop);
+    }
+
+    const destPlace = places.find(p => p.type === 'destination');
+    if (destPlace) list.push(destPlace);
+
+    return list;
+  }, [places, selectedPitstops]);
+
+  // Fetch road-following route from OSRM demo API with graceful offline fallback
+  useEffect(() => {
+    if (waypoints.length < 2) return;
+
+    let isMounted = true;
+    const controller = new AbortController();
+
+    const fetchRoute = async () => {
+      setRouteState(prev => ({ ...prev, status: 'loading' }));
+      try {
+        const coordsStr = waypoints.map(w => `${w.longitude},${w.latitude}`).join(';');
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson`;
+
+        const response = await fetch(osrmUrl, {
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        });
+
+        if (!response.ok) {
+          throw new Error(`OSRM API error: HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const route = data.routes?.[0];
+
+        if (!route?.geometry?.coordinates) {
+          throw new Error('No route geometry returned');
+        }
+
+        // Coordinates from GeoJSON are [lon, lat]; Leaflet expects [lat, lon]
+        const latLngs: Array<[number, number]> = route.geometry.coordinates.map(
+          ([lon, lat]: [number, number]) => [lat, lon] as [number, number]
+        );
+
+        if (isMounted) {
+          setRouteState({
+            status: 'success',
+            geometry: latLngs,
+            distanceKm: Math.round(route.distance / 1000),
+            durationMinutes: Math.round(route.duration / 60),
+          });
+        }
+      } catch (err: unknown) {
+        if (!isMounted) return;
+        // On network error, sandbox block, or API down: fall back safely to verified coordinate markers
+        setRouteState({
+          status: 'fallback',
+          geometry: null,
+          distanceKm: null,
+          durationMinutes: null,
+          error: err instanceof Error ? err.message : 'Offline or provider unavailable',
+        });
+      }
+    };
+
+    fetchRoute();
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [waypoints]);
+
+  // Calculate bounding box for all relevant markers and road geometry
   const bounds = useMemo<LatLngBoundsExpression>(() => {
+    if (routeState.geometry && routeState.geometry.length > 0) {
+      return L.latLngBounds(routeState.geometry);
+    }
     if (places.length === 0) {
       return [
         [12.9756, 77.6066],
@@ -51,59 +148,64 @@ export default function TripMap({
     }
     const coords = places.map(p => [p.latitude, p.longitude] as [number, number]);
     return L.latLngBounds(coords);
-  }, [places]);
+  }, [places, routeState.geometry]);
 
   // Construct official Google Maps directions URL with active waypoints
   const googleMapsUrl = useMemo(() => {
     const origin = encodeURIComponent('MG Road, Bengaluru, Karnataka, India');
     const dest = encodeURIComponent(`${destination.name}, Karnataka, India`);
-    const waypoints: string[] = [];
+    const waypointStops: string[] = [];
 
     // Add selected pitstop coordinates as official waypoints
     for (const stopId of selectedPitstops) {
       const stopPlace = places.find(p => p.pitstopId === stopId);
       if (stopPlace) {
-        waypoints.push(`${stopPlace.latitude},${stopPlace.longitude}`);
+        waypointStops.push(`${stopPlace.latitude},${stopPlace.longitude}`);
       }
     }
 
     let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`;
-    if (waypoints.length > 0) {
-      url += `&waypoints=${encodeURIComponent(waypoints.join('|'))}`;
+    if (waypointStops.length > 0) {
+      url += `&waypoints=${encodeURIComponent(waypointStops.join('|'))}`;
     }
     return url;
   }, [destination.name, selectedPitstops, places]);
 
   return (
-    <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+    <div className="space-y-3 rounded-2xl border border-[#E1ECF2] bg-white p-4 sm:p-5 shadow-sm text-[#193953]">
       {/* Header and Controls */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold text-slate-900">Interactive Trip Route & Stops</h2>
+            <h2 className="text-lg font-bold text-[#193953]">Interactive Trip Route & Stops</h2>
             <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
               Verified Pins
             </span>
+            {routeState.status === 'success' && (
+              <span className="rounded-full bg-[#DDF0F6] border border-[#176EA8]/30 px-2.5 py-0.5 text-xs font-bold text-[#176EA8]">
+                🛣️ Road Geometry
+              </span>
+            )}
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-[#5A7184]">
             Geographically grounded markers for origin, destination, attractions, and highway stops.
           </p>
         </div>
 
         <div className="flex items-center gap-2 text-xs">
-          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+          <div className="inline-flex rounded-lg border border-[#E1ECF2] bg-[#F4F9FC] p-0.5">
             <button
               onClick={() => setViewMode('map')}
-              className={`rounded-md px-3 py-1 font-semibold transition-all ${
-                viewMode === 'map' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              className={`rounded-md px-3 py-1 font-semibold transition-all cursor-pointer ${
+                viewMode === 'map' ? 'bg-[#176EA8] text-white shadow-xs' : 'text-[#5A7184] hover:text-[#193953]'
               }`}
             >
               Map View
             </button>
             <button
               onClick={() => setViewMode('list')}
-              className={`rounded-md px-3 py-1 font-semibold transition-all ${
-                viewMode === 'list' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              className={`rounded-md px-3 py-1 font-semibold transition-all cursor-pointer ${
+                viewMode === 'list' ? 'bg-[#176EA8] text-white shadow-xs' : 'text-[#5A7184] hover:text-[#193953]'
               }`}
             >
               Stop List
@@ -112,14 +214,38 @@ export default function TripMap({
         </div>
       </div>
 
+      {/* Road Geometry or Fallback Notification Badge */}
+      {routeState.status === 'success' && routeState.distanceKm && (
+        <div className="rounded-xl bg-[#DDF0F6] border border-[#176EA8]/20 p-2.5 text-xs text-[#193953] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span>🛣️</span>
+            <span>
+              <strong>Road Route via OSRM:</strong> ~{routeState.distanceKm} km · ~{formatDuration(routeState.durationMinutes ?? 0)} driving time
+            </span>
+          </div>
+          <span className="text-[11px] text-[#5A7184]">OpenStreetMap Road Graph</span>
+        </div>
+      )}
+
+      {routeState.status === 'fallback' && (
+        <div className="rounded-xl bg-[#F4F9FC] border border-[#E1ECF2] p-2.5 text-xs text-[#5A7184] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span>📍</span>
+            <span>
+              <strong>Verified Waypoint Pins Active:</strong> Road routing service unavailable or offline; open Google Maps for step-by-step turn guidance.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Map View */}
       {viewMode === 'map' && !tileError && (
-        <div className="relative w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+        <div className="relative w-full overflow-hidden rounded-xl border border-[#E1ECF2] bg-[#F4F9FC]">
           <div className="h-72 sm:h-96 w-full">
             <MapContainer
               bounds={bounds}
               scrollWheelZoom={false}
-              className="h-full w-full z-0 text-slate-800"
+              className="h-full w-full z-0 text-[#193953]"
               style={{ minHeight: '280px' }}
             >
               <TileLayer
@@ -132,6 +258,19 @@ export default function TripMap({
               />
 
               <MapFitter bounds={bounds} />
+
+              {/* Road-following Polyline when OSRM geometry is available */}
+              {routeState.geometry && (
+                <Polyline
+                  positions={routeState.geometry}
+                  pathOptions={{
+                    color: '#176EA8',
+                    weight: 4.5,
+                    opacity: 0.85,
+                    lineJoin: 'round',
+                  }}
+                />
+              )}
 
               {places.map(place => {
                 const isPitstop = place.type === 'pitstop';
@@ -148,25 +287,25 @@ export default function TripMap({
                   return false;
                 });
 
-                // Distinct CircleMarker styling per place type
-                let color = '#475569';
-                let fillColor = '#64748b';
+                // Distinct CircleMarker styling per place type using Coastal Explorer palette
+                let color = '#5A7184';
+                let fillColor = '#E1ECF2';
                 let radius = 8;
-                let fillOpacity = 0.85;
+                let fillOpacity = 0.9;
 
                 if (isOrigin) {
                   color = '#065f46';
                   fillColor = '#10b981';
                   radius = 10;
                 } else if (isDestination) {
-                  color = '#1e3a8a';
-                  fillColor = '#3b82f6';
+                  color = '#176EA8';
+                  fillColor = '#193953';
                   radius = 11;
                 } else if (isPitstop) {
-                  color = isSelectedPitstop ? '#b45309' : '#94a3b8';
-                  fillColor = isSelectedPitstop ? '#f59e0b' : '#cbd5e1';
+                  color = isSelectedPitstop ? '#b45309' : '#5A7184';
+                  fillColor = isSelectedPitstop ? '#FF9870' : '#E1ECF2';
                   radius = isSelectedPitstop ? 10 : 7;
-                  fillOpacity = isSelectedPitstop ? 0.95 : 0.6;
+                  fillOpacity = isSelectedPitstop ? 0.95 : 0.7;
                 } else if (isAttraction) {
                   color = '#6d28d9';
                   fillColor = '#a855f7';
@@ -243,9 +382,9 @@ export default function TripMap({
                             href={place.sourceUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-center font-semibold text-teal-700 hover:underline text-[11px]"
+                            className="text-[11px] text-blue-600 hover:underline"
                           >
-                            OpenStreetMap Reference ↗
+                            View OpenStreetMap Source ↗
                           </a>
                         </div>
                       </div>
@@ -255,52 +394,61 @@ export default function TripMap({
               })}
             </MapContainer>
           </div>
-
-          <div className="bg-slate-50/90 px-3 py-1.5 text-[11px] text-slate-500 flex flex-wrap items-center justify-between border-t border-slate-200">
-            <span>Scroll zoom disabled on mobile touch. Use + / − buttons to zoom.</span>
-            <span>OSM Normal Interactive Tiles</span>
-          </div>
         </div>
       )}
 
-      {/* Fallback View or List Mode */}
+      {/* Fallback View if Tile Error or List Mode */}
       {(viewMode === 'list' || tileError) && (
-        <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="space-y-2 rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3 text-xs">
           {tileError && (
-            <p className="rounded-lg bg-amber-50 p-2.5 text-xs text-amber-900 border border-amber-200 mb-2">
-              Note: Map tiles could not be loaded. Displaying verified coordinate waypoint list below.
-            </p>
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-2 text-amber-800 mb-2">
+              ⚠️ Map tiles are currently unavailable offline. Showing verified coordinate stop list below:
+            </div>
           )}
 
-          <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Verified Trip Waypoints ({places.length} Places)
-          </div>
+          <div className="divide-y divide-[#E1ECF2]">
+            {places.map(place => {
+              const isPitstop = place.type === 'pitstop';
+              const isSelected = isPitstop && place.pitstopId && selectedPitstops.includes(place.pitstopId);
 
-          <div className="space-y-2 max-h-80 overflow-y-auto">
-            {places.map(p => {
-              const isSelected = p.pitstopId && selectedPitstops.includes(p.pitstopId);
               return (
-                <div key={p.id} className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
-                  <div className="flex flex-wrap items-center justify-between gap-1">
-                    <strong className="text-slate-900">{p.name}</strong>
-                    <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-                      {p.type.toUpperCase()}
-                    </span>
+                <div key={place.id} className="py-2.5 flex items-start justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <strong className="text-sm font-bold text-[#193953]">{place.name}</strong>
+                      <span className="rounded bg-white border border-[#E1ECF2] px-1.5 py-0.2 text-[10px] uppercase font-bold text-[#5A7184]">
+                        {place.type}
+                      </span>
+                      {isSelected && (
+                        <span className="rounded bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.2 text-[10px] font-bold">
+                          Selected Pitstop
+                        </span>
+                      )}
+                    </div>
+                    {place.address && <p className="text-[11px] text-[#5A7184]">{place.address}</p>}
+                    <p className="text-[10px] text-[#5A7184]">
+                      Coordinates: {place.latitude.toFixed(4)}°N, {place.longitude.toFixed(4)}°E ·{' '}
+                      <a
+                        href={place.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#176EA8] underline"
+                      >
+                        OSM Source
+                      </a>
+                    </p>
                   </div>
-                  <p className="mt-1 text-slate-500">
-                    Coords: {p.latitude.toFixed(4)}° N, {p.longitude.toFixed(4)}° E ·{' '}
-                    <a href={p.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-teal-700 underline">
-                      OSM Source ↗
-                    </a>
-                  </p>
-                  {p.pitstopId && onTogglePitstop && (
+
+                  {isPitstop && place.pitstopId && onTogglePitstop && (
                     <button
-                      onClick={() => onTogglePitstop(p.pitstopId!)}
-                      className={`mt-2 rounded px-2.5 py-1 text-[11px] font-bold ${
-                        isSelected ? 'bg-amber-600 text-white' : 'border border-slate-300 bg-white text-slate-800'
+                      onClick={() => onTogglePitstop(place.pitstopId!)}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-colors cursor-pointer ${
+                        isSelected
+                          ? 'bg-amber-600 text-white hover:bg-amber-700'
+                          : 'bg-white border border-[#E1ECF2] text-[#193953] hover:bg-slate-50'
                       }`}
                     >
-                      {isSelected ? '✓ Pitstop Selected' : '+ Select Pitstop'}
+                      {isSelected ? '✓ Remove' : '+ Add'}
                     </button>
                   )}
                 </div>
@@ -310,38 +458,19 @@ export default function TripMap({
         </div>
       )}
 
-      {/* Map Legend & Actions */}
-      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex flex-wrap items-center gap-3 text-slate-600">
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 rounded-full bg-emerald-500 border border-emerald-700"></span>
-            Origin
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 rounded-full bg-blue-500 border border-blue-800"></span>
-            Destination
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 rounded-full bg-amber-500 border border-amber-700"></span>
-            Pitstop ({selectedPitstops.length > 0 ? 'Selected' : 'Available'})
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 rounded-full bg-purple-500 border border-purple-800"></span>
-            Attractions
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-3 rounded-full bg-cyan-500 border border-cyan-800"></span>
-            Stay Zone
-          </span>
-        </div>
+      {/* Footer Directions Link */}
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[#E1ECF2] text-xs">
+        <span className="text-[#5A7184]">
+          {places.length} verified places mapped along the {destination.routeName} corridor.
+        </span>
 
         <a
           href={googleMapsUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 rounded-xl bg-teal-50 border border-teal-200 px-3.5 py-2 font-bold text-teal-900 hover:bg-teal-100 transition-colors cursor-pointer"
+          className="font-bold text-[#176EA8] hover:underline flex items-center gap-1"
         >
-          <span>🗺️</span> Open Directions in Google Maps ↗
+          <span>🗺️</span> Open Google Maps Directions ({waypoints.length} stops) ↗
         </a>
       </div>
     </div>

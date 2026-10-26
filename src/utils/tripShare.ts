@@ -2,7 +2,7 @@ import { getDestination } from '../data/destinations.js';
 import { getCompatiblePitstops } from '../data/pitstops.js';
 import { parseIST, getCalendarDaysCount } from '../engine/scheduler.js';
 import { formatReadableDate, formatReadableDateTime } from './formatters.js';
-import type { PacePreference, UserConstraints } from '../types.js';
+import type { CustomPlannedActivity, PacePreference, UserConstraints } from '../types.js';
 
 export const MAX_NAME_LENGTH = 40;
 export const MAX_URL_PAYLOAD_LENGTH = 2048;
@@ -70,6 +70,16 @@ export function buildShareableParams(
 
   if (inputs.disabledActivityIds && inputs.disabledActivityIds.length > 0) {
     params.set('skip', inputs.disabledActivityIds.join(','));
+  }
+
+  // User-planned custom activities in free-time slots
+  if (inputs.customActivities && inputs.customActivities.length > 0) {
+    try {
+      const compact = inputs.customActivities
+        .map(ca => `${ca.day}~${encodeURIComponent(ca.name)}~${ca.durationMinutes}~${ca.costPerPersonINR || 0}${ca.slotStart ? `~${ca.slotStart}` : ''}`)
+        .join(';');
+      params.set('ca', compact);
+    } catch {}
   }
 
   return params;
@@ -274,6 +284,30 @@ export function parseShareableTrip(
       );
     }
 
+    // 11. Custom planned activities in free slots
+    const rawCustom = searchParams.get('ca');
+    const customActivities: CustomPlannedActivity[] = [];
+    if (rawCustom) {
+      const parts = rawCustom.split(';').filter(Boolean);
+      for (let i = 0; i < parts.length; i++) {
+        const [dayStr, encName, durStr, costStr, slotStart] = parts[i].split('~');
+        const day = parseInt(dayStr, 10);
+        const name = decodeURIComponent(encName || '').slice(0, 60);
+        const durationMinutes = parseInt(durStr, 10);
+        const costPerPersonINR = parseInt(costStr || '0', 10);
+        if (day >= 1 && day <= 4 && name && durationMinutes > 0 && durationMinutes <= 600) {
+          customActivities.push({
+            id: `custom_${i + 1}`,
+            day,
+            name,
+            durationMinutes,
+            costPerPersonINR: !isNaN(costPerPersonINR) ? costPerPersonINR : 0,
+            slotStart: slotStart || undefined,
+          });
+        }
+      }
+    }
+
     // Schema version
     const schemaVersion = parseInt(searchParams.get('v') || '1', 10) || 1;
 
@@ -290,6 +324,7 @@ export function parseShareableTrip(
       organizerName: organizerName || undefined,
       planningMode,
       destinationAdjustments: { [destinationId]: drivingAdjustmentMinutes },
+      customActivities: customActivities.length > 0 ? customActivities : undefined,
     };
 
     return {

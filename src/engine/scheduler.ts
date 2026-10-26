@@ -95,10 +95,10 @@ export function evaluateFeasibility(
   const timeline: TimetableEntry[] = [];
   let sequence = 0;
   const push = (category: TimelineCategory, label: string, from: number, to: number,
-    day: number, activityId?: string, isOptional?: boolean): void => {
+    day: number, activityId?: string, isOptional?: boolean, isCustom?: boolean): void => {
     if (to <= from) return;
     timeline.push({ id: `t${++sequence}`, category, label,
-      startTime: formatIST(from), endTime: formatIST(to), day, activityId, isOptional });
+      startTime: formatIST(from), endTime: formatIST(to), day, activityId, isOptional, isCustom });
   };
   const violation = (type: ConstraintViolation['type'], severity: ConstraintViolation['severity'],
     message: string, activityId?: string): void => {
@@ -476,27 +476,67 @@ export function evaluateFeasibility(
     }
   }
 
-  // Free leisure blocks: generated per day for daytime unallocated hours
+  const customActivities = [...(input.customActivities ?? [])];
+
+  // Free leisure blocks: generated per day for daytime unallocated hours.
+  // Inserts user-planned custom activities into available free slots and calculates remaining slack time.
   function makeFreeBlocks(from: number, to: number, day: number): number {
     if (to <= from) return 0;
     const occupied = timeline
       .filter(item => item.day === day && item.category !== 'FREE')
       .map(item => [Math.max(from, parseIST(item.startTime)), Math.min(to, parseIST(item.endTime))] as const)
       .filter(([a, b]) => b > a).sort((a, b) => a[0] - b[0]);
+
+    const rawWindows: Array<{ begin: number; end: number }> = [];
     let cursor = from;
-    let free = 0;
     for (const [begin, end] of occupied) {
       if (begin > cursor) {
-        push('FREE', 'Unallocated usable time', cursor, begin, day);
-        free += (begin - cursor) / MINUTE_MS;
+        rawWindows.push({ begin: cursor, end: begin });
       }
       cursor = Math.max(cursor, end);
     }
     if (cursor < to) {
-      push('FREE', 'Unallocated usable time', cursor, to, day);
-      free += (to - cursor) / MINUTE_MS;
+      rawWindows.push({ begin: cursor, end: to });
     }
-    return Math.round(free);
+
+    let freeMinutes = 0;
+    const dayCustoms = customActivities.filter(ca => ca.day === day);
+
+    for (const win of rawWindows) {
+      let winCursor = win.begin;
+      const winEnd = win.end;
+
+      // Find matching custom activity for this slot (by slotStart or next available)
+      const matchingIdx = dayCustoms.findIndex(ca => {
+        if (!ca.durationMinutes || ca.durationMinutes <= 0) return false;
+        if (ca.slotStart) {
+          const caEpoch = parseIST(ca.slotStart);
+          return caEpoch >= win.begin && caEpoch < win.end;
+        }
+        return true;
+      });
+
+      if (matchingIdx !== -1 && winEnd > winCursor) {
+        const [matching] = dayCustoms.splice(matchingIdx, 1);
+        // Also remove from outer customActivities
+        const outerIdx = customActivities.indexOf(matching);
+        if (outerIdx !== -1) customActivities.splice(outerIdx, 1);
+
+        const availableSlotMins = Math.round((winEnd - winCursor) / MINUTE_MS);
+        const actMins = Math.min(matching.durationMinutes, availableSlotMins);
+        const actEnd = add(winCursor, actMins);
+
+        push('ACTIVITY', matching.name, winCursor, actEnd, day, matching.id, true, true);
+        winCursor = actEnd;
+      }
+
+      if (winEnd > winCursor) {
+        push('FREE', 'Unallocated usable time', winCursor, winEnd, day);
+        freeMinutes += (winEnd - winCursor) / MINUTE_MS;
+      }
+    }
+
+    return Math.round(freeMinutes);
   }
 
   let totalSlackMinutes = 0;
@@ -516,10 +556,15 @@ export function evaluateFeasibility(
 
   timeline.sort((a, b) => parseIST(a.startTime) - parseIST(b.startTime));
 
+  const customActivitiesCost = (input.customActivities ?? []).reduce(
+    (sum, ca) => sum + (ca.costPerPersonINR ?? 0),
+    0
+  );
+
   const ticketPerPerson = enabled
     .filter(activity => activityOutcomes.some(outcome => outcome.activityId === activity.id &&
       outcome.status !== 'omitted' && outcome.status !== 'unavailable'))
-    .reduce((sum, activity) => sum + activity.costPerPersonINR, 0);
+    .reduce((sum, activity) => sum + activity.costPerPersonINR, 0) + customActivitiesCost;
 
   // Number of overnight stays is (numDays - 1)
   const numNights = Math.max(0, numDays - 1);

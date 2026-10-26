@@ -61,44 +61,66 @@ export default function BudgetPicker({ budgetINR, onChange }: BudgetPickerProps)
   };
 
   return (
-    <div className="space-y-4 rounded-xl border border-slate-700/60 bg-[#20252E] p-4 text-slate-100">
-      <div className="flex items-center justify-between">
+    <div className="space-y-3.5 rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-4 text-[#193953]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Budget Per Person
+          <span className="text-xs font-semibold text-[#5A7184] uppercase tracking-wider">
+            Budget Cap (Per Person)
           </span>
           <div className="flex items-baseline gap-1 mt-0.5">
+            <span className="text-xl font-bold text-[#176EA8]">₹</span>
             <span
-              className={`text-2xl font-black text-white transition-transform ${
-                pulse ? 'scale-105 text-[#2962FF]' : ''
+              className={`text-2xl font-black text-[#193953] transition-transform duration-200 ${
+                pulse ? 'scale-110 text-[#176EA8]' : 'scale-100'
               }`}
             >
-              ₹{budgetINR.toLocaleString('en-IN')}
+              {budgetINR.toLocaleString('en-IN')}
             </span>
-            <span className="text-xs font-semibold text-slate-400">/ traveler</span>
+            <span className="text-xs font-semibold text-[#5A7184]">/ person</span>
           </div>
         </div>
 
-        {/* Editable numeric input */}
-        <div className="relative w-32">
-          <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-xs font-bold text-slate-400 pointer-events-none">
-            ₹
-          </span>
+        {/* Direct numeric input for precision */}
+        <div className="flex items-center gap-1.5">
+          <label htmlFor="budget-input" className="text-xs text-[#5A7184]">
+            Custom: ₹
+          </label>
           <input
+            id="budget-input"
             type="text"
             inputMode="numeric"
-            pattern="[0-9]*"
             value={inputVal}
             onChange={handleInputChange}
             onBlur={handleInputBlur}
-            className="w-full rounded-lg border border-slate-700 bg-[#15191F] pl-6 pr-2.5 py-1.5 text-right text-xs font-bold text-white focus:border-[#2962FF] focus:outline-none"
-            aria-label="Direct budget input in Indian Rupees"
+            aria-label="Custom per-person budget in rupees"
+            className="w-24 rounded-lg border border-[#E1ECF2] bg-white px-2.5 py-1 text-right text-xs font-bold text-[#193953] focus:border-[#176EA8] focus:outline-none"
           />
         </div>
       </div>
 
-      {/* Tactile Accessible Slider: ₹1,000 to ₹30,000 with step ₹500 */}
-      <div>
+      {/* Preset Chip Buttons */}
+      <div className="grid grid-cols-4 gap-2">
+        {PRESETS.map(preset => {
+          const isSelected = budgetINR === preset.val;
+          return (
+            <button
+              key={preset.val}
+              type="button"
+              onClick={() => onChange(preset.val)}
+              className={`rounded-lg border px-2 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+                isSelected
+                  ? 'border-[#176EA8] bg-[#176EA8] text-white shadow-xs'
+                  : 'border-[#E1ECF2] bg-white text-[#5A7184] hover:border-[#176EA8]/40 hover:text-[#193953]'
+              }`}
+            >
+              {preset.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Smooth slider */}
+      <div className="space-y-1">
         <input
           type="range"
           min={1000}
@@ -106,33 +128,15 @@ export default function BudgetPicker({ budgetINR, onChange }: BudgetPickerProps)
           step={500}
           value={Math.min(30000, Math.max(1000, budgetINR))}
           onChange={handleSliderChange}
-          className="w-full accent-[#2962FF] cursor-pointer"
-          aria-label="Per-person budget slider"
+          aria-label="Budget per person slider"
+          className="w-full h-2 rounded-lg bg-[#E1ECF2] accent-[#176EA8] cursor-pointer"
         />
-        <div className="flex justify-between text-[10px] font-semibold text-slate-400 mt-1">
-          <span>₹1,000 (Min)</span>
-          <span>₹10,000</span>
-          <span>₹20,000</span>
-          <span>₹30,000 (Max)</span>
+        <div className="flex justify-between text-[10px] text-[#5A7184] font-medium px-0.5">
+          <span>₹1,000 (Day trip)</span>
+          <span>₹6,000 (Standard)</span>
+          <span>₹15,000</span>
+          <span>₹30,000+ (Luxury)</span>
         </div>
-      </div>
-
-      {/* Preset Landmark Chips */}
-      <div className="grid grid-cols-4 gap-2 pt-1 border-t border-slate-800">
-        {PRESETS.map(p => (
-          <button
-            key={p.val}
-            type="button"
-            onClick={() => onChange(p.val)}
-            className={`rounded-lg py-1.5 px-2 text-xs font-semibold border transition-all cursor-pointer ${
-              budgetINR === p.val
-                ? 'border-[#2962FF] bg-[#2962FF] text-white shadow-sm font-bold'
-                : 'border-slate-700 bg-[#15191F] text-slate-300 hover:border-slate-500'
-            }`}
-          >
-            {p.label}
-          </button>
-        ))}
       </div>
     </div>
   );

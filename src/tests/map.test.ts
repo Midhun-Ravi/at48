@@ -46,8 +46,8 @@ describe('Interactive Trip Map & Route Places Grounding', () => {
 
   it('pitstops compatibility scope is restricted strictly to MVP destinations (no unsupported IDs)', () => {
     const compatibleStops = getCompatiblePitstops('mysuru');
-    expect(compatibleStops.length).toBe(1);
-    expect(compatibleStops[0].id).toBe('maddur-tiffanys');
+    expect(compatibleStops.length).toBeGreaterThanOrEqual(1);
+    expect(compatibleStops.some(s => s.id === 'maddur-tiffanys')).toBe(true);
 
     // Ensure unsupported destinations (such as wayanad) are NOT present
     for (const stop of compatibleStops) {

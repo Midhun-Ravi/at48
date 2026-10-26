@@ -23,6 +23,16 @@ export interface UserConstraints {
   organizerName?: string; // display name e.g. "Sujil" (max 40 chars)
   planningMode?: 'solo' | 'group'; // default 'group'
   destinationAdjustments?: Record<string, number>; // independent one-way adjustment minutes per destination ID
+  customActivities?: CustomPlannedActivity[]; // user-planned activities inside unallocated free-time slots
+}
+
+export interface CustomPlannedActivity {
+  id: string;
+  day: number;
+  name: string;
+  durationMinutes: number;
+  costPerPersonINR?: number;
+  slotStart?: string; // optional ISO anchor to slot into a specific free window
 }
 
 export interface Activity {
@@ -96,6 +106,11 @@ export interface Pitstop {
   dwellMinutes: number; // estimated stop dwell time
   detourMinutes: number; // estimated detour / slip-road access time
   replacesArrivalMeal?: boolean; // if true on outbound, reduces redundant check-in meal
+  dietary?: 'veg' | 'non-veg' | 'multi'; // dietary classification
+  rating?: number; // sourced public rating
+  reviewCount?: number; // sourced public review count
+  openingHours?: string; // published operating hours
+  directionsUrl?: string; // external directions URL
   timingEvidence: Evidence;
   locationEvidence: Evidence;
 }
@@ -109,6 +124,7 @@ export interface TimetableEntry {
   day: number; // 1, 2, 3, or 4
   activityId?: string;
   isOptional?: boolean;
+  isCustom?: boolean; // true if added by user during free-time planning
 }
 
 export type ViolationType =

@@ -61,87 +61,80 @@ export default function OriginPicker({
   };
 
   return (
-    <div className="space-y-3 rounded-xl border border-slate-700/60 bg-[#20252E] p-4 text-slate-100">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div>
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Where are we starting from?
-          </span>
-          <p className="text-xs text-slate-300 mt-0.5">
-            Select your starting corridor in Bengaluru
-          </p>
-        </div>
-
+        <label className="block text-xs font-semibold uppercase tracking-wider text-[#5A7184]">
+          Starting Point (Bengaluru)
+        </label>
         <button
           type="button"
           onClick={handleUseCurrentLocation}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-[#292F39] hover:bg-slate-700 border border-slate-600 px-2.5 py-1 text-xs font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer"
+          className="flex items-center gap-1 text-[11px] font-bold text-[#176EA8] hover:underline cursor-pointer"
         >
-          <span>🎯</span>
-          <span>My Location</span>
+          <span>🎯</span> Use Current Location
         </button>
       </div>
 
       {gpsStatus && (
-        <div className="rounded-lg bg-blue-950/40 border border-blue-500/30 p-2 text-[11px] text-blue-200">
+        <div className="rounded-lg bg-[#DDF0F6] border border-[#176EA8]/30 px-3 py-1.5 text-[11px] text-[#176EA8]">
           {gpsStatus}
         </div>
       )}
 
-      {/* Preset selection dropdown */}
-      <div className="relative">
-        <select
-          value={activeOrigin}
-          onChange={e => handleSelect(e.target.value)}
-          className="w-full rounded-lg border border-slate-700 bg-[#15191F] px-3 py-2 text-xs font-bold text-white focus:border-[#2962FF] focus:outline-none cursor-pointer"
-        >
-          {BENGALURU_PRESETS.map(p => (
-            <option key={p.id} value={p.id} className="bg-[#15191F] text-white">
-              {p.name}
-            </option>
-          ))}
-        </select>
+      {/* Origin Selector dropdown/cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {BENGALURU_PRESETS.map(preset => {
+          const isSelected = activeOrigin === preset.id;
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => handleSelect(preset.id)}
+              className={`flex items-start justify-between rounded-xl border p-2.5 text-left transition-all cursor-pointer ${
+                isSelected
+                  ? 'border-[#176EA8] bg-[#DDF0F6] text-[#193953] shadow-xs'
+                  : 'border-[#E1ECF2] bg-[#F4F9FC] text-[#5A7184] hover:border-slate-300'
+              }`}
+            >
+              <div className="min-w-0 pr-2">
+                <span className="block text-xs font-bold text-[#193953] truncate">{preset.name}</span>
+                <span className="block text-[10px] text-[#5A7184]">{preset.area}</span>
+              </div>
+              {'isDemo' in preset && preset.isDemo && (
+                <span className="rounded bg-[#FF9870]/20 text-[#193953] border border-[#FF9870]/40 px-1.5 py-0.5 text-[9px] font-black uppercase flex-shrink-0">
+                  Demo
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-        <span>Reference Corridor: MG Road</span>
-        <button
-          type="button"
-          onClick={() => handleSelect('koramangala')}
-          className="text-blue-400 hover:underline font-semibold cursor-pointer"
-        >
-          Try Sample Koramangala Demo →
-        </button>
-      </div>
+      <p className="text-[11px] text-[#5A7184]">
+        📍 All route baselines ground at <strong>MG Road (Central Bengaluru)</strong>. Add driving adjustments in Step 2 if departing from outer suburbs.
+      </p>
 
-      {/* Out of area modal */}
+      {/* Out of Bengaluru Alert Modal */}
       {showOutOfAreaModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-[#15191F] p-5 text-center text-slate-100 shadow-2xl space-y-3">
-            <span className="text-3xl">📍</span>
-            <h4 className="text-base font-bold text-white">We're starting in Bengaluru!</h4>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              It looks like you're outside our currently supported Bengaluru area. Try a demo trip using Koramangala, or select a Bengaluru departure corridor.
-            </p>
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  handleSelect('koramangala');
-                  setShowOutOfAreaModal(false);
-                }}
-                className="flex-1 rounded-lg bg-[#2962FF] py-2 text-xs font-bold text-white hover:bg-blue-600 transition-colors"
-              >
-                Use Koramangala Demo
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowOutOfAreaModal(false)}
-                className="rounded-lg bg-[#292F39] px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white transition-colors"
-              >
-                Close
-              </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-[#E1ECF2] bg-white p-5 text-[#193953] shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">⚠️</span>
+              <div>
+                <h4 className="text-base font-bold text-[#193953]">Outside Bengaluru</h4>
+                <p className="text-xs text-[#5A7184]">Location outside Bengaluru metro region.</p>
+              </div>
             </div>
+            <p className="text-xs text-[#5A7184] leading-relaxed">
+              @48 is currently calibrated strictly for <strong>Bengaluru departures</strong>. We've set your starting point to the central <strong>MG Road baseline</strong> for realistic driving calculations.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowOutOfAreaModal(false)}
+              className="w-full rounded-xl bg-[#176EA8] py-2.5 text-xs font-bold text-white hover:bg-[#135a8a] transition-colors cursor-pointer"
+            >
+              Understood, use Bengaluru baseline
+            </button>
           </div>
         </div>
       )}

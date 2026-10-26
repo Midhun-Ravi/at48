@@ -27,6 +27,23 @@ const PACE_EXPLANATIONS: Record<PacePreference, { title: string; desc: string }>
   },
 };
 
+function getRecommendedDurationLabel(id: string): string {
+  switch (id) {
+    case 'yelagiri':
+      return '1–2 day escapes';
+    case 'wayanad':
+    case 'hampi':
+    case 'gokarna':
+      return '3–4 day escapes';
+    case 'kabini':
+    case 'sakleshpur':
+    case 'chikmagalur':
+    case 'pondicherry':
+    default:
+      return '2–3 day escapes';
+  }
+}
+
 export default function CompareScreen({ inputs, setInputs }: Props) {
   const [activeGuideId, setActiveGuideId] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -337,18 +354,17 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
         </div>
 
         {/* Responsive Grid of Destination Inspiration Cards */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-2">
+        <div className="grid gap-6 md:grid-cols-2">
           {candidateRecs.map(c => {
             const img = getDestinationImage(c.id);
-            const guide = getDestinationGuide(c.id, numDays, activeInputs.pace);
 
             return (
-              <div
+              <article
                 key={c.id}
-                className="flex flex-col justify-between rounded-2xl border border-[#E1ECF2] bg-[#F4F9FC]/70 p-4 transition-all hover:bg-white hover:border-[#BAE3F1] hover:shadow-sm"
+                className="flex flex-col justify-between rounded-2xl border border-[#E1ECF2] bg-white p-5 shadow-sm transition-all hover:border-[#BAE3F1] hover:shadow-md"
               >
-                <div className="space-y-3">
-                  {/* Photo thumbnail */}
+                <div className="space-y-3.5">
+                  {/* 1. Photo thumbnail */}
                   {img && (
                     <div className="relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-slate-100 shadow-inner">
                       <img
@@ -366,48 +382,57 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                     </div>
                   )}
 
-                  {/* Header info */}
+                  {/* 2. Destination title */}
                   <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-base font-bold text-[#193953]">{c.name}</h3>
-                      <span className="rounded-full bg-[#DDF0F6] border border-[#BAE3F1] px-2 py-0.5 text-[10px] font-bold text-[#176EA8] whitespace-nowrap">
-                        {guide.idealDuration}
-                      </span>
-                    </div>
-                    <p className="text-xs text-[#5A7184] mt-0.5">{c.routeName}</p>
+                    <h3 className="text-lg font-black text-[#193953] leading-snug">
+                      {c.name}
+                    </h3>
+                    {/* 3. Route / corridor / approx distance */}
+                    <p className="text-xs text-[#5A7184] font-medium mt-0.5">
+                      {c.routeName}
+                    </p>
                   </div>
 
-                  {/* Highlights / Why Go */}
+                  {/* 4. Short one-line description */}
                   <p className="text-xs text-[#193953] leading-relaxed font-medium">
                     {c.highlights}
                   </p>
 
-                  {/* Friendly status badge */}
-                  <div>
-                    <span className="inline-flex items-center gap-1.5 rounded-lg bg-white border border-[#E1ECF2] px-2.5 py-1 text-[11px] font-semibold text-[#5A7184]">
-                      <span className="h-2 w-2 rounded-full bg-[#FF9870]" />
-                      Trip inspiration — Detailed scheduling not yet available
+                  {/* 5. Recommended duration / drive note */}
+                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                    <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#DDF0F6] border border-[#BAE3F1] px-2.5 py-1 text-xs font-semibold text-[#176EA8]">
+                      <span>📅</span>
+                      <span>Best for {getRecommendedDurationLabel(c.id)}</span>
+                    </span>
+                    <span className="text-[11px] text-[#5A7184]">
+                      · ~{c.approxDriveLabel} drive
                     </span>
                   </div>
 
-                  {/* Honest drive estimate disclaimer */}
-                  <p className="text-[10px] text-[#5A7184] leading-relaxed italic border-t border-[#E1ECF2] pt-2">
-                    * ~{c.approxDriveLabel} from Bengaluru depending on traffic and route conditions.
-                  </p>
+                  {/* 6. Friendly status badge */}
+                  <div className="space-y-1.5 pt-0.5">
+                    <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#F4F9FC] border border-[#E1ECF2] px-2.5 py-1 text-[11px] font-semibold text-[#5A7184]">
+                      <span className="h-2 w-2 rounded-full bg-[#FF9870] flex-shrink-0" />
+                      <span>Trip inspiration — Detailed scheduling not yet available</span>
+                    </span>
+                    <p className="text-[10px] text-[#5A7184] italic leading-tight">
+                      * Travel time is an indicative estimate from Bengaluru; subject to traffic & road conditions.
+                    </p>
+                  </div>
                 </div>
 
-                {/* Explore Guide Button */}
-                <div className="mt-4 pt-3 border-t border-[#E1ECF2]">
+                {/* 7. Primary CTA */}
+                <div className="mt-5 pt-3 border-t border-[#E1ECF2]">
                   <button
                     type="button"
                     onClick={() => setActiveGuideId(c.id)}
-                    className="w-full flex items-center justify-center gap-1.5 rounded-xl border border-[#BAE3F1] bg-white py-2 text-xs font-bold text-[#176EA8] hover:bg-[#DDF0F6] active:scale-[0.99] transition-all cursor-pointer shadow-2xs"
+                    className="w-full flex items-center justify-center gap-2 rounded-xl border border-[#BAE3F1] bg-white py-2.5 px-4 text-xs font-bold text-[#176EA8] hover:bg-[#DDF0F6] active:scale-[0.99] transition-all cursor-pointer shadow-2xs"
                   >
                     <span>Explore Guide</span>
                     <span>→</span>
                   </button>
                 </div>
-              </div>
+              </article>
             );
           })}
         </div>

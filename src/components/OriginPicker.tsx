@@ -5,81 +5,12 @@ interface OriginPickerProps {
   onSelectOrigin?: (origin: string) => void;
 }
 
-interface OriginPreset {
-  id: string;
-  name: string;
-  sublabel: string;
-  isDemo?: boolean;
-  lat: number;
-  lng: number;
-}
-
-const BENGALURU_PRESETS: OriginPreset[] = [
-  {
-    id: 'mg-road',
-    name: 'MG Road, Bengaluru',
-    sublabel: 'Baseline reference hub (Central)',
-    lat: 12.9756,
-    lng: 77.6066,
-  },
-  {
-    id: 'koramangala',
-    name: 'Koramangala, Bengaluru — Demo Location',
-    sublabel: 'Pre-calibrated test starting point for non-local explorers',
-    isDemo: true,
-    lat: 12.9352,
-    lng: 77.6245,
-  },
-  {
-    id: 'indiranagar',
-    name: 'Indiranagar, Bengaluru',
-    sublabel: 'East Bengaluru corridor',
-    lat: 12.9784,
-    lng: 77.6408,
-  },
-  {
-    id: 'whitefield',
-    name: 'Whitefield, Bengaluru',
-    sublabel: 'East outer corridor / ITPL',
-    lat: 12.9698,
-    lng: 77.7500,
-  },
-  {
-    id: 'electronic-city',
-    name: 'Electronic City, Bengaluru',
-    sublabel: 'South corridor / Hosur Road toll plaza',
-    lat: 12.8452,
-    lng: 77.6602,
-  },
-  {
-    id: 'hebbal',
-    name: 'Hebbal, Bengaluru',
-    sublabel: 'North corridor / Airport highway & NH44',
-    lat: 13.0358,
-    lng: 77.5970,
-  },
-];
-
-function findNearestPreset(lat: number, lng: number): OriginPreset {
-  let closest = BENGALURU_PRESETS[0];
-  let minDistance = Infinity;
-
-  for (const preset of BENGALURU_PRESETS) {
-    if (preset.isDemo) continue; // Match against genuine corridors
-    const d = Math.hypot(lat - preset.lat, lng - preset.lng);
-    if (d < minDistance) {
-      minDistance = d;
-      closest = preset;
-    }
-  }
-  return closest;
-}
-
 export default function OriginPicker({
-  selectedOrigin = 'mg-road',
+  selectedOrigin = 'koramangala',
   onSelectOrigin,
 }: OriginPickerProps) {
   const [activeOrigin, setActiveOrigin] = useState(selectedOrigin);
+  const [detectedCoords, setDetectedCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
   const [showOutOfAreaModal, setShowOutOfAreaModal] = useState(false);
 
@@ -90,8 +21,8 @@ export default function OriginPicker({
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
-      setGpsStatus('Location access unavailable. Using default starting point (MG Road, Bengaluru).');
-      handleSelect('mg-road');
+      setGpsStatus('Location access unavailable on this device. Using Koramangala Demo Location.');
+      handleSelect('koramangala');
       return;
     }
 
@@ -99,16 +30,16 @@ export default function OriginPicker({
     navigator.geolocation.getCurrentPosition(
       position => {
         const { latitude, longitude } = position.coords;
-        // Bengaluru bounding box roughly: Lat 12.75 to 13.25 N, Lon 77.35 to 77.85 E
+        // Bengaluru metropolitan bounding box roughly: Lat 12.75 to 13.25 N, Lon 77.35 to 77.85 E
         const isInsideBengaluru =
           latitude >= 12.75 && latitude <= 13.25 && longitude >= 77.35 && longitude <= 77.85;
 
         if (isInsideBengaluru) {
-          const nearest = findNearestPreset(latitude, longitude);
+          setDetectedCoords({ lat: latitude, lng: longitude });
           setGpsStatus(
-            `Detected inside Bengaluru (${latitude.toFixed(2)}°N, ${longitude.toFixed(2)}°E). Mapped to closest corridor: ${nearest.name}.`
+            `Detected inside Bengaluru (${latitude.toFixed(2)}°N, ${longitude.toFixed(2)}°E).`
           );
-          handleSelect(nearest.id);
+          handleSelect('current-location');
         } else {
           setGpsStatus(null);
           handleSelect('koramangala');
@@ -117,15 +48,17 @@ export default function OriginPicker({
       },
       error => {
         if (error.code === error.PERMISSION_DENIED) {
-          setGpsStatus('Location access permission was denied. Using default starting point (MG Road, Bengaluru).');
+          setGpsStatus('Location access permission was denied. Using Koramangala Demo Location.');
         } else {
-          setGpsStatus('Location access unavailable. Using default starting point (MG Road, Bengaluru).');
+          setGpsStatus('Location access unavailable. Using Koramangala Demo Location.');
         }
-        handleSelect('mg-road');
+        handleSelect('koramangala');
       },
       { timeout: 7000 }
     );
   };
+
+  const isCurrentLoc = activeOrigin === 'current-location' && detectedCoords;
 
   return (
     <div className="space-y-3">
@@ -143,44 +76,63 @@ export default function OriginPicker({
       </div>
 
       {gpsStatus && (
-        <div className="rounded-xl bg-[#DDF0F6] border border-[#BAE3F1] px-3.5 py-2 text-xs text-[#193953] flex items-start gap-2 shadow-xs">
+        <div className="rounded-xl bg-[#DDF0F6] border border-[#BAE3F1] px-3.5 py-2 text-xs text-[#193953] flex items-start gap-2 shadow-2xs">
           <span className="text-[#176EA8] mt-0.5">ℹ️</span>
           <p className="leading-relaxed">{gpsStatus}</p>
         </div>
       )}
 
-      {/* Preset origin cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        {BENGALURU_PRESETS.map(preset => {
-          const isSelected = activeOrigin === preset.id;
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              onClick={() => handleSelect(preset.id)}
-              className={`flex items-start justify-between rounded-xl border p-3 text-left transition-all cursor-pointer ${
-                isSelected
-                  ? 'border-[#176EA8] bg-[#DDF0F6] text-[#193953] shadow-xs ring-1 ring-[#176EA8]'
-                  : 'border-[#E1ECF2] bg-white text-[#5A7184] hover:border-[#176EA8]/40 hover:bg-[#F4F9FC]'
-              }`}
-            >
-              <div className="min-w-0 pr-2">
-                <span className="block text-xs font-bold text-[#193953] truncate">{preset.name}</span>
-                <span className="block text-[11px] text-[#5A7184] mt-0.5 leading-snug">{preset.sublabel}</span>
-              </div>
-              {preset.isDemo && (
-                <span className="rounded-full bg-[#FF9870]/20 text-[#193953] border border-[#FF9870]/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider flex-shrink-0">
-                  Demo
+      {/* Exactly ONE Visible Starting Point Card */}
+      <div>
+        {isCurrentLoc ? (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-[#176EA8] bg-[#DDF0F6] p-4 text-[#193953] shadow-xs ring-1 ring-[#176EA8]">
+            <div className="space-y-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-base">📍</span>
+                <strong className="text-sm font-bold text-[#193953]">Current Location (Bengaluru)</strong>
+                <span className="rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                  Verified GPS
                 </span>
-              )}
+              </div>
+              <p className="text-xs text-[#5A7184]">
+                Detected at {detectedCoords.lat.toFixed(3)}°N, {detectedCoords.lng.toFixed(3)}°E · Bengaluru Service Area
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setDetectedCoords(null);
+                setGpsStatus(null);
+                handleSelect('koramangala');
+              }}
+              className="text-xs font-bold text-[#176EA8] hover:underline self-start sm:self-auto cursor-pointer"
+            >
+              Reset to Demo Origin
             </button>
-          );
-        })}
+          </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-[#176EA8] bg-[#DDF0F6] p-4 text-[#193953] shadow-xs ring-1 ring-[#176EA8]">
+            <div className="space-y-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-base">📍</span>
+                <strong className="text-sm font-bold text-[#193953]">
+                  Koramangala, Bengaluru — Demo Location
+                </strong>
+                <span className="rounded-full bg-[#FF9870]/20 text-[#193953] border border-[#FF9870]/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                  Demo Location
+                </span>
+              </div>
+              <p className="text-xs text-[#5A7184]">
+                Use this sample Bengaluru starting point to experience @48.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="rounded-xl border border-[#E1ECF2] bg-white/70 p-3 text-[11px] text-[#5A7184] space-y-1">
         <p className="font-semibold text-[#193953]">
-          Drive times are estimated from your selected starting point using standard Bengaluru highway corridors with typical weekend traffic buffers (+20%).
+          Drive times are estimated from Bengaluru using standard highway corridors with typical weekend traffic buffers (+20%).
         </p>
         <p>
           Need to fine-tune for your specific neighbourhood? You can adjust driving time ±15 to 45 minutes on the next screen.
@@ -190,38 +142,31 @@ export default function OriginPicker({
       {/* Out-of-Area Friendly Modal */}
       {showOutOfAreaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-md rounded-2xl border border-[#E1ECF2] bg-white p-5 text-[#193953] shadow-2xl space-y-4">
+          <div className="w-full max-w-md rounded-2xl border border-[#E1ECF2] bg-white p-6 text-[#193953] shadow-2xl space-y-4">
             <div className="flex items-start gap-3">
-              <span className="text-3xl p-1 bg-[#DDF0F6] rounded-xl border border-[#BAE3F1]">🧭</span>
+              <span className="text-3xl p-2 bg-[#DDF0F6] rounded-xl border border-[#BAE3F1]">🧭</span>
               <div>
                 <h4 className="text-base font-bold text-[#193953]">You appear to be outside Bengaluru</h4>
                 <p className="text-xs text-[#5A7184] mt-0.5">
-                  @48 currently plans road trips departing from Bengaluru.
+                  @48 currently supports Bengaluru road-trip planning.
                 </p>
               </div>
             </div>
 
             <p className="text-xs text-[#5A7184] leading-relaxed">
-              We&apos;ve set your starting point to our demo location (<strong>Koramangala, Bengaluru — Demo Location</strong>) so you can explore how our feasibility and scheduling engine works.
+              @48 currently supports Bengaluru road-trip planning. For now, try the <strong>Koramangala Demo Location</strong> to explore the experience.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowOutOfAreaModal(false)}
-                className="flex-1 rounded-xl bg-[#176EA8] py-2.5 px-3 text-xs font-bold text-white hover:bg-[#135A8A] transition-colors cursor-pointer shadow-xs"
-              >
-                Keep Koramangala (Demo)
-              </button>
+            <div className="pt-2">
               <button
                 type="button"
                 onClick={() => {
-                  handleSelect('mg-road');
+                  handleSelect('koramangala');
                   setShowOutOfAreaModal(false);
                 }}
-                className="flex-1 rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] py-2.5 px-3 text-xs font-bold text-[#193953] hover:bg-white transition-colors cursor-pointer"
+                className="w-full rounded-xl bg-[#176EA8] py-2.5 px-4 text-xs font-bold text-white hover:bg-[#135A8A] transition-colors cursor-pointer shadow-xs"
               >
-                Choose another Bengaluru hub
+                Try Koramangala Demo Location →
               </button>
             </div>
           </div>

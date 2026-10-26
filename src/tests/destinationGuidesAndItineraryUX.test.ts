@@ -3,6 +3,7 @@ import { getDestinationGuide, ALL_DESTINATION_IDS } from '../data/destinationGui
 import { getDestinationImage } from '../data/images';
 import { evaluateFeasibility } from '../engine/scheduler';
 import { getDestination } from '../data/destinations';
+import { buildShareableParams, parseShareableTrip } from '../utils/tripShare';
 import type { UserConstraints } from '../types';
 
 describe('Gate 3, 4, 5: Timing-Aware Destination Guides & Photography', () => {
@@ -50,6 +51,42 @@ describe('Gate 3, 4, 5: Timing-Aware Destination Guides & Photography', () => {
     expect(coorgRelaxed.pace).toBe('relaxed');
     expect(coorgPacked.pace).toBe('packed');
     expect(coorgRelaxed.whatToPrioritize.length).toBeLessThanOrEqual(coorgPacked.whatToPrioritize.length);
+  });
+
+  it('confirms all eight new destination guides vary meaningfully with selected duration and pace', () => {
+    const CANDIDATE_8_IDS = [
+      'kabini',
+      'sakleshpur',
+      'chikmagalur',
+      'yelagiri',
+      'wayanad',
+      'hampi',
+      'pondicherry',
+      'gokarna',
+    ];
+
+    for (const destId of CANDIDATE_8_IDS) {
+      const g1Relaxed = getDestinationGuide(destId, 1, 'relaxed');
+      const g4Packed = getDestinationGuide(destId, 4, 'packed');
+
+      // 1. Duration fit analysis must differ between 1 day and 4 days
+      expect(g1Relaxed.durationDays).toBe(1);
+      expect(g4Packed.durationDays).toBe(4);
+      expect(g1Relaxed.durationFitVerdict).not.toBe(g4Packed.durationFitVerdict);
+
+      // 2. 1-day express limits top highlights to top 3; 4-day returns full suite
+      expect(g1Relaxed.topHighlights.length).toBeLessThanOrEqual(3);
+      expect(g4Packed.topHighlights.length).toBeGreaterThan(3);
+
+      // 3. Recommended order adapts from 1-day sprint to 4-day deep journey
+      expect(g1Relaxed.recommendedOrder[0]).toContain('Morning');
+      expect(g4Packed.recommendedOrder.length).toBe(4); // Day 1, Day 2, Day 3, Day 4
+      expect(g4Packed.recommendedOrder[3]).toContain('Day 4');
+
+      // 4. Pace notes reflect relaxed vs packed travel style
+      expect(g1Relaxed.paceNote).toContain('Relaxed Pace');
+      expect(g4Packed.paceNote).toContain('Packed Pace');
+    }
   });
 
   it('registers genuine destination photography for all 12 destinations', () => {
@@ -187,5 +224,45 @@ describe('Gate 6: Multi-Day Free-Time Activity Planning', () => {
     expect(act2).toBeDefined();
     expect(act1?.day).toBe(2);
     expect(act2?.day).toBe(2);
+  });
+
+  it('persists a custom Day 3 activity across serialization, URL parameters, deserialization and scheduler execution', () => {
+    const dest = getDestination('mysuru')!;
+    const inputWithDay3Custom: UserConstraints = {
+      ...baseConstraints,
+      customActivities: [
+        {
+          id: 'custom_day3_act',
+          day: 3,
+          name: 'Day 3 Sandalwood Carving Workshop',
+          durationMinutes: 75,
+          costPerPersonINR: 250,
+        },
+      ],
+    };
+
+    // 1. URL serialization (Simulating sharing link / navigation)
+    const params = buildShareableParams('mysuru', inputWithDay3Custom);
+    expect(params.get('ca')).toContain('3~Day%203%20Sandalwood%20Carving%20Workshop~75~250');
+
+    // 2. URL deserialization (Simulating browser refresh / guest opening shared link)
+    const parsed = parseShareableTrip(params, 'mysuru');
+    expect(parsed.valid).toBe(true);
+    if (!parsed.valid) return;
+
+    expect(parsed.data.inputs.customActivities).toBeDefined();
+    expect(parsed.data.inputs.customActivities?.length).toBe(1);
+    const roundTripped = parsed.data.inputs.customActivities![0];
+    expect(roundTripped.day).toBe(3);
+    expect(roundTripped.name).toBe('Day 3 Sandalwood Carving Workshop');
+    expect(roundTripped.durationMinutes).toBe(75);
+    expect(roundTripped.costPerPersonINR).toBe(250);
+
+    // 3. Execution in scheduler with reconstructed inputs
+    const res = evaluateFeasibility(dest, parsed.data.inputs);
+    const day3Entry = res.timeline.find(t => t.day === 3 && t.label === 'Day 3 Sandalwood Carving Workshop');
+    expect(day3Entry).toBeDefined();
+    expect(day3Entry?.isCustom).toBe(true);
+    expect(day3Entry?.category).toBe('ACTIVITY');
   });
 });

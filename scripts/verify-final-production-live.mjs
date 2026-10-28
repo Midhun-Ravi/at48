@@ -46,19 +46,13 @@ function checkEndpoint(url) {
 }
 
 async function run() {
-  console.log('--- 1. Testing Production HTTP Endpoints ---');
+  console.log('--- 1. Testing Live Production HTTP Endpoints ---');
   const endpoints = [
     'https://at48.vercel.app/',
     'https://at48.vercel.app/plan',
     'https://at48.vercel.app/compare',
-    'https://at48.vercel.app/images/destinations/sakleshpur.jpg',
-    'https://at48.vercel.app/images/destinations/kabini.jpg',
-    'https://at48.vercel.app/images/destinations/chikmagalur.jpg',
-    'https://at48.vercel.app/images/destinations/yelagiri.jpg',
-    'https://at48.vercel.app/images/destinations/wayanad.jpg',
-    'https://at48.vercel.app/images/destinations/hampi.jpg',
-    'https://at48.vercel.app/images/destinations/pondicherry.jpg',
-    'https://at48.vercel.app/images/destinations/gokarna.jpg'
+    'https://at48.vercel.app/schedule/mysuru',
+    'https://at48.vercel.app/review/mysuru',
   ];
 
   for (const ep of endpoints) {
@@ -68,60 +62,36 @@ async function run() {
 
   console.log('\n--- 2. Capturing Live Production Screenshots from https://at48.vercel.app ---');
 
-  // Step 1: Home / Plan Desktop (Single demo card)
+  // 1. Page 2: Compare without Travel Pace Preference section
   await takeScreenshot(
-    'https://at48.vercel.app/plan',
-    path.join(ARTIFACT_DIR, 'production-live-plan-desktop.png'),
+    'https://at48.vercel.app/compare?dep=2026-10-31T06:00&ret=2026-11-03T21:00&budget=12000',
+    path.join(ARTIFACT_DIR, 'production-live-page2-no-pace-desktop.png'),
     1280,
-    1100
+    1400
   );
 
-  // Step 1: Plan Mobile 360px
+  // 2. Page 3: Stops & Route / Schedule without Trip Invitation / RSVP form (guest link)
+  const guestScheduleUrl = 'https://at48.vercel.app/schedule/mysuru?v=1&org=Sujil&mode=group&dep=2026-10-31T08:00&ret=2026-11-01T20:30&budget=6000&stops=maddur-tiffanys';
   await takeScreenshot(
-    'https://at48.vercel.app/plan',
-    path.join(ARTIFACT_DIR, 'production-live-plan-mobile-360px.png'),
-    360,
-    1200
-  );
-
-  // Step 2: Compare Desktop (Aligned cards + genuine photos)
-  await takeScreenshot(
-    'https://at48.vercel.app/compare?dep=2026-10-31T06:00&ret=2026-11-03T21:00&pace=relaxed&budget=12000',
-    path.join(ARTIFACT_DIR, 'production-live-compare-desktop.png'),
+    guestScheduleUrl,
+    path.join(ARTIFACT_DIR, 'production-live-page3-no-invite-desktop.png'),
     1280,
-    2400
+    1600
   );
 
-  // Step 2: Compare Mobile 360px
+  // 3. Page 4: Review Screen with Guest Invitation & RSVP form (guest link)
+  const guestReviewUrl = 'https://at48.vercel.app/review/mysuru?v=1&org=Sujil&mode=group&dep=2026-10-31T08:00&ret=2026-11-01T20:30&budget=6000&stops=maddur-tiffanys';
   await takeScreenshot(
-    'https://at48.vercel.app/compare?dep=2026-10-31T06:00&ret=2026-11-03T21:00&pace=relaxed&budget=12000',
-    path.join(ARTIFACT_DIR, 'production-live-compare-mobile-360px.png'),
-    360,
-    3400
-  );
-
-  // Step 3: Four-day schedule Desktop (Coorg 4-day engine)
-  const scheduleUrl = 'https://at48.vercel.app/schedule/coorg-madikeri?org=Atlas&mode=group&dep=2026-10-31T06:00&ret=2026-11-03T21:00&pace=relaxed&budget=12000';
-  await takeScreenshot(
-    scheduleUrl,
-    path.join(ARTIFACT_DIR, 'production-live-schedule-4day-desktop.png'),
+    guestReviewUrl,
+    path.join(ARTIFACT_DIR, 'production-live-page4-with-rsvp-desktop.png'),
     1280,
-    2800
+    2200
   );
 
-  // Step 4: Review Desktop
-  const reviewUrl = 'https://at48.vercel.app/review/coorg-madikeri?org=Atlas&mode=group&dep=2026-10-31T06:00&ret=2026-11-03T21:00&pace=relaxed&budget=12000';
+  // 4. Page 4: Mobile 360px Viewport with Guest Invitation & RSVP
   await takeScreenshot(
-    reviewUrl,
-    path.join(ARTIFACT_DIR, 'production-live-review-desktop.png'),
-    1280,
-    2400
-  );
-
-  // Guest invitation mobile 360px
-  await takeScreenshot(
-    scheduleUrl,
-    path.join(ARTIFACT_DIR, 'production-live-guest-invitation-mobile-360px.png'),
+    guestReviewUrl,
+    path.join(ARTIFACT_DIR, 'production-live-page4-with-rsvp-mobile-360px.png'),
     360,
     2600
   );

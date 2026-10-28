@@ -10,7 +10,6 @@ import TripMap from '../components/TripMap';
 import ProgressBar from '../components/ProgressBar';
 import { getPlaceImage } from '../data/images';
 import {
-  buildWhatsAppShareUrl,
   formatDuration,
   formatReadableDate,
   formatReadableDateTime,
@@ -18,11 +17,7 @@ import {
 } from '../utils/formatters';
 import {
   buildShareableParams,
-  buildShareableTripUrl,
-  buildWhatsAppRSVPMessage,
-  cleanInputDisplayName,
   parseShareableTrip,
-  sanitizeDisplayName,
 } from '../utils/tripShare';
 
 type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserConstraints>> };
@@ -84,9 +79,6 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   // Active inputs: Reconstructed from URL if valid share link opened; otherwise use props from planning flow
   const initialInputs = parsedTrip?.valid ? parsedTrip.data.inputs : inputs;
   const [currentInputs, setCurrentInputs] = useState<UserConstraints>(initialInputs);
-  const [guestName, setGuestName] = useState('');
-  const [guestError, setGuestError] = useState('');
-  const [rsvpSent, setRsvpSent] = useState(false);
 
   const dest = getDestination(id ?? '');
 
@@ -232,28 +224,6 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
     dest.name + ', Karnataka, India'
   )}`;
 
-  const handleGuestRSVP = () => {
-    const cleanGuest = sanitizeDisplayName(guestName);
-    if (!cleanGuest) {
-      setGuestError('Please enter your name so the organizer knows who is joining.');
-      return;
-    }
-    setGuestError('');
-
-    const tripUrl = buildShareableTripUrl(dest.id, currentInputs);
-    const text = buildWhatsAppRSVPMessage({
-      destinationName: dest.name,
-      departureDateTime: currentInputs.departureDateTime,
-      returnDeadlineDateTime: currentInputs.returnDeadlineDateTime,
-      organizerName: organizerName || 'the organizer',
-      guestName: cleanGuest,
-      tripUrl,
-    });
-
-    setRsvpSent(true);
-    window.open(buildWhatsAppShareUrl(text), '_blank', 'noopener,noreferrer');
-  };
-
   const goToReviewScreen = () => {
     const params = buildShareableParams(dest.id, currentInputs);
     nav(`/review/${dest.id}?${params.toString()}`);
@@ -264,67 +234,27 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       {/* 4-part segmented progress meter */}
       <ProgressBar currentStep={3} />
 
-      {/* Guest Invitation Banner if opened from shared link */}
+      {/* Guest Invitation Notice: Directs to Page 4 for RSVP while preserving trip data */}
       {isGuestView && (
-        <div className="rounded-2xl border border-[#176EA8]/30 bg-[#DDF0F6] p-5 shadow-sm space-y-4">
-          <div className="flex items-start justify-between gap-3">
+        <div className="rounded-2xl border border-[#BAE3F1] bg-[#DDF0F6] p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-[#193953] shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <span className="text-2xl">🚗</span>
             <div>
-              <span className="rounded-full bg-[#176EA8] text-white px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider">
-                Trip Invitation
-              </span>
-              <h2 className="text-xl font-black text-[#193953] mt-1.5">
-                {organizerName ? `${organizerName} invited you on a road trip!` : 'You’ve been invited on a road trip!'}
-              </h2>
-              <p className="text-xs text-[#5A7184] mt-1">
-                Explore the planned schedule for <strong>{dest.name}</strong>, highway pitstops, and budget before sending your RSVP.
+              <p className="font-bold text-[#176EA8]">
+                {organizerName ? `Trip Invitation from ${organizerName}` : 'Shared Road Trip Invitation'}
+              </p>
+              <p className="text-[#5A7184] text-[11px] mt-0.5">
+                Explore the planned schedule and route below, or proceed directly to review and send your RSVP.
               </p>
             </div>
-            <span className="text-3xl">🚗</span>
           </div>
-
-          <div className="rounded-xl bg-white border border-[#E1ECF2] p-3 text-xs space-y-1">
-            <p>
-              📅 <strong>Dates:</strong> {formatReadableDateTime(currentInputs.departureDateTime)} → {formatReadableDateTime(currentInputs.returnDeadlineDateTime)}
-            </p>
-            <p>
-              👥 <strong>Crew Size:</strong> {currentInputs.partySize} travelers · <strong>Est. Cost:</strong> ₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label className="block text-xs font-bold uppercase tracking-wider text-[#193953]">
-              Your Name to RSVP
-            </label>
-            <input
-              type="text"
-              maxLength={40}
-              placeholder="e.g. Arun or Priya"
-              value={guestName}
-              onChange={e => {
-                setGuestError('');
-                setGuestName(cleanInputDisplayName(e.target.value));
-              }}
-              className="w-full rounded-xl border border-[#E1ECF2] bg-white p-3 text-sm text-[#193953] placeholder:text-[#5A7184]/60 focus:border-[#176EA8] focus:outline-none"
-            />
-            {guestError && <p className="text-xs font-semibold text-red-700">{guestError}</p>}
-          </div>
-
           <button
             type="button"
-            onClick={handleGuestRSVP}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 font-bold text-white shadow-md hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
+            onClick={goToReviewScreen}
+            className="w-full sm:w-auto flex-shrink-0 rounded-xl bg-[#176EA8] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#135a8a] active:scale-[0.99] transition-all cursor-pointer shadow-xs"
           >
-            <span className="text-base">💬</span> Join Trip & Send RSVP via WhatsApp
+            Review & RSVP on Page 4 →
           </button>
-
-          {rsvpSent && (
-            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-xs text-emerald-800 space-y-1">
-              <p className="font-bold">✓ WhatsApp opened with your RSVP message.</p>
-              <p>
-                Send the message directly to {organizerName || 'the organizer'} to confirm your spot.
-              </p>
-            </div>
-          )}
         </div>
       )}
 
@@ -1161,7 +1091,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
           onClick={goToReviewScreen}
           className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#176EA8] px-6 py-4 text-base font-bold text-white shadow-sm hover:bg-[#135a8a] active:scale-[0.99] transition-all cursor-pointer"
         >
-          Review My Trip →
+          {isGuestView ? 'Review Trip & RSVP →' : 'Review My Trip →'}
         </button>
       </div>
 

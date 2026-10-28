@@ -59,7 +59,7 @@ export default function DestinationGuideModal({
                 Destination Guide
               </span>
               <span className="rounded-full bg-white/20 backdrop-blur-xs px-2.5 py-0.5 text-[11px] font-semibold">
-                {guide.durationDays} Calendar Day{guide.durationDays > 1 ? 's' : ''} · {guide.pace} pace
+                {guide.durationDays} Calendar Day{guide.durationDays > 1 ? 's' : ''}
               </span>
             </div>
             <h2 id="guide-title" className="text-2xl sm:text-3xl font-black">

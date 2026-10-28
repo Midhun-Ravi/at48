@@ -12,21 +12,6 @@ import { buildShareableParams } from '../utils/tripShare';
 
 type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserConstraints>> };
 
-const PACE_EXPLANATIONS: Record<PacePreference, { title: string; desc: string }> = {
-  relaxed: {
-    title: 'Relaxed Pace',
-    desc: 'Schedules only top-priority highlights. Reserves 90m for arrival & check-in, 60m for breakfast, and ample free time.',
-  },
-  balanced: {
-    title: 'Balanced Pace (Recommended)',
-    desc: 'Schedules key signature landmarks with sensible 75m arrival meal, 45m breakfast, and reliable travel buffers.',
-  },
-  packed: {
-    title: 'Packed Pace',
-    desc: 'Maximizes attraction visits fitting within operating hours. Uses compact 60m check-in and 30m meals. Watch for fatigue.',
-  },
-};
-
 function getRecommendedDurationLabel(id: string): string {
   switch (id) {
     case 'yelagiri':
@@ -62,22 +47,23 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
     }));
   };
 
-  const handlePaceChange = (pace: PacePreference) => {
-    setInputs(prev => ({ ...prev, pace }));
-  };
-
   const [searchParams] = useSearchParams();
 
   // If query params are present, defensively merge into activeInputs
   const activeInputs = useMemo<UserConstraints>(() => {
     const dep = searchParams.get('dep');
     const ret = searchParams.get('ret');
-    if (!dep || !ret) return inputs;
+    if (!dep || !ret) {
+      return {
+        ...inputs,
+        pace: inputs.pace || 'balanced',
+      };
+    }
 
     const party = parseInt(searchParams.get('party') || '', 10);
     const budget = parseInt(searchParams.get('budget') || '', 10);
     const rawPace = searchParams.get('pace');
-    const pace = rawPace === 'relaxed' || rawPace === 'packed' ? rawPace : inputs.pace;
+    const pace = rawPace === 'relaxed' || rawPace === 'packed' || rawPace === 'balanced' ? rawPace : (inputs.pace || 'balanced');
 
     return {
       ...inputs,
@@ -115,44 +101,6 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
         <Link to="/plan" className="text-xs font-semibold text-[#176EA8] hover:underline">
           ← Edit dates & budget
         </Link>
-      </div>
-
-      {/* Travel Pace Selector (with dynamic explanation) */}
-      <div className="rounded-2xl border border-[#E1ECF2] bg-white p-4 sm:p-5 shadow-sm space-y-3">
-        <div>
-          <span className="text-xs font-semibold uppercase tracking-wider text-[#5A7184]">
-            Travel Pace Preference
-          </span>
-          <p className="text-xs text-[#5A7184] mt-0.5">
-            Adjusts allocated duration at attractions, arrival dining times, and morning departure schedules.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          {(['relaxed', 'balanced', 'packed'] as const).map(p => {
-            const isSelected = activeInputs.pace === p;
-            return (
-              <button
-                key={p}
-                type="button"
-                onClick={() => handlePaceChange(p)}
-                className={`rounded-xl border px-3 py-2.5 text-xs font-bold capitalize transition-all cursor-pointer ${
-                  isSelected
-                    ? 'border-[#176EA8] bg-[#176EA8] text-white shadow-xs'
-                    : 'border-[#E1ECF2] bg-[#F4F9FC] text-[#5A7184] hover:border-slate-300 hover:text-[#193953]'
-                }`}
-              >
-                {p === 'relaxed' ? '🌿 Relaxed' : p === 'balanced' ? '⚖️ Balanced' : '⚡ Packed'}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Dynamic Contextual Pace Explanation Banner */}
-        <div className="rounded-xl bg-[#DDF0F6] border border-[#176EA8]/20 p-3 text-xs text-[#193953] leading-relaxed">
-          <strong className="text-[#176EA8]">{PACE_EXPLANATIONS[activeInputs.pace].title}:</strong>{' '}
-          {PACE_EXPLANATIONS[activeInputs.pace].desc}
-        </div>
       </div>
 
       {/* Verified Destination Comparison Cards (Ranked Deterministically) */}

@@ -214,71 +214,25 @@ export default function ReviewScreen({ inputs }: Props) {
       <div>
         <h1 className="text-3xl font-extrabold text-[#193953]">Ready to hit the road?</h1>
         <p className="mt-1 text-sm text-[#5A7184]">
-          Everything is set! Check your final itinerary snapshot, save on this device, and share with your crew.
+          Final trip reality check: review your return deadline margin, usable destination time, budget, and sharing link.
         </p>
       </div>
 
-      {/* Guest Invitation & RSVP Panel on Page 4 */}
+      {/* Guest Invitation Notice (Gate 6: De-emphasized, preserves full trip visibility first) */}
       {isGuestView && (
-        <div className="rounded-2xl border-2 border-[#25D366]/40 bg-[#DDF0F6] p-5 sm:p-6 shadow-sm space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <span className="rounded-full bg-[#176EA8] text-white px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider">
-                Trip Invitation & RSVP
-              </span>
-              <h2 className="text-xl font-black text-[#193953] mt-1.5">
-                {organizerName ? `${organizerName} invited you on a road trip!` : 'You’ve been invited on a road trip!'}
-              </h2>
-              <p className="text-xs text-[#5A7184] mt-1">
-                Explore the planned schedule for <strong>{dest.name}</strong>, highway pitstops, and budget before sending your RSVP.
-              </p>
-            </div>
-            <span className="text-3xl">🚗</span>
+        <div className="rounded-xl border border-[#BAE3F1] bg-[#DDF0F6] p-3.5 text-xs text-[#193953] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🚗</span>
+            <span>
+              <strong>Trip Invitation from {organizerName || 'your organizer'}:</strong> Review the planned timeline below, then send your RSVP at the bottom of the page.
+            </span>
           </div>
-
-          <div className="rounded-xl bg-white border border-[#E1ECF2] p-3.5 text-xs space-y-1">
-            <p>
-              📅 <strong>Dates:</strong> {formatReadableDateTime(activeInputs.departureDateTime)} → {formatReadableDateTime(activeInputs.returnDeadlineDateTime)}
-            </p>
-            <p>
-              👥 <strong>Crew Size:</strong> {activeInputs.partySize} travelers · <strong>Est. Cost:</strong> ₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label className="block text-xs font-bold uppercase tracking-wider text-[#193953]">
-              Your Name to RSVP
-            </label>
-            <input
-              type="text"
-              maxLength={40}
-              placeholder="e.g. Arun or Priya"
-              value={guestName}
-              onChange={e => {
-                setGuestError('');
-                setGuestName(cleanInputDisplayName(e.target.value));
-              }}
-              className="w-full rounded-xl border border-[#E1ECF2] bg-white p-3 text-sm text-[#193953] placeholder:text-[#5A7184]/60 focus:border-[#176EA8] focus:outline-none"
-            />
-            {guestError && <p className="text-xs font-semibold text-red-700">{guestError}</p>}
-          </div>
-
-          <button
-            type="button"
-            onClick={handleGuestRSVP}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3.5 font-bold text-white shadow-md hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer text-sm"
+          <a
+            href="#guest-rsvp"
+            className="rounded-lg bg-[#176EA8] text-white px-3 py-1 font-bold text-xs hover:bg-[#135a8a] transition-colors whitespace-nowrap self-end sm:self-auto"
           >
-            <span className="text-base">💬</span> Join Trip & Send RSVP via WhatsApp
-          </button>
-
-          {rsvpSent && (
-            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3.5 text-xs text-emerald-800 space-y-1">
-              <p className="font-bold">✓ WhatsApp opened with your RSVP message.</p>
-              <p>
-                Send the message directly to {organizerName || 'the organizer'} to confirm your spot.
-              </p>
-            </div>
-          )}
+            Jump to RSVP ↓
+          </a>
         </div>
       )}
 
@@ -616,32 +570,37 @@ export default function ReviewScreen({ inputs }: Props) {
           </p>
         </div>
 
-        {/* If guest view, also provide RSVP action in Section E */}
+        {/* If guest view, provide the RSVP action (Gate 6) */}
         {isGuestView && (
-          <div className="rounded-xl border border-[#BAE3F1] bg-white p-4 space-y-3">
+          <div id="guest-rsvp" className="rounded-xl border border-[#BAE3F1] bg-white p-4 space-y-3 shadow-2xs">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">Guest RSVP</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">Trip Invitation & RSVP</span>
               <span className="text-xs text-[#5A7184]">Confirm spot with {organizerName || 'organizer'}</span>
             </div>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input
-                type="text"
-                maxLength={40}
-                placeholder="Your name to RSVP"
-                value={guestName}
-                onChange={e => {
-                  setGuestError('');
-                  setGuestName(cleanInputDisplayName(e.target.value));
-                }}
-                className="flex-1 rounded-xl border border-[#E1ECF2] p-2.5 text-xs text-[#193953] placeholder:text-[#5A7184]/60 focus:border-[#176EA8] focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={handleGuestRSVP}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-[#25D366] px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
-              >
-                <span>💬</span> Join & Send RSVP
-              </button>
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-[#193953]">
+                Your Name to RSVP
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  maxLength={40}
+                  placeholder="e.g. Arun or Priya"
+                  value={guestName}
+                  onChange={e => {
+                    setGuestError('');
+                    setGuestName(cleanInputDisplayName(e.target.value));
+                  }}
+                  className="flex-1 rounded-xl border border-[#E1ECF2] p-2.5 text-xs text-[#193953] placeholder:text-[#5A7184]/60 focus:border-[#176EA8] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleGuestRSVP}
+                  className="flex items-center justify-center gap-1.5 rounded-xl bg-[#25D366] px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer whitespace-nowrap"
+                >
+                  <span>💬</span> Join Trip & Send RSVP via WhatsApp
+                </button>
+              </div>
             </div>
             {guestError && <p className="text-xs font-semibold text-red-700">{guestError}</p>}
             {rsvpSent && (
@@ -650,46 +609,46 @@ export default function ReviewScreen({ inputs }: Props) {
           </div>
         )}
 
-        {/* Primary Action Buttons: Save My Trip & Copy Share Link */}
+        {/* Primary Action Buttons: Prioritize Share Trip (Gate 6) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
-            onClick={handleSaveTrip}
-            className={`w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-sm font-bold text-white shadow-xs transition-all cursor-pointer ${
-              savedSuccess
-                ? 'bg-emerald-600 hover:bg-emerald-700'
-                : 'bg-[#176EA8] hover:bg-[#135a8a]'
-            }`}
-          >
-            <span>{savedSuccess ? '✓' : '💾'}</span>
-            <span>{savedSuccess ? 'Saved to My Trip!' : 'Save My Trip (This Device)'}</span>
-          </button>
-
-          <button
             onClick={handleCopyTripLink}
-            className="w-full flex items-center justify-center gap-2 rounded-xl border border-[#E1ECF2] bg-white py-3.5 px-4 text-sm font-bold text-[#193953] shadow-xs hover:bg-slate-50 active:scale-[0.99] transition-all cursor-pointer"
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#176EA8] py-3.5 px-4 text-sm font-bold text-white shadow-xs hover:bg-[#135a8a] active:scale-[0.99] transition-all cursor-pointer"
           >
             <span>🔗</span>
             <span>Share Trip (Copy Link)</span>
           </button>
+
+          <button
+            onClick={handleSaveTrip}
+            className={`w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-sm font-bold transition-all cursor-pointer border ${
+              savedSuccess
+                ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
+                : 'border-[#E1ECF2] bg-white text-[#193953] shadow-xs hover:bg-slate-50'
+            }`}
+          >
+            <span>{savedSuccess ? '✓' : '💾'}</span>
+            <span>{savedSuccess ? 'Saved to My Trip!' : 'Save Trip (This Device)'}</span>
+          </button>
         </div>
 
-        {/* WhatsApp Sharing Actions */}
+        {/* Supporting Quick Sharing Options */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
           <button
             onClick={handleShareInviteWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-3.5 py-3 text-xs font-bold text-white shadow-xs hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-3.5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
           >
             <span>💬</span> WhatsApp Invite
           </button>
           <button
             onClick={handleCopySummary}
-            className="flex items-center justify-center gap-2 rounded-xl border border-[#E1ECF2] bg-white px-3.5 py-3 text-xs font-bold text-[#193953] hover:bg-slate-50 shadow-xs active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-[#E1ECF2] bg-white px-3.5 py-2.5 text-xs font-bold text-[#193953] hover:bg-slate-50 shadow-xs active:scale-[0.99] transition-all cursor-pointer"
           >
             <span>📋</span> Copy Text Summary
           </button>
           <button
             onClick={handleShareSummaryWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl border border-[#E1ECF2] bg-white px-3.5 py-3 text-xs font-bold text-[#193953] hover:bg-slate-50 shadow-xs active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-[#E1ECF2] bg-white px-3.5 py-2.5 text-xs font-bold text-[#193953] hover:bg-slate-50 shadow-xs active:scale-[0.99] transition-all cursor-pointer"
           >
             <span>💬</span> WhatsApp Summary
           </button>

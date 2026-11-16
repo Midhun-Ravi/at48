@@ -280,45 +280,98 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
           </p>
         ) : (
           <p>
-            <strong>Standard Corridor:</strong> No national park night driving bans along this highway. Departure timing models typical weekend toll and traffic buffers.
+            <strong>Standard Highway Corridor:</strong> No national park night driving bans along this highway. Departure timing models standard expressway speeds with realistic buffer margins.
           </p>
         )}
-        <p className="text-[11px] text-amber-800/80">
-          Weather Forecast: Outside 5-day predictive horizon for requested dates. Check official IMD / Karnataka State Natural Disaster Monitoring Centre updates before departure.
-        </p>
       </div>
 
-      {/* Primary Feasibility Card */}
-      <div className="rounded-2xl border border-[#E1ECF2] bg-white p-6 text-[#193953] shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="rounded-full bg-[#DDF0F6] border border-[#176EA8]/30 px-3 py-1 text-xs font-bold uppercase tracking-wider text-[#176EA8]">
-            Feasibility Verdict
-          </span>
-          <span className="text-xs text-[#5A7184]">MG Road reference origin</span>
-        </div>
-        <p className="mt-2 text-2xl font-black tracking-tight text-[#193953]">{r.rating}</p>
-        <p className="mt-1 text-sm text-[#5A7184]">{r.ratingExplanation}</p>
-
-        <div className="mt-5 grid grid-cols-2 gap-4 border-t border-[#E1ECF2] pt-4 text-sm">
-          <div>
-            <p className="text-xs text-[#5A7184]">Usable destination free time</p>
-            <strong className="text-2xl font-black text-[#193953]">{formatDuration(r.destinationSlackMinutes)}</strong>
+      {/* Primary Feasibility Card (Gate 3 & Gate 5: Hero Return Feasibility) */}
+      <div className="rounded-2xl border border-[#E1ECF2] bg-white p-5 sm:p-6 text-[#193953] shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E1ECF2] pb-3">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-[#DDF0F6] border border-[#176EA8]/30 px-3 py-0.5 text-xs font-bold uppercase tracking-wider text-[#176EA8]">
+              Feasibility Reality Check
+            </span>
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-xs font-extrabold border ${
+                r.rating === 'Comfortable'
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                  : r.rating === 'Tight'
+                  ? 'bg-amber-50 text-amber-800 border-amber-300'
+                  : 'bg-red-50 text-red-800 border-red-300'
+              }`}
+            >
+              {r.rating === 'Comfortable' ? '✓ Comfortable' : r.rating === 'Tight' ? '⚠️ Tight' : '❌ Not Recommended'}
+            </span>
           </div>
-          <div>
-            <p className="text-xs text-[#5A7184]">Return deadline margin</p>
-            <strong className={`text-2xl font-black ${r.returnDeadlineMarginMinutes < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
-              {formatDuration(r.returnDeadlineMarginMinutes, true)}
+          <span className="text-xs text-[#5A7184]">Reference origin: Bengaluru (MG Road)</span>
+        </div>
+
+        <p className="text-sm font-semibold text-[#193953]">{r.ratingExplanation}</p>
+
+        {/* HERO METRIC: Return Deadline Margin */}
+        <div
+          className={`rounded-xl border p-3.5 space-y-1.5 ${
+            r.returnDeadlineMarginMinutes >= 60
+              ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+              : r.returnDeadlineMarginMinutes >= 0
+              ? 'bg-amber-50/80 border-amber-200 text-amber-950'
+              : 'bg-red-50/80 border-red-200 text-red-950'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#5A7184]">
+              Will I return before my deadline?
+            </span>
+            <strong
+              className={`text-lg font-black ${
+                r.returnDeadlineMarginMinutes >= 60
+                  ? 'text-emerald-700'
+                  : r.returnDeadlineMarginMinutes >= 0
+                  ? 'text-amber-700'
+                  : 'text-red-700'
+              }`}
+            >
+              {r.returnDeadlineMarginMinutes >= 0
+                ? `+${formatDuration(r.returnDeadlineMarginMinutes)} margin`
+                : `−${formatDuration(Math.abs(r.returnDeadlineMarginMinutes))} overdue`}
             </strong>
           </div>
+          <p className="text-xs leading-relaxed font-medium">
+            {r.returnDeadlineMarginMinutes >= 60 ? (
+              <>
+                <strong className="text-emerald-800">✓ Safe return buffer:</strong> Expected arrival home is{' '}
+                <strong>{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>, arriving{' '}
+                <strong>{formatDuration(r.returnDeadlineMarginMinutes)}</strong> before your{' '}
+                <strong>{formatReadableDateTime(currentInputs.returnDeadlineDateTime)}</strong> return deadline.
+              </>
+            ) : r.returnDeadlineMarginMinutes >= 0 ? (
+              <>
+                <strong className="text-amber-800">⚠️ Narrow buffer:</strong> Expected arrival home is{' '}
+                <strong>{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>, leaving only{' '}
+                <strong>{formatDuration(r.returnDeadlineMarginMinutes)}</strong> before your deadline. Highway delays risk being late.
+              </>
+            ) : (
+              <>
+                <strong className="text-red-800">❌ Return deadline missed:</strong> Expected return arrival is{' '}
+                <strong>{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>, which exceeds your{' '}
+                <strong>{formatReadableDateTime(currentInputs.returnDeadlineDateTime)}</strong> deadline by{' '}
+                <strong>{formatDuration(Math.abs(r.returnDeadlineMarginMinutes))}</strong>.
+              </>
+            )}
+          </p>
         </div>
 
-        <div className="mt-4 border-t border-[#E1ECF2] pt-3 text-xs text-[#5A7184] space-y-1">
-          <p>
-            Expected home: <strong className="text-[#193953]">{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>
-          </p>
-          <p>
-            Estimated cost: <strong className="text-[#193953]">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person</strong> (₹{r.estimatedTripTotalINR.toLocaleString('en-IN')} total for party of {currentInputs.partySize})
-          </p>
+        <div className="grid grid-cols-2 gap-4 border-t border-[#E1ECF2] pt-3 text-xs">
+          <div>
+            <p className="text-[#5A7184] font-medium">Usable Destination Free Time</p>
+            <strong className="text-xl font-black text-[#193953]">{formatDuration(r.destinationSlackMinutes)}</strong>
+          </div>
+          <div>
+            <p className="text-[#5A7184] font-medium">Estimated Per-Person Budget</p>
+            <strong className="text-xl font-black text-[#193953]">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}</strong>
+            <span className="text-[11px] text-[#5A7184] block">(₹{r.estimatedTripTotalINR.toLocaleString('en-IN')} total for party of {currentInputs.partySize})</span>
+          </div>
         </div>
       </div>
 
@@ -330,36 +383,130 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         onTogglePitstop={togglePitstop}
       />
 
-      {/* Adjustments & Scenarios */}
+      {/* Adjustments & Scenarios: What if the drive takes longer? (Gate 4 & Gate 5) */}
       <div className="space-y-4 rounded-2xl border border-[#E1ECF2] bg-white p-5 shadow-sm">
-        <div>
-          <h2 className="text-base font-bold text-[#193953]">Itinerary Scenarios & Sightseeing</h2>
-          <p className="text-xs text-[#5A7184]">
-            Customize departure delays and optional visits. Feasibility metrics and timelines recalculate immediately.
-          </p>
+        <div className="flex flex-wrap items-center justify-between gap-1">
+          <div>
+            <h2 className="text-base font-bold text-[#193953]">What if the drive takes longer?</h2>
+            <p className="text-xs text-[#5A7184]">
+              Add extra travel time to see how it affects your itinerary and return deadline.
+            </p>
+          </div>
+          <span className="rounded-full bg-[#DDF0F6] border border-[#BAE3F1] px-2.5 py-0.5 text-[10px] font-semibold text-[#176EA8]">
+            Planning scenario · Not live GPS
+          </span>
         </div>
 
-        {/* Departure Delay Scenario */}
-        <div className="rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3.5">
-          <label className="flex items-center gap-3 font-semibold text-[#193953] cursor-pointer">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded accent-[#176EA8] cursor-pointer"
-              checked={currentInputs.simulateDelayMinutes === 60}
-              onChange={e =>
-                updateInputs(s => ({
-                  ...s,
-                  simulateDelayMinutes: e.target.checked ? 60 : 0,
-                }))
-              }
-            />
+        {/* Driving Adjustment & Delay Controls */}
+        <div className="rounded-xl border border-[#BAE3F1] bg-[#DDF0F6]/40 p-4 space-y-3.5 text-xs">
+          {/* 1. Travel Time Allowance */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <span className="block text-sm text-[#193953] font-bold">Simulate +1 hour outbound departure delay</span>
-              <span className="text-xs text-[#5A7184] font-normal">
-                Models being held up leaving Bengaluru (e.g., Saturday morning traffic or late start).
+              <span className="font-bold text-[#193953] block text-xs">One-Way Driving Allowance:</span>
+              <span className="text-[11px] text-[#5A7184]">
+                Baseline: {formatDuration(dest.baselineOneWayDriveMinutes)} + 20% highway buffer ({formatDuration(r.outboundDriveMinutes)} total one-way)
               </span>
             </div>
-          </label>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  updateInputs(s => ({
+                    ...s,
+                    drivingAdjustmentMinutes: Math.max(-60, Math.min(120, (s.drivingAdjustmentMinutes ?? 0) - 15)),
+                  }))
+                }
+                disabled={(currentInputs.drivingAdjustmentMinutes ?? 0) <= -60}
+                className="h-7 w-7 rounded-lg bg-white border border-[#E1ECF2] text-xs font-bold text-[#193953] hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                title="Reduce by 15m"
+              >
+                −15
+              </button>
+              <span className="min-w-12 text-center text-xs font-extrabold text-[#176EA8]">
+                {(currentInputs.drivingAdjustmentMinutes ?? 0) > 0
+                  ? `+${currentInputs.drivingAdjustmentMinutes}m`
+                  : (currentInputs.drivingAdjustmentMinutes ?? 0) < 0
+                  ? `${currentInputs.drivingAdjustmentMinutes}m`
+                  : '0m'}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  updateInputs(s => ({
+                    ...s,
+                    drivingAdjustmentMinutes: Math.max(-60, Math.min(120, (s.drivingAdjustmentMinutes ?? 0) + 15)),
+                  }))
+                }
+                disabled={(currentInputs.drivingAdjustmentMinutes ?? 0) >= 120}
+                className="h-7 w-7 rounded-lg bg-white border border-[#E1ECF2] text-xs font-bold text-[#193953] hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                title="Add 15m delay"
+              >
+                +15
+              </button>
+
+              {/* Presets */}
+              <div className="flex items-center gap-1 ml-2">
+                {([0, 30, 45, 60] as const).map(preset => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() =>
+                      updateInputs(s => ({
+                        ...s,
+                        drivingAdjustmentMinutes: preset,
+                      }))
+                    }
+                    className={`rounded-lg px-2 py-1 text-[10px] font-bold cursor-pointer transition-colors ${
+                      (currentInputs.drivingAdjustmentMinutes ?? 0) === preset
+                        ? 'bg-[#176EA8] text-white shadow-xs'
+                        : 'bg-white border border-[#BAE3F1] text-[#193953] hover:bg-slate-100'
+                    }`}
+                  >
+                    {preset === 0 ? 'Baseline' : `+${preset}m`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Departure Delay Scenario */}
+          <div className="rounded-lg border border-[#E1ECF2] bg-white p-3">
+            <label className="flex items-center gap-3 font-semibold text-[#193953] cursor-pointer">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded accent-[#176EA8] cursor-pointer"
+                checked={currentInputs.simulateDelayMinutes === 60}
+                onChange={e =>
+                  updateInputs(s => ({
+                    ...s,
+                    simulateDelayMinutes: e.target.checked ? 60 : 0,
+                  }))
+                }
+              />
+              <div>
+                <span className="block text-xs text-[#193953] font-bold">Simulate +1 hour late outbound departure</span>
+                <span className="text-[11px] text-[#5A7184] font-normal">
+                  Models being held up leaving Bengaluru (e.g. morning city bottlenecks or late start).
+                </span>
+              </div>
+            </label>
+          </div>
+
+          {/* Live Impact Callout */}
+          {((currentInputs.drivingAdjustmentMinutes ?? 0) !== 0 || currentInputs.simulateDelayMinutes === 60) && (
+            <div className="rounded-lg bg-white border border-[#BAE3F1] p-2.5 text-[11px] space-y-1">
+              <div className="flex items-center justify-between font-bold text-[#176EA8]">
+                <span>Active Scenario Impact:</span>
+                <span className={r.returnDeadlineMarginMinutes >= 60 ? 'text-emerald-700' : r.returnDeadlineMarginMinutes >= 0 ? 'text-amber-700' : 'text-red-700'}>
+                  Return Margin: {formatDuration(r.returnDeadlineMarginMinutes, true)}
+                </span>
+              </div>
+              <p className="text-[#5A7184]">
+                Timeline below has automatically shifted. Expected home arrival is now <strong>{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Attractions List: Required vs Optional */}

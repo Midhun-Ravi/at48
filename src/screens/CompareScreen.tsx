@@ -1,33 +1,16 @@
 import { useState, useMemo, type Dispatch, type SetStateAction } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import type { UserConstraints, PacePreference } from '../types';
-import { formatDuration } from '../utils/formatters';
+import { formatDuration, formatReadableDateTime } from '../utils/formatters';
 import { getDestinationImage } from '../data/images';
 import ProgressBar from '../components/ProgressBar';
 import DestinationGuideModal from '../components/DestinationGuideModal';
 import { getDestinationGuide } from '../data/destinationGuides';
-import { getCalendarDaysCount, parseIST } from '../engine/scheduler';
+import { getCalendarDaysCount, parseIST, evaluateFeasibility } from '../engine/scheduler';
 import { getDestinationRecommendations } from '../engine/recommendations';
 import { buildShareableParams } from '../utils/tripShare';
 
 type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserConstraints>> };
-
-function getRecommendedDurationLabel(id: string): string {
-  switch (id) {
-    case 'yelagiri':
-      return '1–2 day escapes';
-    case 'wayanad':
-    case 'hampi':
-    case 'gokarna':
-      return '3–4 day escapes';
-    case 'kabini':
-    case 'sakleshpur':
-    case 'chikmagalur':
-    case 'pondicherry':
-    default:
-      return '2–3 day escapes';
-  }
-}
 
 export default function CompareScreen({ inputs, setInputs }: Props) {
   const [activeGuideId, setActiveGuideId] = useState<string | null>(null);
@@ -35,9 +18,8 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
   const adjustments = inputs.destinationAdjustments ?? {};
   const getAdj = (destId: string) => adjustments[destId] ?? 0;
 
-  const updateAdj = (destId: string, delta: number) => {
-    const current = getAdj(destId);
-    const next = Math.max(-60, Math.min(120, current + delta));
+  const setExactAdj = (destId: string, value: number) => {
+    const next = Math.max(-60, Math.min(120, value));
     setInputs(prev => ({
       ...prev,
       destinationAdjustments: {
@@ -45,6 +27,11 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
         [destId]: next,
       },
     }));
+  };
+
+  const updateAdj = (destId: string, delta: number) => {
+    const current = getAdj(destId);
+    setExactAdj(destId, current + delta);
   };
 
   const [searchParams] = useSearchParams();
@@ -81,8 +68,8 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
   );
 
   const allRecommendations = getDestinationRecommendations(activeInputs);
+  // GATE 2: Show only the 4 destinations that support complete feasibility calculations
   const verifiedRecs = allRecommendations.filter(r => r.isVerified && r.destination && r.feasibility);
-  const candidateRecs = allRecommendations.filter(r => !r.isVerified);
 
   return (
     <section className="space-y-6">
@@ -92,10 +79,10 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold text-[#193953]">
-            Where should we escape to?
+            Can your trip fit before the deadline?
           </h1>
           <p className="mt-1 text-sm text-[#5A7184]">
-            Intelligent recommendations for your <strong className="text-[#193953]">{numDays} calendar date(s)</strong> ({durationHours} hours). Usable leisure and return margins computed deterministically.
+            Deterministic feasibility calculations for your <strong className="text-[#193953]">{numDays} calendar date(s)</strong> ({durationHours} hours). Evaluated against Bangalore traffic buffers and return deadlines.
           </p>
         </div>
         <Link to="/plan" className="text-xs font-semibold text-[#176EA8] hover:underline">
@@ -103,19 +90,19 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
         </Link>
       </div>
 
-      {/* Verified Destination Comparison Cards (Ranked Deterministically) */}
+      {/* Verified Destination Feasibility Cards (Gate 2: Exclusively the 4 schedulable destinations) */}
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E1ECF2] pb-2">
           <div>
             <h2 className="text-lg font-bold text-[#193953]">
-              Verified Weekend Destinations ({verifiedRecs.length} Schedulable)
+              Weekend Trip Feasibility ({verifiedRecs.length} Destinations)
             </h2>
             <p className="text-xs text-[#5A7184]">
-              Ranked dynamically by usable daylight leisure time and comfortable return buffers.
+              Prioritized by return deadline safety margin, usable daylight leisure time, and route curfew constraints.
             </p>
           </div>
           <span className="rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-800">
-            ✓ Deterministic Calculations
+            ✓ Deterministic Reality Check
           </span>
         </div>
 
@@ -126,13 +113,18 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
             const img = getDestinationImage(d.id);
             const adj = getAdj(d.id);
 
+            // Calculate baseline feasibility (0 driving adjustment) to show clear before/after trade-offs
+            const baseFeasibility = adj !== 0
+              ? evaluateFeasibility(d, { ...activeInputs, drivingAdjustmentMinutes: 0 })
+              : r;
+
             return (
               <article
                 key={d.id}
-                className="flex flex-col justify-between rounded-2xl border border-[#E1ECF2] bg-white p-5 shadow-sm transition-all hover:shadow-md"
+                className="flex flex-col justify-between rounded-2xl border border-[#E1ECF2] bg-white p-5 shadow-sm transition-all hover:shadow-md space-y-4"
               >
                 <div className="space-y-4">
-                  {/* Card Header with Badges */}
+                  {/* Card Header & Feasibility Verdict (Hero Question 1: Can I complete this trip?) */}
                   <div>
                     <div className="flex items-start justify-between gap-2">
                       <div>
@@ -144,24 +136,28 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-[#5A7184] mt-0.5">{d.routeName}</p>
+                        <p className="text-xs text-[#5A7184] mt-0.5">
+                          📍 {d.oneWayDistanceKm} km · {d.routeName}
+                        </p>
                       </div>
 
+                      {/* Prominent Feasibility Verdict Badge */}
                       <span
-                        className={`rounded-full px-2.5 py-1 text-xs font-bold border ${
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-extrabold border shadow-2xs ${
                           r.rating === 'Comfortable'
-                            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
                             : r.rating === 'Tight'
-                            ? 'bg-amber-50 border-amber-200 text-amber-800'
-                            : 'bg-red-50 border-red-200 text-red-800'
+                            ? 'bg-amber-50 border-amber-300 text-amber-800'
+                            : 'bg-red-50 border-red-300 text-red-800'
                         }`}
                       >
-                        {r.rating}
+                        <span>{r.rating === 'Comfortable' ? '✓' : r.rating === 'Tight' ? '⚠️' : '❌'}</span>
+                        <span>{r.rating === 'Comfortable' ? 'Comfortable' : r.rating === 'Tight' ? 'Tight Schedule' : 'Not Recommended'}</span>
                       </span>
                     </div>
 
                     {rec.whyRecommended && (
-                      <p className="mt-2 text-xs font-semibold text-[#176EA8] bg-[#DDF0F6] px-2.5 py-1 rounded-lg">
+                      <p className="mt-2 text-xs font-medium text-[#176EA8] bg-[#DDF0F6] px-2.5 py-1.5 rounded-lg leading-relaxed">
                         {rec.whyRecommended}
                       </p>
                     )}
@@ -169,32 +165,38 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
 
                   {/* Destination Photography */}
                   {img && (
-                    <div className="relative h-44 w-full overflow-hidden rounded-xl bg-slate-100 shadow-inner">
+                    <div className="relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-slate-100 shadow-inner">
                       <img
                         src={img.src}
                         alt={img.alt}
                         loading="lazy"
                         className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
                       />
-                      <div className="absolute bottom-2 left-2 rounded-md bg-black/60 backdrop-blur-xs px-2 py-0.5 text-[10px] font-medium text-white">
-                        📍 {d.oneWayDistanceKm} km from Bengaluru (MG Road)
+                      <div className="absolute top-2.5 right-2.5 rounded-full bg-black/60 backdrop-blur-xs px-2.5 py-0.5 text-[10px] font-semibold text-white">
+                        ~{formatDuration(r.outboundDriveMinutes)} drive each way
+                      </div>
+                      <div className="absolute bottom-2 left-2 rounded-md bg-black/60 backdrop-blur-xs px-2 py-0.5 text-[9px] font-medium text-white/90">
+                        Photo: {img.author}
                       </div>
                     </div>
                   )}
 
-                  {/* Key Metrics Grid */}
-                  <div className="grid grid-cols-2 gap-3 rounded-xl bg-[#F4F9FC] p-3 text-xs border border-[#E1ECF2]">
-                    <div>
-                      <span className="text-[#5A7184] block">Usable Leisure Time:</span>
-                      <strong className="text-base text-[#193953]">
-                        {formatDuration(r.destinationSlackMinutes)}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <span className="text-[#5A7184] block">Return Deadline Margin:</span>
+                  {/* HERO METRIC 1: Will I return before my deadline? (Gate 3) */}
+                  <div
+                    className={`rounded-xl border p-3.5 space-y-1.5 transition-colors ${
+                      r.returnDeadlineMarginMinutes >= 60
+                        ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+                        : r.returnDeadlineMarginMinutes >= 0
+                        ? 'bg-amber-50/80 border-amber-200 text-amber-950'
+                        : 'bg-red-50/80 border-red-200 text-red-950'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-[#5A7184]">
+                        Will I return before my deadline?
+                      </span>
                       <strong
-                        className={`text-base ${
+                        className={`text-base font-black ${
                           r.returnDeadlineMarginMinutes >= 60
                             ? 'text-emerald-700'
                             : r.returnDeadlineMarginMinutes >= 0
@@ -202,63 +204,176 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                             : 'text-red-700'
                         }`}
                       >
-                        {formatDuration(r.returnDeadlineMarginMinutes)}
+                        {r.returnDeadlineMarginMinutes >= 0
+                          ? `+${formatDuration(r.returnDeadlineMarginMinutes)} margin`
+                          : `−${formatDuration(Math.abs(r.returnDeadlineMarginMinutes))} overdue`}
                       </strong>
+                    </div>
+
+                    {/* Clear, explicit explanation of positive and negative return margins */}
+                    <p className="text-xs leading-relaxed font-medium">
+                      {r.returnDeadlineMarginMinutes >= 60 ? (
+                        <>
+                          <strong className="text-emerald-800">✓ Safe return buffer:</strong> You arrive back in Bengaluru around{' '}
+                          <strong>{formatReadableDateTime(r.homeArrivalTime)}</strong>, comfortably ahead of your{' '}
+                          <strong>{formatReadableDateTime(activeInputs.returnDeadlineDateTime)}</strong> return deadline.
+                        </>
+                      ) : r.returnDeadlineMarginMinutes >= 0 ? (
+                        <>
+                          <strong className="text-amber-800">⚠️ Narrow buffer:</strong> You arrive back in Bengaluru around{' '}
+                          <strong>{formatReadableDateTime(r.homeArrivalTime)}</strong>, leaving only{' '}
+                          <strong>{formatDuration(r.returnDeadlineMarginMinutes)}</strong> before your deadline. Highway slowdowns risk arriving late.
+                        </>
+                      ) : (
+                        <>
+                          <strong className="text-red-800">❌ Return deadline missed by {formatDuration(Math.abs(r.returnDeadlineMarginMinutes))}:</strong> Expected return arrival is{' '}
+                          <strong>{formatReadableDateTime(r.homeArrivalTime)}</strong>, which exceeds your{' '}
+                          <strong>{formatReadableDateTime(activeInputs.returnDeadlineDateTime)}</strong> return deadline. You need an earlier departure or later deadline.
+                        </>
+                      )}
+                    </p>
+                  </div>
+
+                  {/* HERO METRIC 2: How much time can I enjoy at the destination? (Gate 3) */}
+                  <div className="grid grid-cols-2 gap-3 rounded-xl bg-[#F4F9FC] p-3 text-xs border border-[#E1ECF2]">
+                    <div>
+                      <span className="text-[#5A7184] block font-medium">Usable Destination Leisure Time:</span>
+                      <strong className="text-lg font-black text-[#193953] block">
+                        {formatDuration(r.destinationSlackMinutes)}
+                      </strong>
+                      <span className="text-[11px] text-[#5A7184] block mt-0.5">
+                        Daylight hours for sightseeing & relaxation
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[#5A7184] block font-medium">Journey Windows:</span>
+                      <span className="text-xs font-semibold text-[#193953] block">
+                        Depart: {formatReadableDateTime(activeInputs.departureDateTime)}
+                      </span>
+                      <span className="text-xs font-semibold text-[#193953] block">
+                        Return: {formatReadableDateTime(r.homeArrivalTime)}
+                      </span>
+                      <span className="text-[11px] text-[#5A7184] block mt-0.5">
+                        Est. Cost: ₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person
+                      </span>
                     </div>
                   </div>
 
-                  {/* Driving Time & Adjustment */}
-                  <div className="space-y-2 rounded-xl bg-[#F4F9FC] p-3 text-xs border border-[#E1ECF2]">
-                    <div className="flex items-center justify-between">
+                  {/* GATE 4: What if the drive takes longer? (Driving-delay trade-offs) */}
+                  <div className="rounded-xl border border-[#BAE3F1] bg-[#DDF0F6]/50 p-4 space-y-3 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-1">
                       <div>
-                        <span className="text-[#5A7184] block">Estimated One-Way Drive:</span>
-                        <strong className="text-sm text-[#193953]">
-                          {formatDuration(r.outboundDriveMinutes)}
-                        </strong>
-                        <span className="text-[10px] text-[#5A7184] block">
-                          (Baseline: {formatDuration(d.baselineOneWayDriveMinutes)} + 20% buffer{adj !== 0 ? ` ${adj > 0 ? `+${adj}` : adj}m adj` : ''})
-                        </span>
+                        <h4 className="font-bold text-[#193953] text-sm">
+                          What if the drive takes longer?
+                        </h4>
+                        <p className="text-[11px] text-[#5A7184] mt-0.5">
+                          Add extra travel time to see how it affects your itinerary and return deadline.
+                        </p>
                       </div>
+                      <span className="rounded-full bg-white border border-[#BAE3F1] px-2 py-0.5 text-[10px] font-semibold text-[#176EA8]">
+                        Planning scenario · Not live GPS
+                      </span>
+                    </div>
 
-                      <div className="flex items-center gap-1.5">
+                    {/* Manual Driving Allowance Controls & Presets */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <span className="text-[11px] font-bold text-[#193953]">Extra travel allowance:</span>
+                      <div className="flex items-center gap-1">
                         <button
                           type="button"
                           onClick={() => updateAdj(d.id, -15)}
                           disabled={adj <= -60}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white border border-[#E1ECF2] text-xs font-bold text-[#193953] hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                          title="Reduce driving time by 15m"
+                          className="h-7 w-7 rounded-lg bg-white border border-[#E1ECF2] text-xs font-bold text-[#193953] hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                          title="Reduce allowance by 15m"
                         >
                           −15
                         </button>
-                        <span className="w-10 text-center text-xs font-bold text-[#176EA8]">
+                        <span className="min-w-12 text-center text-xs font-extrabold text-[#176EA8]">
                           {adj > 0 ? `+${adj}m` : adj < 0 ? `${adj}m` : '0m'}
                         </span>
                         <button
                           type="button"
                           onClick={() => updateAdj(d.id, 15)}
                           disabled={adj >= 120}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white border border-[#E1ECF2] text-xs font-bold text-[#193953] hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                          title="Add 15m extra driving buffer"
+                          className="h-7 w-7 rounded-lg bg-white border border-[#E1ECF2] text-xs font-bold text-[#193953] hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                          title="Add 15m delay allowance"
                         >
                           +15
                         </button>
                       </div>
+
+                      {/* Quick Scenario Presets */}
+                      <div className="flex items-center gap-1.5 ml-auto">
+                        {([0, 30, 45, 60] as const).map(preset => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setExactAdj(d.id, preset)}
+                            className={`rounded-lg px-2.5 py-1 text-[11px] font-bold cursor-pointer transition-colors ${
+                              adj === preset
+                                ? 'bg-[#176EA8] text-white shadow-xs'
+                                : 'bg-white border border-[#BAE3F1] text-[#193953] hover:bg-slate-100'
+                            }`}
+                          >
+                            {preset === 0 ? 'Baseline' : `+${preset}m`}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
-                    <details className="text-[11px] text-[#5A7184] pt-1 border-t border-[#E1ECF2]">
-                      <summary className="cursor-pointer text-[#176EA8] hover:underline">
-                        Why adjust driving time? ▼
-                      </summary>
-                      <p className="mt-1 text-[#5A7184] leading-relaxed">
-                        Baseline driving assumes departure from Central Bengaluru (MG Road). If you're starting from Whitefield or North Bengaluru, add +30m to +45m to reflect city traffic before hitting the highway.
+                    {/* Before & After Trade-Off Impact Display (Gate 4 & Gate 9) */}
+                    {adj !== 0 ? (
+                      <div className="rounded-lg bg-white border border-[#BAE3F1] p-3 space-y-2 text-[11px]">
+                        <div className="flex items-center justify-between font-bold text-[#176EA8]">
+                          <span>Trade-Off Impact of {adj > 0 ? `+${adj}m delay scenario` : `${adj}m shorter drive`}:</span>
+                          {baseFeasibility.rating !== r.rating && (
+                            <span className="text-red-700 font-extrabold">
+                              ⚠️ Verdict shifts: {baseFeasibility.rating} → {r.rating}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div className="bg-[#F4F9FC] p-2 rounded-lg border border-[#E1ECF2]">
+                            <span className="block text-[#5A7184] text-[10px]">One-Way Drive</span>
+                            <span className="font-extrabold text-[#193953]">
+                              {formatDuration(baseFeasibility.outboundDriveMinutes)} → {formatDuration(r.outboundDriveMinutes)}
+                            </span>
+                          </div>
+                          <div className="bg-[#F4F9FC] p-2 rounded-lg border border-[#E1ECF2]">
+                            <span className="block text-[#5A7184] text-[10px]">Leisure Time</span>
+                            <span className="font-extrabold text-[#193953]">
+                              {formatDuration(baseFeasibility.destinationSlackMinutes)} → {formatDuration(r.destinationSlackMinutes)}
+                            </span>
+                          </div>
+                          <div className="bg-[#F4F9FC] p-2 rounded-lg border border-[#E1ECF2]">
+                            <span className="block text-[#5A7184] text-[10px]">Return Margin</span>
+                            <span
+                              className={`font-extrabold ${
+                                r.returnDeadlineMarginMinutes >= 60
+                                  ? 'text-emerald-700'
+                                  : r.returnDeadlineMarginMinutes >= 0
+                                  ? 'text-amber-700'
+                                  : 'text-red-700'
+                              }`}
+                            >
+                              {formatDuration(baseFeasibility.returnDeadlineMarginMinutes, true)} → {formatDuration(r.returnDeadlineMarginMinutes, true)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-[#5A7184] leading-relaxed">
+                        Currently showing baseline calculation with standard 20% highway traffic buffer included. Select +30m or +45m above to test how highway delays impact your return deadline.
                       </p>
-                    </details>
+                    )}
                   </div>
 
                   {/* Night Curfew Warning if Applicable */}
                   {d.routeRestriction && (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
-                      ⚠️ <strong>Night Curfew:</strong> {d.routeRestriction.name} ({d.routeRestriction.startTime}–{d.routeRestriction.endTime} closure).
+                      ⚠️ <strong>Night Curfew:</strong> {d.routeRestriction.name} ({d.routeRestriction.startTime}–{d.routeRestriction.endTime} closure). Transit through reserve must clear before 21:00.
                     </div>
                   )}
                 </div>
@@ -285,108 +400,7 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
         </div>
       </div>
 
-      {/* More escapes to explore Section (Gate 3 & Gate 4) */}
-      <div className="space-y-5 rounded-2xl border border-[#E1ECF2] bg-white p-5 sm:p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E1ECF2] pb-3">
-          <div>
-            <h2 className="text-lg font-bold text-[#193953]">
-              More escapes to explore
-            </h2>
-            <p className="text-xs text-[#5A7184] mt-0.5">
-              Discover scenic drives, heritage towns, hill stations and coastal getaways worth adding to your next trip.
-            </p>
-          </div>
-          <span className="rounded-full bg-[#DDF0F6] border border-[#BAE3F1] px-3 py-1 text-xs font-bold text-[#176EA8]">
-            {candidateRecs.length} Curated Escapes
-          </span>
-        </div>
-
-        {/* Responsive Grid of Destination Inspiration Cards */}
-        <div className="grid gap-6 md:grid-cols-2">
-          {candidateRecs.map(c => {
-            const img = getDestinationImage(c.id);
-
-            return (
-              <article
-                key={c.id}
-                className="flex flex-col justify-between rounded-2xl border border-[#E1ECF2] bg-white p-5 shadow-sm transition-all hover:border-[#BAE3F1] hover:shadow-md"
-              >
-                <div className="space-y-3.5">
-                  {/* 1. Photo thumbnail */}
-                  {img && (
-                    <div className="relative aspect-[16/9] w-full overflow-hidden rounded-xl bg-slate-100 shadow-inner">
-                      <img
-                        src={img.src}
-                        alt={img.alt}
-                        loading="lazy"
-                        className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-                      />
-                      <div className="absolute top-2.5 right-2.5 rounded-full bg-black/60 backdrop-blur-xs px-2.5 py-0.5 text-[10px] font-semibold text-white">
-                        {c.approxDriveLabel} drive
-                      </div>
-                      <div className="absolute bottom-2 left-2 rounded-md bg-black/60 backdrop-blur-xs px-2 py-0.5 text-[9px] font-medium text-white/90">
-                        Photo: {img.author}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 2. Destination title */}
-                  <div>
-                    <h3 className="text-lg font-black text-[#193953] leading-snug">
-                      {c.name}
-                    </h3>
-                    {/* 3. Route / corridor / approx distance */}
-                    <p className="text-xs text-[#5A7184] font-medium mt-0.5">
-                      {c.routeName}
-                    </p>
-                  </div>
-
-                  {/* 4. Short one-line description */}
-                  <p className="text-xs text-[#193953] leading-relaxed font-medium">
-                    {c.highlights}
-                  </p>
-
-                  {/* 5. Recommended duration / drive note */}
-                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                    <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#DDF0F6] border border-[#BAE3F1] px-2.5 py-1 text-xs font-semibold text-[#176EA8]">
-                      <span>📅</span>
-                      <span>Best for {getRecommendedDurationLabel(c.id)}</span>
-                    </span>
-                    <span className="text-[11px] text-[#5A7184]">
-                      · ~{c.approxDriveLabel} drive
-                    </span>
-                  </div>
-
-                  {/* 6. Friendly status badge */}
-                  <div className="space-y-1.5 pt-0.5">
-                    <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#F4F9FC] border border-[#E1ECF2] px-2.5 py-1 text-[11px] font-semibold text-[#5A7184]">
-                      <span className="h-2 w-2 rounded-full bg-[#FF9870] flex-shrink-0" />
-                      <span>Trip inspiration — Detailed scheduling not yet available</span>
-                    </span>
-                    <p className="text-[10px] text-[#5A7184] italic leading-tight">
-                      * Travel time is an indicative estimate from Bengaluru; subject to traffic & road conditions.
-                    </p>
-                  </div>
-                </div>
-
-                {/* 7. Primary CTA */}
-                <div className="mt-5 pt-3 border-t border-[#E1ECF2]">
-                  <button
-                    type="button"
-                    onClick={() => setActiveGuideId(c.id)}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl border border-[#BAE3F1] bg-white py-2.5 px-4 text-xs font-bold text-[#176EA8] hover:bg-[#DDF0F6] active:scale-[0.99] transition-all cursor-pointer shadow-2xs"
-                  >
-                    <span>Explore Guide</span>
-                    <span>→</span>
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Destination Guide Modal (Gates 3 & 5) */}
+      {/* Destination Guide Modal (Preserved for the 4 verified destinations) */}
       <DestinationGuideModal
         guide={activeGuideId ? getDestinationGuide(activeGuideId, numDays, activeInputs.pace) : null}
         onClose={() => setActiveGuideId(null)}

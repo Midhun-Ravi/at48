@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { evaluateFeasibility, getCalendarDaysCount, parseIST } from '../engine/scheduler';
 import { getDestination } from '../data/destinations';
+import { getDestinationRecommendations } from '../engine/recommendations';
 import {
   buildShareableTripUrl,
   buildWhatsAppRSVPMessage,
@@ -351,7 +352,8 @@ describe('Resubmission Product Focus Sprint (Gates 1-8)', () => {
     // GATE 3: Return feasibility is hero on CompareScreen
     expect(compareSrc).toContain('Will I return before my deadline?');
     expect(compareSrc).toContain('Usable Destination Leisure Time');
-    expect(compareSrc).toContain('Return deadline missed');
+    expect(compareSrc).toContain('projected late');
+    expect(scheduleSrc).toContain('projected late');
 
     // GATE 4: "What if the drive takes longer?" section with before/after comparison
     expect(compareSrc).toContain('What if the drive takes longer?');
@@ -368,5 +370,175 @@ describe('Resubmission Product Focus Sprint (Gates 1-8)', () => {
     expect(reviewSrc).toContain('Share Trip (Copy Link)');
     expect(reviewSrc).toContain('Save Trip (This Device)');
     expect(reviewSrc).toContain('Trip Invitation & RSVP');
+  });
+
+  // 12. Clearance Scenario 1: All four schedulable destinations remain available across 1, 2, 3, and 4 day durations
+  it('12. keeps all four schedulable destinations available across different selected trip lengths without hard restrictions', () => {
+    const durations = [
+      { dep: '2026-10-31T06:00', ret: '2026-10-31T20:30' },
+      { dep: '2026-10-31T08:00', ret: '2026-11-01T20:30' },
+      { dep: '2026-10-31T07:00', ret: '2026-11-02T20:30' },
+      { dep: '2026-10-31T06:00', ret: '2026-11-03T20:30' },
+    ];
+
+    for (const { dep, ret } of durations) {
+      const inputs: UserConstraints = {
+        departureDateTime: dep,
+        returnDeadlineDateTime: ret,
+        pace: 'balanced',
+        perPersonBudgetINR: 6000,
+        partySize: 2,
+        drivingAdjustmentMinutes: 0,
+        simulateDelayMinutes: 0,
+        disabledActivityIds: [],
+      };
+
+      const recs = getDestinationRecommendations(inputs);
+      const verified = recs.filter(r => r.isVerified && r.destination && r.feasibility);
+
+      // Must always contain all 4 destinations
+      expect(verified).toHaveLength(4);
+      const ids = verified.map(v => v.id);
+      expect(ids).toContain('nandi-hills');
+      expect(ids).toContain('mysuru');
+      expect(ids).toContain('coorg-madikeri');
+      expect(ids).toContain('ooty');
+
+      // Recommended durations do not act as hard restrictions: each has a complete feasibility result
+      for (const item of verified) {
+        expect(item.feasibility).toBeDefined();
+        expect(item.feasibility?.timeline.length).toBeGreaterThan(0);
+        expect(item.feasibility?.rating).toMatch(/Comfortable|Tight|Not Recommended/);
+      }
+    }
+  });
+
+  // 13. Clearance Scenario 2: 2-day Mysuru trip with +60m driving allowance recalculates itinerary and return deadline
+  it('13. recalculates itinerary, leisure time, and return deadline for 2-day Mysuru with +60m driving allowance', () => {
+    const dest = getDestination('mysuru')!;
+    const baseInputs: UserConstraints = {
+      departureDateTime: '2026-10-31T08:00',
+      returnDeadlineDateTime: '2026-11-01T20:30',
+      pace: 'balanced',
+      perPersonBudgetINR: 6000,
+      partySize: 2,
+      drivingAdjustmentMinutes: 0,
+      simulateDelayMinutes: 0,
+      disabledActivityIds: [],
+    };
+
+    const baseResult = evaluateFeasibility(dest, baseInputs);
+
+    // Apply +60 minutes driving allowance
+    const adjustedResult = evaluateFeasibility(dest, {
+      ...baseInputs,
+      drivingAdjustmentMinutes: 60,
+    });
+
+    // 195 baseline + 60 adjustment = 255. 255 * 1.2 (20% contingency) = 306m
+    expect(adjustedResult.outboundDriveMinutes).toBe(306);
+    expect(adjustedResult.inboundDriveMinutes).toBe(306);
+    expect(adjustedResult.outboundDriveMinutes).toBeGreaterThan(baseResult.outboundDriveMinutes);
+
+    // Feasible leisure slack is reduced because extra driving consumes available daylight
+    expect(adjustedResult.destinationSlackMinutes).toBeLessThan(baseResult.destinationSlackMinutes);
+
+    // In delayed schedule, return departure shifts earlier to preserve safe home arrival
+    const baseReturnEntry = baseResult.timeline.find(t => t.category === 'DRIVE' && t.day === 2)!;
+    const adjReturnEntry = adjustedResult.timeline.find(t => t.category === 'DRIVE' && t.day === 2)!;
+    const baseDepartMs = parseIST(baseReturnEntry.startTime);
+    const adjDepartMs = parseIST(adjReturnEntry.startTime);
+    expect(adjDepartMs).toBeLessThan(baseDepartMs);
+    // (255*1.2) - (195*1.2) = 306 - 234 = 72m earlier departure
+    expect(Math.round((baseDepartMs - adjDepartMs) / 60_000)).toBe(72);
+
+    // For a tight deadline where arrival is projected late, verify negative margin calculation
+    const tightDelayed = evaluateFeasibility(dest, {
+      ...baseInputs,
+      returnDeadlineDateTime: '2026-11-01T12:00',
+      drivingAdjustmentMinutes: 60,
+    });
+    expect(tightDelayed.returnDeadlineMarginMinutes).toBeLessThan(0);
+    expect(tightDelayed.rating).toBe('Not Recommended');
+  });
+
+  // 14. Clearance Scenario 3: Shared trip URLs with custom activities, saved trips, and guest RSVP remain functional
+  it('14. verifies shared trip URLs with custom activities, saved trips, and guest RSVP functionality', () => {
+    const inputsWithCustom: UserConstraints = {
+      departureDateTime: '2026-10-31T08:00',
+      returnDeadlineDateTime: '2026-11-01T20:30',
+      pace: 'balanced',
+      perPersonBudgetINR: 7000,
+      partySize: 3,
+      drivingAdjustmentMinutes: 30,
+      simulateDelayMinutes: 0,
+      disabledActivityIds: [],
+      selectedPitstopIds: ['maddur-tiffanys'],
+      organizerName: 'Anita',
+      planningMode: 'group',
+      customActivities: [
+        {
+          id: 'custom-1',
+          name: 'Mysore Silk Saree Shopping',
+          durationMinutes: 90,
+          costPerPersonINR: 500,
+          day: 1,
+        },
+      ],
+    };
+
+    // Serialize to URL
+    const url = buildShareableTripUrl('mysuru', inputsWithCustom, 'https://at48.vercel.app');
+    const queryString = url.split('?')[1];
+    expect(queryString).toContain('ca=');
+    expect(queryString).toContain('org=Anita');
+
+    // Parse URL back
+    const parsed = parseShareableTrip(queryString, 'mysuru');
+    expect(parsed.valid).toBe(true);
+    if (!parsed.valid) return;
+
+    expect(parsed.data.organizerName).toBe('Anita');
+    expect(parsed.data.isGuestView).toBe(true);
+    expect(parsed.data.inputs.customActivities).toHaveLength(1);
+    expect(parsed.data.inputs.customActivities?.[0].name).toBe('Mysore Silk Saree Shopping');
+    expect(parsed.data.inputs.selectedPitstopIds).toContain('maddur-tiffanys');
+
+    // Verify scheduled with custom activity present
+    const dest = getDestination('mysuru')!;
+    const feasibility = evaluateFeasibility(dest, parsed.data.inputs);
+    const customEntry = feasibility.timeline.find(t => t.label === 'Mysore Silk Saree Shopping');
+    expect(customEntry).toBeDefined();
+    expect(customEntry?.isCustom).toBe(true);
+
+    // Verify local save & retrieve
+    const saved = saveTrip({
+      destinationId: 'mysuru',
+      destinationName: dest.name,
+      routeName: dest.routeName,
+      departureDateTime: parsed.data.inputs.departureDateTime,
+      returnDeadlineDateTime: parsed.data.inputs.returnDeadlineDateTime,
+      pace: parsed.data.inputs.pace,
+      partySize: parsed.data.inputs.partySize,
+      perPersonBudgetINR: parsed.data.inputs.perPersonBudgetINR,
+      organizerName: parsed.data.organizerName,
+      planningMode: parsed.data.planningMode,
+      shareUrl: url,
+    });
+    expect(saved).toBeDefined();
+    const retrieved = getSavedTrips();
+    expect(retrieved.some(t => t.id === saved.id)).toBe(true);
+
+    // Verify WhatsApp RSVP message generation
+    const rsvpMessage = buildWhatsAppRSVPMessage({
+      organizerName: 'Anita',
+      guestName: 'Kavita',
+      destinationName: 'Mysuru',
+      departureDateTime: parsed.data.inputs.departureDateTime,
+      returnDeadlineDateTime: parsed.data.inputs.returnDeadlineDateTime,
+      tripUrl: url,
+    });
+    expect(rsvpMessage).toContain('Hey Anita, count me in for the Mysuru road trip');
+    expect(rsvpMessage).toContain('- Kavita');
   });
 });

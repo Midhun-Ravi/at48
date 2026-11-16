@@ -334,7 +334,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
             >
               {r.returnDeadlineMarginMinutes >= 0
                 ? `+${formatDuration(r.returnDeadlineMarginMinutes)} margin`
-                : `−${formatDuration(Math.abs(r.returnDeadlineMarginMinutes))} overdue`}
+                : `−${formatDuration(Math.abs(r.returnDeadlineMarginMinutes))} projected late`}
             </strong>
           </div>
           <p className="text-xs leading-relaxed font-medium">

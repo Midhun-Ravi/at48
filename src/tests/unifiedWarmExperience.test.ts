@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { DESTINATIONS, getDestination } from '../data/destinations';
+import { getDestination } from '../data/destinations';
 import { evaluateFeasibility, parseIST, getCalendarDaysCount } from '../engine/scheduler';
-import { evaluateActivityMove, getMoveCandidates } from '../engine/moveActivity';
+import { evaluateActivityMove } from '../engine/moveActivity';
 import { evaluateTransferAdjustment, evaluateVisitScheduling } from '../engine/timelineEditing';
-import { buildShareableParams, buildShareableTripUrl, buildWhatsAppRSVPMessage, parseShareableTrip } from '../utils/tripShare';
 import type { UserConstraints } from '../types';
 
 describe('@48 Unified Consumer Experience Redesign Verification', () => {
@@ -228,6 +227,7 @@ describe('@48 Unified Consumer Experience Redesign Verification', () => {
     const visitPreview = evaluateVisitScheduling(
       {
         activityId: 'mysuru-market',
+        name: 'Devaraja Market Walk',
         day: 2,
         visitStartTime: '11:00',
         durationMinutes: 60,

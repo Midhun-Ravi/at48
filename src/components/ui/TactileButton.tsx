@@ -4,7 +4,10 @@ import { Link } from 'react-router';
 export type TactileButtonVariant =
   | 'primary'
   | 'secondary'
+  | 'forest'
   | 'marine'
+  | 'sage'
+  | 'terracotta'
   | 'success'
   | 'warning'
   | 'danger'
@@ -23,29 +26,45 @@ export interface TactileButtonProps
   rightIcon?: React.ReactNode;
 }
 
-const VARIANT_STYLES: Record<TactileButtonVariant, {
+const VARIANT_STYLES: Record<string, {
   base: string;
   depth: string;
   active: string;
 }> = {
   primary: {
-    base: 'bg-[#176EA8] text-white hover:bg-[#145D8F]',
-    depth: 'border-b-[3px] border-[#0D4971] shadow-sm',
+    base: 'bg-[#C65B32] text-white hover:bg-[#B04E27]',
+    depth: 'border-b-[3px] border-[#8D3817] shadow-sm',
+    active: 'active:translate-y-[2px] active:border-b-[1px]',
+  },
+  terracotta: {
+    base: 'bg-[#C65B32] text-white hover:bg-[#B04E27]',
+    depth: 'border-b-[3px] border-[#8D3817] shadow-sm',
+    active: 'active:translate-y-[2px] active:border-b-[1px]',
+  },
+  forest: {
+    base: 'bg-[#344F48] text-white hover:bg-[#273D37]',
+    depth: 'border-b-[3px] border-[#1A2A26] shadow-sm',
     active: 'active:translate-y-[2px] active:border-b-[1px]',
   },
   marine: {
-    base: 'bg-[#193953] text-white hover:bg-[#122B3F]',
-    depth: 'border-b-[3px] border-[#0A1824] shadow-sm',
+    // Aliased to forest for warm palette consistency
+    base: 'bg-[#344F48] text-white hover:bg-[#273D37]',
+    depth: 'border-b-[3px] border-[#1A2A26] shadow-sm',
     active: 'active:translate-y-[2px] active:border-b-[1px]',
   },
   secondary: {
-    base: 'bg-white text-[#193953] border border-[#CBDDE9] hover:bg-[#F4F9FC]',
-    depth: 'border-b-[3px] border-b-[#A7C2D6] shadow-xs',
+    base: 'bg-white text-[#344F48] border border-[#EADBCE] hover:bg-[#FFF7F0]',
+    depth: 'border-b-[3px] border-b-[#CFBCAC] shadow-xs',
+    active: 'active:translate-y-[2px] active:border-b-[1px]',
+  },
+  sage: {
+    base: 'bg-[#5F7B6B] text-white hover:bg-[#4E6759]',
+    depth: 'border-b-[3px] border-[#394C41] shadow-sm',
     active: 'active:translate-y-[2px] active:border-b-[1px]',
   },
   success: {
-    base: 'bg-[#0E8A50] text-white hover:bg-[#0A7040]',
-    depth: 'border-b-[3px] border-[#06502D] shadow-sm',
+    base: 'bg-[#3D694E] text-white hover:bg-[#30553E]',
+    depth: 'border-b-[3px] border-[#203D2A] shadow-sm',
     active: 'active:translate-y-[2px] active:border-b-[1px]',
   },
   warning: {
@@ -54,21 +73,21 @@ const VARIANT_STYLES: Record<TactileButtonVariant, {
     active: 'active:translate-y-[2px] active:border-b-[1px]',
   },
   danger: {
-    base: 'bg-[#DC2626] text-white hover:bg-[#B91C1C]',
-    depth: 'border-b-[3px] border-[#8A1111] shadow-sm',
+    base: 'bg-[#C64032] text-white hover:bg-[#A83226]',
+    depth: 'border-b-[3px] border-[#782017] shadow-sm',
     active: 'active:translate-y-[2px] active:border-b-[1px]',
   },
   ghost: {
-    base: 'bg-transparent text-[#193953] hover:bg-[#EAF2F7] border border-transparent',
+    base: 'bg-transparent text-[#344F48] hover:bg-[#F8E1D2]/50 border border-transparent',
     depth: 'border-b-[2px] border-b-transparent',
-    active: 'active:bg-[#DDE9F2]',
+    active: 'active:bg-[#F2D6C3]',
   },
 };
 
 const SIZE_STYLES: Record<TactileButtonSize, string> = {
   sm: 'px-3 py-1.5 text-xs font-bold rounded-lg gap-1.5',
-  md: 'px-4 py-2.5 text-sm font-bold rounded-xl gap-2',
-  lg: 'px-6 py-3.5 text-base font-extrabold rounded-2xl gap-2.5',
+  md: 'px-4 py-2 text-sm font-bold rounded-xl gap-2',
+  lg: 'px-6 py-3 text-base font-extrabold rounded-xl gap-2.5',
 };
 
 export default function TactileButton({
@@ -84,13 +103,13 @@ export default function TactileButton({
   children,
   ...props
 }: TactileButtonProps) {
-  const vStyle = VARIANT_STYLES[variant];
+  const vStyle = VARIANT_STYLES[variant] || VARIANT_STYLES.primary;
   const sStyle = SIZE_STYLES[size];
 
   const commonClasses = [
     'inline-flex items-center justify-center select-none font-sans',
     'transition-all duration-75 ease-out cursor-pointer',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#176EA8] focus-visible:ring-offset-2',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C65B32] focus-visible:ring-offset-2',
     'motion-reduce:transform-none motion-reduce:transition-none',
     vStyle.base,
     vStyle.depth,

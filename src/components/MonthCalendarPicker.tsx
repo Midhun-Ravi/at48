@@ -182,9 +182,9 @@ export default function MonthCalendarPicker({
   const isOrderValid = returnDeadlineDateTime > departureDateTime;
 
   return (
-    <div className="space-y-3.5 sm:space-y-4 rounded-2xl sm:rounded-3xl border border-[#CBDDE9] bg-white p-2.5 sm:p-5 text-[#193953] shadow-sm">
+    <div className="space-y-3.5 sm:space-y-4 rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-2.5 sm:p-5 text-[#344F48] shadow-sm">
       {/* Calendar Header with Navigation */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-2.5 border-b border-[#E1ECF2]">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-2.5 border-b border-[#EADBCE]">
         <div className="flex items-center justify-between sm:justify-start gap-2 w-full sm:w-auto">
           <TactileButton
             variant="secondary"
@@ -197,7 +197,7 @@ export default function MonthCalendarPicker({
             ←
           </TactileButton>
 
-          <span className="text-sm sm:text-base font-black tracking-tight text-[#193953] flex-1 sm:flex-none text-center sm:min-w-[140px]">
+          <span className="text-sm sm:text-base font-black tracking-tight text-[#344F48] flex-1 sm:flex-none text-center sm:min-w-[140px]">
             {MONTH_NAMES[viewMonth]} {viewYear}
           </span>
 
@@ -218,14 +218,14 @@ export default function MonthCalendarPicker({
           <button
             type="button"
             onClick={() => handleQuickWeekendPreset(0)}
-            className="flex-1 sm:flex-none text-center rounded-lg border border-[#CBDDE9] bg-[#F4F9FC] px-2.5 py-1 text-[11px] sm:text-xs font-bold text-[#176EA8] hover:bg-[#DDF0F6] transition-colors cursor-pointer"
+            className="flex-1 sm:flex-none text-center rounded-lg border border-[#EADBCE] bg-[#FAF2EB] px-2.5 py-1 text-[11px] sm:text-xs font-bold text-[#C65B32] hover:bg-[#F8E1D2] transition-colors cursor-pointer"
           >
             This Weekend
           </button>
           <button
             type="button"
             onClick={() => handleQuickWeekendPreset(1)}
-            className="flex-1 sm:flex-none text-center rounded-lg border border-[#CBDDE9] bg-[#F4F9FC] px-2.5 py-1 text-[11px] sm:text-xs font-bold text-[#193953] hover:bg-[#DDF0F6] transition-colors cursor-pointer"
+            className="flex-1 sm:flex-none text-center rounded-lg border border-[#EADBCE] bg-[#FAF2EB] px-2.5 py-1 text-[11px] sm:text-xs font-bold text-[#344F48] hover:bg-[#F8E1D2] transition-colors cursor-pointer"
           >
             Next Weekend
           </button>
@@ -241,8 +241,8 @@ export default function MonthCalendarPicker({
               key={wd}
               className={`py-1 text-[10px] sm:text-[11px] font-black uppercase tracking-wider rounded ${
                 isWeekendHeader
-                  ? 'text-[#176EA8] bg-[#DDF0F6]/40 font-black'
-                  : 'text-[#5A7184]'
+                  ? 'text-[#C65B32] bg-[#F8E1D2]/40 font-black'
+                  : 'text-[#6B7C77]'
               }`}
             >
               {wd}
@@ -272,18 +272,18 @@ export default function MonthCalendarPicker({
               onClick={() => handleDateClick(cell.dateStr)}
               className={`relative aspect-square min-w-0 max-w-full flex flex-col items-center justify-center rounded-lg sm:rounded-xl p-0.5 sm:p-1 text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                 cell.isDeparture && cell.isReturn
-                  ? 'bg-[#176EA8] text-white shadow-sm ring-1 sm:ring-2 ring-[#0D4971]'
+                  ? 'bg-[#C65B32] text-white shadow-sm ring-1 sm:ring-2 ring-[#8D3817]'
                   : cell.isDeparture
-                  ? 'bg-[#176EA8] text-white shadow-sm ring-1 sm:ring-2 ring-[#176EA8]'
+                  ? 'bg-[#C65B32] text-white shadow-sm ring-1 sm:ring-2 ring-[#C65B32]'
                   : cell.isReturn
-                  ? 'bg-[#193953] text-white shadow-sm ring-1 sm:ring-2 ring-[#193953]'
+                  ? 'bg-[#344F48] text-white shadow-sm ring-1 sm:ring-2 ring-[#344F48]'
                   : cell.isInRange
-                  ? 'bg-[#DDF0F6] text-[#176EA8] rounded-none first-of-type:rounded-l-lg last-of-type:rounded-r-lg sm:first-of-type:rounded-l-xl sm:last-of-type:rounded-r-xl font-black'
+                  ? 'bg-[#F8E1D2] text-[#C65B32] rounded-none first-of-type:rounded-l-lg last-of-type:rounded-r-lg sm:first-of-type:rounded-l-xl sm:last-of-type:rounded-r-xl font-black'
                   : cell.isSaturdayOrSunday
-                  ? 'bg-[#F4F9FC] text-[#193953] hover:bg-[#E1ECF2] border border-[#CBDDE9]'
+                  ? 'bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2]/60 border border-[#EADBCE]'
                   : cell.isWeekend
-                  ? 'bg-[#FAFDFE] text-[#193953] hover:bg-[#E1ECF2] border border-dashed border-[#CBDDE9]'
-                  : 'bg-white text-[#5A7184] hover:bg-[#F4F9FC] border border-transparent hover:border-[#CBDDE9]'
+                  ? 'bg-[#FFF7F0] text-[#344F48] hover:bg-[#F8E1D2]/40 border border-dashed border-[#EADBCE]'
+                  : 'bg-white text-[#6B7C77] hover:bg-[#FAF2EB] border border-transparent hover:border-[#EADBCE]'
               }`}
               aria-label={`${cell.dateStr}${cell.isDeparture ? ' (Departure)' : ''}${cell.isReturn ? ' (Return)' : ''}`}
             >
@@ -293,19 +293,19 @@ export default function MonthCalendarPicker({
 
               {/* Status Pill on Selected Days */}
               {cell.isDeparture && cell.isReturn ? (
-                <span className="text-[9px] font-extrabold text-blue-100 uppercase tracking-tighter">
+                <span className="text-[9px] font-extrabold text-[#F8E1D2] uppercase tracking-tighter">
                   1-Day
                 </span>
               ) : cell.isDeparture ? (
-                <span className="text-[9px] font-extrabold text-blue-100 uppercase tracking-tighter">
+                <span className="text-[9px] font-extrabold text-[#F8E1D2] uppercase tracking-tighter">
                   Dep
                 </span>
               ) : cell.isReturn ? (
-                <span className="text-[9px] font-extrabold text-blue-200 uppercase tracking-tighter">
+                <span className="text-[9px] font-extrabold text-[#E4ECE5] uppercase tracking-tighter">
                   Ret
                 </span>
               ) : cell.isSaturdayOrSunday ? (
-                <span className="text-[8px] font-medium text-[#176EA8]/70 hidden sm:inline">
+                <span className="text-[8px] font-medium text-[#C65B32]/70 hidden sm:inline">
                   Wknd
                 </span>
               ) : null}
@@ -315,18 +315,18 @@ export default function MonthCalendarPicker({
       </div>
 
       {/* Selected Trip Window Summary & Time Selectors */}
-      <div className="rounded-2xl border border-[#CBDDE9] bg-[#F4F9FC] p-3.5 sm:p-4 space-y-3">
+      <div className="rounded-2xl border border-[#EADBCE] bg-[#FAF2EB] p-3.5 sm:p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#5A7184]">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#6B7C77]">
               Trip Window:
             </span>
-            <span className="rounded-lg bg-[#DDF0F6] px-2.5 py-0.5 text-xs font-black text-[#176EA8]">
+            <span className="rounded-lg bg-[#F8E1D2] px-2.5 py-0.5 text-xs font-black text-[#C65B32]">
               {calendarDaysCount} {calendarDaysCount === 1 ? 'Calendar Day' : 'Calendar Days'}
             </span>
           </div>
 
-          <div className="text-xs text-[#5A7184] font-medium">
+          <div className="text-xs text-[#6B7C77] font-medium">
             Strict IST interpretation (Asia/Kolkata)
           </div>
         </div>
@@ -334,17 +334,17 @@ export default function MonthCalendarPicker({
         {/* Departure & Return Controls */}
         <div className="grid sm:grid-cols-2 gap-3 text-xs">
           {/* Departure */}
-          <div className="rounded-xl bg-white p-3 border border-[#CBDDE9] space-y-1.5 shadow-2xs">
+          <div className="rounded-xl bg-white p-3 border border-[#EADBCE] space-y-1.5 shadow-2xs">
             <div className="flex items-center justify-between">
-              <span className="font-black uppercase tracking-wider text-[#176EA8]">
+              <span className="font-black uppercase tracking-wider text-[#C65B32]">
                 🛫 Departure Date & Time
               </span>
-              <span className="text-[11px] font-bold text-[#193953]">{currentDepDate}</span>
+              <span className="text-[11px] font-bold text-[#344F48]">{currentDepDate}</span>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <div className="flex items-center gap-2">
-                <label htmlFor="dep-time-input" className="text-[#5A7184] shrink-0 font-medium">
+                <label htmlFor="dep-time-input" className="text-[#6B7C77] shrink-0 font-medium">
                   Time (IST):
                 </label>
                 <input
@@ -352,7 +352,7 @@ export default function MonthCalendarPicker({
                   type="time"
                   value={currentDepTime}
                   onChange={e => handleDepTimeChange(e.target.value)}
-                  className="rounded-lg border border-[#CBDDE9] bg-[#F4F9FC] px-2 py-1 font-bold text-[#193953] focus:border-[#176EA8] focus:outline-none"
+                  className="rounded-lg border border-[#EADBCE] bg-[#FAF2EB] px-2 py-1 font-bold text-[#344F48] focus:border-[#C65B32] focus:outline-none"
                 />
               </div>
               <div className="flex gap-1 overflow-x-auto">
@@ -363,8 +363,8 @@ export default function MonthCalendarPicker({
                     onClick={() => handleDepTimeChange(preset)}
                     className={`rounded px-1.5 py-0.5 text-[10px] font-bold cursor-pointer ${
                       currentDepTime === preset
-                        ? 'bg-[#176EA8] text-white'
-                        : 'bg-[#E1ECF2] text-[#5A7184] hover:bg-[#CBDDE9]'
+                        ? 'bg-[#C65B32] text-white'
+                        : 'bg-[#EADBCE] text-[#6B7C77] hover:bg-[#CFBCAC]'
                     }`}
                   >
                     {preset}
@@ -375,17 +375,17 @@ export default function MonthCalendarPicker({
           </div>
 
           {/* Return Deadline */}
-          <div className="rounded-xl bg-white p-3 border border-[#CBDDE9] space-y-1.5 shadow-2xs">
+          <div className="rounded-xl bg-white p-3 border border-[#EADBCE] space-y-1.5 shadow-2xs">
             <div className="flex items-center justify-between">
-              <span className="font-black uppercase tracking-wider text-[#193953]">
+              <span className="font-black uppercase tracking-wider text-[#344F48]">
                 🏁 Return Deadline (IST)
               </span>
-              <span className="text-[11px] font-bold text-[#193953]">{currentRetDate}</span>
+              <span className="text-[11px] font-bold text-[#344F48]">{currentRetDate}</span>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <div className="flex items-center gap-2">
-                <label htmlFor="ret-time-input" className="text-[#5A7184] shrink-0 font-medium">
+                <label htmlFor="ret-time-input" className="text-[#6B7C77] shrink-0 font-medium">
                   Time (IST):
                 </label>
                 <input
@@ -393,7 +393,7 @@ export default function MonthCalendarPicker({
                   type="time"
                   value={currentRetTime}
                   onChange={e => handleRetTimeChange(e.target.value)}
-                  className="rounded-lg border border-[#CBDDE9] bg-[#F4F9FC] px-2 py-1 font-bold text-[#193953] focus:border-[#176EA8] focus:outline-none"
+                  className="rounded-lg border border-[#EADBCE] bg-[#FAF2EB] px-2 py-1 font-bold text-[#344F48] focus:border-[#C65B32] focus:outline-none"
                 />
               </div>
               <div className="flex gap-1 overflow-x-auto">
@@ -404,8 +404,8 @@ export default function MonthCalendarPicker({
                     onClick={() => handleRetTimeChange(preset)}
                     className={`rounded px-1.5 py-0.5 text-[10px] font-bold cursor-pointer ${
                       currentRetTime === preset
-                        ? 'bg-[#193953] text-white'
-                        : 'bg-[#E1ECF2] text-[#5A7184] hover:bg-[#CBDDE9]'
+                        ? 'bg-[#344F48] text-white'
+                        : 'bg-[#EADBCE] text-[#6B7C77] hover:bg-[#CFBCAC]'
                     }`}
                   >
                     {preset}

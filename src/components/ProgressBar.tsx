@@ -12,11 +12,11 @@ const STEPS = [
 export default function ProgressBar({ currentStep }: ProgressBarProps) {
   return (
     <div className="w-full space-y-2 mb-6" aria-label={`Step ${currentStep} of 4`}>
-      <div className="flex items-center justify-between text-xs font-semibold tracking-wider uppercase text-[#5A7184]">
-        <span className="text-[#176EA8]">
-          Step {currentStep} of 4: <span className="text-[#193953] font-bold">{STEPS[currentStep - 1].label}</span>
+      <div className="flex items-center justify-between text-xs font-semibold tracking-wider uppercase text-[#6B7C77]">
+        <span className="text-[#C65B32]">
+          Step {currentStep} of 4: <span className="text-[#344F48] font-bold">{STEPS[currentStep - 1].label}</span>
         </span>
-        <span className="text-[#5A7184] hidden sm:inline">
+        <span className="text-[#6B7C77] hidden sm:inline">
           {Math.round((currentStep / 4) * 100)}% Complete
         </span>
       </div>
@@ -32,10 +32,10 @@ export default function ProgressBar({ currentStep }: ProgressBarProps) {
               key={s.step}
               className={`h-2 rounded-full transition-all duration-300 ${
                 isCurrent
-                  ? 'bg-[#176EA8] shadow-xs shadow-[#176EA8]/40 ring-2 ring-[#176EA8]/20'
+                  ? 'bg-[#C65B32] shadow-xs shadow-[#C65B32]/40 ring-2 ring-[#C65B32]/20'
                   : isDone
-                  ? 'bg-[#176EA8]/70'
-                  : 'bg-[#E1ECF2]'
+                  ? 'bg-[#5F7B6B]'
+                  : 'bg-[#EADBCE]'
               }`}
             />
           );

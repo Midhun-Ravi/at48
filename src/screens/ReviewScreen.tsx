@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router';
 import type { Dispatch, SetStateAction } from 'react';
 import type { UserConstraints } from '../types';
 import { getDestination } from '../data/destinations';
-import { getCompatiblePitstops } from '../data/pitstops.js';
+import { getCompatiblePitstops } from '../data/pitstops';
 import { evaluateFeasibility, parseIST } from '../engine/scheduler';
 import { getDestinationImage, getPlaceImage } from '../data/images';
 import ProgressBar from '../components/ProgressBar';
@@ -25,6 +25,8 @@ import {
   parseShareableTrip,
   sanitizeDisplayName,
 } from '../utils/tripShare';
+import TactileButton from '../components/ui/TactileButton';
+import ScenicBackground from '../components/scenic/ScenicBackground';
 
 type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserConstraints>> };
 
@@ -57,7 +59,7 @@ export default function ReviewScreen({ inputs }: Props) {
         <div className="pt-2">
           <Link
             to="/"
-            className="inline-block rounded-xl bg-[#176EA8] px-5 py-3 text-sm font-bold text-white hover:bg-[#135a8a] transition-colors"
+            className="inline-block rounded-xl bg-[#C65B32] px-5 py-3 text-sm font-bold text-white hover:bg-[#B04E27] transition-colors"
           >
             ← Create a new trip
           </Link>
@@ -69,9 +71,9 @@ export default function ReviewScreen({ inputs }: Props) {
   const dest = getDestination(id ?? '');
   if (!dest) {
     return (
-      <div className="mx-auto max-w-xl space-y-4 py-8 text-center text-[#193953]">
-        <p className="text-lg font-bold text-[#193953]">Unknown destination.</p>
-        <Link to="/compare" className="text-[#176EA8] underline font-semibold">
+      <div className="mx-auto max-w-xl space-y-4 py-8 text-center text-[#344F48]">
+        <p className="text-lg font-bold text-[#344F48]">Unknown destination.</p>
+        <Link to="/compare" className="text-[#C65B32] underline font-semibold">
           ← Back to comparison
         </Link>
       </div>
@@ -192,36 +194,71 @@ export default function ReviewScreen({ inputs }: Props) {
 
   const googleMapsDirectionsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent('MG Road, Bengaluru')}&destination=${encodeURIComponent(dest.name + ', India')}&travelmode=driving`;
 
+  // Vehicle fleet modeling
+  const partySize = activeInputs.partySize;
+  const getFleetInfo = (size: number) => {
+    if (size <= 4) {
+      return {
+        label: '1 Standard Car (Hatchback/Sedan)',
+        badge: '1 Car',
+        vehicles: 1,
+        note: 'Fits 1–4 adults comfortably. 1x fuel and toll calculations apply.',
+      };
+    }
+    if (size <= 6) {
+      return {
+        label: '1 Large SUV (6-Seater Innova / Safari)',
+        badge: '1 SUV',
+        vehicles: 1,
+        note: 'Single 6-seater SUV. 1x vehicle fuel and toll calculations apply.',
+      };
+    }
+    const count = Math.ceil(size / 5);
+    return {
+      label: `${count} Vehicles (Multi-Car Convoy or Tempo Traveller)`,
+      badge: `${count} Cars / Tempo`,
+      vehicles: count,
+      note: `For ${size} travelers, models ${count} vehicles or a 12/17-seater Tempo Traveller. Fuel and toll budgets scale proportionally.`,
+    };
+  };
+
+  const fleet = getFleetInfo(partySize);
+
   return (
-    <section className="mx-auto max-w-3xl space-y-6">
+    <section className="relative mx-auto max-w-3xl space-y-6 w-full min-w-0">
       {/* 4-part segmented progress meter */}
       <ProgressBar currentStep={4} />
 
-      {/* Top Navigation */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link
-          to={editUrl}
-          className="inline-flex items-center text-xs font-semibold text-[#176EA8] hover:underline"
-        >
-          ← Edit Itinerary (Screen 3)
-        </Link>
-        <span className="rounded-full bg-[#DDF0F6] border border-[#176EA8]/30 px-3 py-1 text-xs font-bold text-[#176EA8]">
-          Ready to Hit the Road
-        </span>
+      {/* Screen Hero Banner with Warm Scenic Layers */}
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-b from-[#F8E1D2]/50 via-[#FAF2EB] to-[#FFF7F0] p-4 sm:p-6 border border-[#EADBCE]">
+        <ScenicBackground variant="compact" />
+        <div className="relative z-10 flex flex-wrap items-end justify-between gap-4">
+          <div className="space-y-1">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[11px] font-bold text-[#C65B32] border border-[#EADBCE] shadow-2xs">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#C65B32]" />
+              Step 4 · Final Reality Check & RSVP
+            </span>
+            <h1 className="text-2xl sm:text-3xl font-black text-[#344F48] tracking-tight leading-snug">
+              Ready to hit the road?
+            </h1>
+            <p className="text-xs sm:text-sm text-[#6B7C77] max-w-xl leading-relaxed">
+              Review your return deadline margin, transparent vehicle fleet costs, and invite your crew via WhatsApp.
+            </p>
+          </div>
+
+          <Link
+            to={editUrl}
+            className="text-xs font-bold text-[#C65B32] hover:text-[#B04E27] hover:underline transition-colors"
+          >
+            ← Edit Schedule
+          </Link>
+        </div>
       </div>
 
-      {/* Screen Title */}
-      <div>
-        <h1 className="text-3xl font-extrabold text-[#193953]">Ready to hit the road?</h1>
-        <p className="mt-1 text-sm text-[#5A7184]">
-          Final trip reality check: review your return deadline margin, usable destination time, budget, and sharing link.
-        </p>
-      </div>
-
-      {/* Guest Invitation Notice (Gate 6: De-emphasized, preserves full trip visibility first) */}
+      {/* Guest Invitation Notice (if opening shared link) */}
       {isGuestView && (
-        <div className="rounded-xl border border-[#BAE3F1] bg-[#DDF0F6] p-3.5 text-xs text-[#193953] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
-          <div className="flex items-center gap-2">
+        <div className="rounded-2xl border border-[#EADBCE] bg-[#FAF2EB] p-4 text-xs text-[#344F48] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2.5">
             <span className="text-xl">🚗</span>
             <span>
               <strong>Trip Invitation from {organizerName || 'your organizer'}:</strong> Review the planned timeline below, then send your RSVP at the bottom of the page.
@@ -229,7 +266,7 @@ export default function ReviewScreen({ inputs }: Props) {
           </div>
           <a
             href="#guest-rsvp"
-            className="rounded-lg bg-[#176EA8] text-white px-3 py-1 font-bold text-xs hover:bg-[#135a8a] transition-colors whitespace-nowrap self-end sm:self-auto"
+            className="rounded-xl bg-[#C65B32] text-white px-3.5 py-1.5 font-bold text-xs hover:bg-[#B04E27] transition-colors whitespace-nowrap self-end sm:self-auto shadow-2xs"
           >
             Jump to RSVP ↓
           </a>
@@ -237,28 +274,21 @@ export default function ReviewScreen({ inputs }: Props) {
       )}
 
       {/* Section A: Trip Overview Hero Card */}
-      <div className="overflow-hidden rounded-2xl border border-[#E1ECF2] bg-white shadow-sm">
-        {/* Destination Hero Photo with Fixed Aspect Ratio */}
+      <div className="overflow-hidden rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white shadow-sm">
+        {/* Destination Photo Header */}
         <div className="relative aspect-[16/9] sm:aspect-[21/9] w-full bg-slate-100 overflow-hidden">
-          {heroImage ? (
+          {heroImage && (
             <img
               src={heroImage.src}
               alt={heroImage.alt}
               loading="lazy"
               className="h-full w-full object-cover"
-              onError={e => {
-                (e.target as HTMLElement).style.display = 'none';
-              }}
             />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center bg-slate-100 text-4xl">
-              🏞️
-            </div>
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
           <div className="absolute bottom-3 left-4 right-4 flex items-end justify-between text-white">
             <div>
-              <span className="rounded-full bg-[#176EA8] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider backdrop-blur-xs">
+              <span className="rounded-full bg-[#C65B32] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider backdrop-blur-xs">
                 {isGroup ? 'Group Escape' : 'Solo Road Trip'}
               </span>
               <h2 className="mt-1 text-2xl sm:text-3xl font-black">{dest.name}</h2>
@@ -272,80 +302,80 @@ export default function ReviewScreen({ inputs }: Props) {
         </div>
 
         {/* Core Trip Parameters Grid */}
-        <div className="p-5 sm:p-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs border-t border-[#E1ECF2] bg-[#F4F9FC]">
+        <div className="p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs border-t border-[#EADBCE] bg-[#FAF2EB]">
           <div>
-            <span className="block text-[#5A7184] font-medium">Organizer</span>
-            <strong className="text-sm font-bold text-[#193953]">
+            <span className="block text-[#6B7C77] font-medium">Organizer</span>
+            <strong className="text-sm font-bold text-[#344F48]">
               {organizerName || (isGroup ? 'Trip Organizer' : 'Solo Traveler')}
             </strong>
           </div>
           <div>
-            <span className="block text-[#5A7184] font-medium">Party Size</span>
-            <strong className="text-sm font-bold text-[#193953]">
+            <span className="block text-[#6B7C77] font-medium">Party Size</span>
+            <strong className="text-sm font-bold text-[#344F48]">
               {activeInputs.partySize} {activeInputs.partySize === 1 ? 'traveler' : 'travelers'}
             </strong>
           </div>
           <div>
-            <span className="block text-[#5A7184] font-medium">Travel Pace</span>
-            <strong className="text-sm font-bold text-[#193953] capitalize">
-              {activeInputs.pace}
+            <span className="block text-[#6B7C77] font-medium">Corridor Distance</span>
+            <strong className="text-sm font-bold text-[#344F48]">
+              {dest.oneWayDistanceKm} km one-way
             </strong>
           </div>
           <div>
-            <span className="block text-[#5A7184] font-medium">Target Budget</span>
-            <strong className="text-sm font-bold text-[#193953]">
+            <span className="block text-[#6B7C77] font-medium">Target Budget</span>
+            <strong className="text-sm font-bold text-[#344F48]">
               ₹{activeInputs.perPersonBudgetINR.toLocaleString('en-IN')}/person
             </strong>
           </div>
         </div>
 
         {/* Travel Window Times */}
-        <div className="p-5 sm:p-6 border-t border-[#E1ECF2] grid sm:grid-cols-2 gap-4 text-sm bg-white">
-          <div className="rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3.5">
-            <span className="block text-xs font-semibold uppercase text-[#176EA8]">Leave Bengaluru</span>
-            <strong className="mt-1 block text-[#193953]">
+        <div className="p-4 sm:p-6 border-t border-[#EADBCE] grid sm:grid-cols-2 gap-4 text-sm bg-white">
+          <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3.5">
+            <span className="block text-xs font-bold uppercase text-[#C65B32]">Leave Bengaluru</span>
+            <strong className="mt-1 block text-[#344F48]">
               {formatReadableDateTime(activeInputs.departureDateTime)} (IST)
             </strong>
-            <span className="text-xs text-[#5A7184]">Origin: MG Road reference corridor</span>
+            <span className="text-xs text-[#6B7C77]">Origin: MG Road reference corridor</span>
           </div>
-          <div className="rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3.5">
-            <span className="block text-xs font-semibold uppercase text-[#176EA8]">Must Be Home By</span>
-            <strong className="mt-1 block text-[#193953]">
+          <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3.5">
+            <span className="block text-xs font-bold uppercase text-[#344F48]">Must Be Home By</span>
+            <strong className="mt-1 block text-[#344F48]">
               {formatReadableDateTime(activeInputs.returnDeadlineDateTime)} (IST)
             </strong>
-            <span className="text-xs text-[#5A7184]">
+            <span className="text-xs text-[#6B7C77]">
               Expected arrival: {formatReadableDateTime(r.homeArrivalTime)}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Section B: Feasibility Verdict Card */}
-      <div className="rounded-2xl border border-[#E1ECF2] bg-white p-6 text-[#193953] shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="rounded-full bg-[#DDF0F6] border border-[#176EA8]/30 px-3 py-1 text-xs font-bold uppercase tracking-wider text-[#176EA8]">
+      {/* Section B: Feasibility Verdict & Return Margin Card */}
+      <div className="rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 text-[#344F48] shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#EADBCE] pb-3">
+          <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-3 py-1 text-xs font-bold uppercase tracking-wider text-[#C65B32]">
             Feasibility Verdict
           </span>
-          <span className="text-xs text-[#5A7184]">MG Road reference origin</span>
+          <span className="text-xs text-[#6B7C77]">Deterministic MG Road baseline</span>
         </div>
 
         <div>
-          <p className="text-3xl font-black tracking-tight text-[#193953]">{r.rating}</p>
-          <p className="mt-1 text-sm text-[#5A7184]">{r.ratingExplanation}</p>
+          <p className="text-2xl sm:text-3xl font-black tracking-tight text-[#344F48]">{r.rating}</p>
+          <p className="mt-1 text-xs sm:text-sm text-[#6B7C77]">{r.ratingExplanation}</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 border-t border-[#E1ECF2] pt-4 text-sm">
+        <div className="grid grid-cols-2 gap-4 border-t border-[#EADBCE] pt-4 text-sm">
           <div>
-            <p className="text-xs text-[#5A7184]">Usable destination free time</p>
-            <strong className="text-2xl font-black text-[#193953]">
+            <p className="text-xs text-[#6B7C77]">Usable destination free time</p>
+            <strong className="text-xl sm:text-2xl font-black text-[#344F48]">
               {formatDuration(r.destinationSlackMinutes)}
             </strong>
           </div>
           <div>
-            <p className="text-xs text-[#5A7184]">Return deadline margin</p>
+            <p className="text-xs text-[#6B7C77]">Return deadline margin</p>
             <strong
-              className={`text-2xl font-black ${
-                r.returnDeadlineMarginMinutes < 0 ? 'text-red-700' : 'text-emerald-700'
+              className={`text-xl sm:text-2xl font-black ${
+                r.returnDeadlineMarginMinutes < 0 ? 'text-rose-700' : 'text-emerald-700'
               }`}
             >
               {formatDuration(r.returnDeadlineMarginMinutes, true)}
@@ -353,25 +383,67 @@ export default function ReviewScreen({ inputs }: Props) {
           </div>
         </div>
 
-        <div className="border-t border-[#E1ECF2] pt-3 text-xs text-[#5A7184] space-y-1">
+        <div className="border-t border-[#EADBCE] pt-3 text-xs text-[#6B7C77] space-y-1">
           <p>
-            Expected home: <strong className="text-[#193953]">{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>
+            Expected home: <strong className="text-[#344F48]">{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>
           </p>
           <p>
-            Estimated cost: <strong className="text-[#193953]">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person</strong> (₹{r.estimatedTripTotalINR.toLocaleString('en-IN')} total for party of {activeInputs.partySize}{activeInputs.partySize > 6 ? ` across ${Math.ceil(activeInputs.partySize / 5)} vehicles` : ''})
+            Estimated cost: <strong className="text-[#344F48]">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person</strong> (₹{r.estimatedTripTotalINR.toLocaleString('en-IN')} total for party of {activeInputs.partySize})
           </p>
         </div>
       </div>
 
-      {/* Section C: Route & Stop Highlights with External Links */}
-      <div className="space-y-4 rounded-2xl border border-[#E1ECF2] bg-white p-5 sm:p-6 shadow-sm">
+      {/* Section C: Transparent Vehicle Fleet & Cost Breakdown */}
+      <div className="space-y-4 rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
+        <div className="flex items-center justify-between border-b border-[#EADBCE] pb-3">
+          <div>
+            <h2 className="text-base font-black text-[#344F48]">Vehicle Fleet & Cost Sharing</h2>
+            <p className="text-xs text-[#6B7C77]">
+              Transparent cost-sharing model based on party size of {activeInputs.partySize}.
+            </p>
+          </div>
+          <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-3 py-1 text-xs font-bold text-[#C65B32]">
+            {fleet.badge}
+          </span>
+        </div>
+
+        <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 text-xs space-y-2">
+          <strong className="block text-sm text-[#344F48]">{fleet.label}</strong>
+          <p className="text-[#6B7C77] leading-relaxed">{fleet.note}</p>
+          <div className="pt-2 border-t border-[#EADBCE] grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+            <div>
+              <span className="text-[#6B7C77] block">Round-Trip Fuel:</span>
+              <strong className="text-[#344F48]">₹{(dest.approximateRoundTripFuelINR * fleet.vehicles).toLocaleString('en-IN')}</strong>
+            </div>
+            <div>
+              <span className="text-[#6B7C77] block">Highway Tolls:</span>
+              <strong className="text-[#344F48]">₹{(dest.approximateRoundTripTollsINR * fleet.vehicles).toLocaleString('en-IN')}</strong>
+            </div>
+            <div>
+              <span className="text-[#6B7C77] block">Stays ({Math.ceil(activeInputs.partySize / 2)} rooms):</span>
+              <strong className="text-[#344F48]">₹{(dest.approximateOneNightStayINR * Math.ceil(activeInputs.partySize / 2)).toLocaleString('en-IN')}</strong>
+            </div>
+            <div>
+              <span className="text-[#6B7C77] block">Cost Per Traveler:</span>
+              <strong className="text-[#C65B32] font-black">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}</strong>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-[11px] text-[#6B7C77] leading-relaxed">
+          💡 Fuel and toll expenses are divided equally among all {activeInputs.partySize} travelers. Accommodation assumes twin sharing rooms. Personal dining and souvenir purchases are excluded.
+        </p>
+      </div>
+
+      {/* Section D: Route & Stop Highlights with External Links */}
+      <div className="space-y-4 rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-[#193953]">Route & Landmark Destinations</h2>
+          <h2 className="text-base font-black text-[#344F48]">Route & Landmark Destinations</h2>
           <a
             href={googleMapsDirectionsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs font-bold text-[#176EA8] hover:underline"
+            className="text-xs font-bold text-[#C65B32] hover:underline"
           >
             Open in Google Maps ↗
           </a>
@@ -379,29 +451,23 @@ export default function ReviewScreen({ inputs }: Props) {
 
         {/* Selected Pitstop Highlight */}
         {selectedStops.length > 0 && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-              <span className="font-bold text-amber-900 text-xs uppercase tracking-wider">
-                ☕ Selected Highway Pitstops
-              </span>
-              <span className="rounded bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 text-[11px] font-bold">
-                {selectedStops.length} Stop{selectedStops.length > 1 ? 's' : ''}
-              </span>
-            </div>
+          <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 space-y-2 text-xs">
+            <span className="font-bold text-[#344F48] block uppercase tracking-wider text-[11px]">
+              ☕ Selected Highway Pitstops ({selectedStops.length})
+            </span>
             {selectedStops.map(stop => (
-              <div key={stop.id} className="flex gap-3 items-center pt-1 border-t border-amber-200/50 first:border-t-0">
-                <div className="text-xs text-[#5A7184] flex-1">
-                  <strong className="block text-sm text-[#193953]">{stop.name}</strong>
+              <div key={stop.id} className="flex gap-3 items-center pt-1 border-t border-[#EADBCE] first:border-t-0">
+                <div className="text-xs text-[#6B7C77] flex-1">
+                  <strong className="block text-sm text-[#344F48]">{stop.name}</strong>
                   <p className="mt-0.5">
                     Est. Dwell: {stop.dwellMinutes}m · Detour: {stop.detourMinutes}m (+{stop.dwellMinutes + stop.detourMinutes}m total)
-                    {stop.replacesArrivalMeal && <span className="text-[#176EA8] ml-1 font-semibold">· Replaces arrival meal break</span>}
                   </p>
                 </div>
                 <a
                   href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.name)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="rounded-lg bg-white border border-[#E1ECF2] px-3 py-1.5 text-xs font-bold text-[#176EA8] hover:bg-slate-50 transition-colors"
+                  className="rounded-lg bg-white border border-[#EADBCE] px-3 py-1.5 text-xs font-bold text-[#C65B32] hover:bg-[#FAF2EB] transition-colors"
                 >
                   Directions ↗
                 </a>
@@ -411,8 +477,8 @@ export default function ReviewScreen({ inputs }: Props) {
         )}
 
         {/* Planned Attractions & Custom Activities */}
-        <div className="space-y-2">
-          <span className="block text-xs font-bold text-[#5A7184] uppercase tracking-wider">
+        <div className="space-y-2 text-xs">
+          <span className="block font-bold text-[#6B7C77] uppercase tracking-wider text-[11px]">
             Planned Attractions & Activities
           </span>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -422,8 +488,8 @@ export default function ReviewScreen({ inputs }: Props) {
               return (
                 <div
                   key={a.id}
-                  className={`flex items-center gap-3 rounded-xl border p-2.5 text-xs ${
-                    isSkipped ? 'border-[#E1ECF2] bg-[#F4F9FC] opacity-60' : 'border-[#E1ECF2] bg-white'
+                  className={`flex items-center gap-3 rounded-xl border p-2.5 ${
+                    isSkipped ? 'border-[#EADBCE] bg-[#FAF2EB] opacity-60' : 'border-[#EADBCE] bg-white'
                   }`}
                 >
                   {aImg && (
@@ -434,38 +500,26 @@ export default function ReviewScreen({ inputs }: Props) {
                     />
                   )}
                   <div className="min-w-0 flex-1">
-                    <strong className="block text-[#193953] truncate">{a.name}</strong>
-                    <span className="text-[#5A7184]">
+                    <strong className="block text-[#344F48] truncate">{a.name}</strong>
+                    <span className="text-[#6B7C77]">
                       {isSkipped ? 'Skipped' : `${formatDuration(a.durationMinutes)} planned visit`}
                     </span>
                   </div>
-                  {!isSkipped && (
-                    <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a.name + ', ' + dest.name)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded bg-[#F4F9FC] border border-[#E1ECF2] px-2 py-1 text-[10px] font-bold text-[#176EA8] hover:bg-slate-100 transition-colors"
-                      title="Search landmark on Google Maps"
-                    >
-                      Map ↗
-                    </a>
-                  )}
                 </div>
               );
             })}
 
-            {/* Custom planned activities */}
             {(activeInputs.customActivities ?? []).map(ca => (
               <div
                 key={ca.id}
-                className="flex items-center gap-3 rounded-xl border border-[#176EA8]/30 bg-[#DDF0F6]/70 p-2.5 text-xs"
+                className="flex items-center gap-3 rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2.5"
               >
-                <div className="h-10 w-10 rounded-lg bg-[#176EA8] text-white flex items-center justify-center text-base font-bold flex-shrink-0">
+                <div className="h-10 w-10 rounded-lg bg-[#C65B32] text-white flex items-center justify-center text-base font-bold flex-shrink-0">
                   ✨
                 </div>
                 <div className="min-w-0 flex-1">
-                  <strong className="block text-[#193953] truncate">{ca.name}</strong>
-                  <span className="text-[#176EA8] font-semibold">
+                  <strong className="block text-[#344F48] truncate">{ca.name}</strong>
+                  <span className="text-[#6B7C77]">
                     Day {ca.day} · {ca.durationMinutes}m · {ca.costPerPersonINR ? `₹${ca.costPerPersonINR}` : 'Free'}
                   </span>
                 </div>
@@ -475,69 +529,52 @@ export default function ReviewScreen({ inputs }: Props) {
         </div>
       </div>
 
-      {/* Section D: Day-by-Day Itinerary Review Card */}
-      <div className="space-y-5 rounded-2xl border border-[#E1ECF2] bg-white p-5 sm:p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* Section E: Day-by-Day Itinerary Review */}
+      <div className="space-y-5 rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#EADBCE] pb-3">
           <div>
-            <h2 className="text-base font-bold text-[#193953]">Day-by-Day Itinerary Review</h2>
-            <p className="text-xs text-[#5A7184]">
+            <h2 className="text-base font-black text-[#344F48]">Day-by-Day Itinerary Review</h2>
+            <p className="text-xs text-[#6B7C77]">
               Hour-by-hour breakdown of highway driving, stops, and leisure windows.
             </p>
           </div>
-          <span className="rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-bold text-emerald-800">
-            Verified Engine Schedule
+          <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-3 py-1 text-xs font-bold text-[#5F7B6B]">
+            Verified Schedule
           </span>
         </div>
 
-        {/* Day-by-Day Itinerary Cards (Dynamic 1 to 4 Days) */}
+        {/* Day-by-Day Cards */}
         {availableDays.map(day => {
           const items = r.timeline.filter(t => t.day === day && t.category !== 'REST');
           const dayDate = r.timeline.find(t => t.day === day)?.startTime;
           return (
-            <div key={day} className="rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-4 space-y-3">
-              <div className="flex items-center justify-between border-b border-[#E1ECF2] pb-2">
-                <h3 className="text-sm font-extrabold text-[#193953] uppercase tracking-wide">
-                  Day {day} {dayDate && <span className="text-xs font-normal text-[#5A7184] lowercase">· {formatReadableDate(dayDate)}</span>}
+            <div key={day} className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 space-y-3">
+              <div className="flex items-center justify-between border-b border-[#EADBCE] pb-2">
+                <h3 className="text-sm font-extrabold text-[#344F48] uppercase tracking-wide">
+                  Day {day} {dayDate && <span className="text-xs font-normal text-[#6B7C77] lowercase">· {formatReadableDate(dayDate)}</span>}
                 </h3>
-                <span className="text-[11px] font-semibold text-[#5A7184]">
+                <span className="text-[11px] font-semibold text-[#6B7C77]">
                   {items.length} segments
                 </span>
               </div>
 
               <div className="space-y-2">
                 {items.map(item => {
-                  const isPitstop = item.category === 'PITSTOP';
-                  const isFree = item.category === 'FREE';
-                  const isDrive = item.category === 'DRIVE';
-                  const isActivity = item.category === 'ACTIVITY';
-                  const isCustom = item.isCustom;
                   const duration = Math.round((parseIST(item.endTime) - parseIST(item.startTime)) / 60_000);
 
                   return (
                     <div
                       key={item.id}
-                      className={`flex items-center justify-between gap-3 rounded-lg border p-2.5 text-xs transition-colors ${
-                        isFree
-                          ? 'border-emerald-200 bg-emerald-50/80 text-emerald-900 font-medium'
-                          : isPitstop
-                          ? 'border-amber-200 bg-amber-50/80 text-amber-900 font-semibold'
-                          : isDrive
-                          ? 'border-blue-200 bg-blue-50/80 text-blue-900'
-                          : isCustom
-                          ? 'border-[#176EA8]/40 bg-[#DDF0F6] text-[#193953] font-semibold'
-                          : isActivity
-                          ? 'border-purple-200 bg-purple-50/80 text-purple-900'
-                          : 'border-[#E1ECF2] bg-white text-[#193953]'
-                      }`}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-[#EADBCE] bg-white p-2.5 text-xs"
                     >
                       <div className="min-w-0 flex-1">
-                        <span className="font-semibold text-[#193953]">{item.label}</span>
+                        <span className="font-semibold text-[#344F48]">{item.label}</span>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0 text-[#5A7184]">
+                      <div className="flex items-center gap-2 flex-shrink-0 text-[#6B7C77]">
                         <span>
                           {formatTimelineTime(item.startTime)} - {formatTimelineTime(item.endTime)}
                         </span>
-                        <span className="font-bold text-[#193953]">({formatDuration(duration)})</span>
+                        <span className="font-bold text-[#344F48]">({formatDuration(duration)})</span>
                       </div>
                     </div>
                   );
@@ -548,37 +585,37 @@ export default function ReviewScreen({ inputs }: Props) {
         })}
 
         {/* Expandable Plain-Text Preview for Copying */}
-        <details className="group border-t border-[#E1ECF2] pt-3">
-          <summary className="cursor-pointer text-xs font-bold text-[#176EA8] hover:underline select-none flex items-center justify-between">
+        <details className="group border-t border-[#EADBCE] pt-3">
+          <summary className="cursor-pointer text-xs font-bold text-[#C65B32] hover:underline select-none flex items-center justify-between">
             <span>Show plain-text messaging preview</span>
             <span className="group-open:rotate-180 transition-transform">▼</span>
           </summary>
           <div className="mt-3">
-            <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-4 text-xs text-[#193953] font-mono leading-relaxed">
+            <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 text-xs text-[#344F48] font-mono leading-relaxed">
               {summaryText}
             </pre>
           </div>
         </details>
       </div>
 
-      {/* Section E: Save & Share Actions */}
-      <div className="space-y-4 rounded-2xl border border-[#176EA8]/30 bg-[#DDF0F6]/50 p-5 sm:p-6 shadow-sm">
+      {/* Section F: Save & Share Actions */}
+      <div className="space-y-4 rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-[#FAF2EB]/70 p-5 sm:p-6 shadow-sm">
         <div>
-          <h2 className="text-base font-bold text-[#193953]">Save & Share Trip</h2>
-          <p className="text-xs text-[#5A7184]">
+          <h2 className="text-base font-black text-[#344F48]">Save & Share Trip</h2>
+          <p className="text-xs text-[#6B7C77]">
             Save this itinerary to your browser storage, or share with your crew via WhatsApp.
           </p>
         </div>
 
-        {/* If guest view, provide the RSVP action (Gate 6) */}
+        {/* If guest view, provide the RSVP action (Preserved for tests & guests) */}
         {isGuestView && (
-          <div id="guest-rsvp" className="rounded-xl border border-[#BAE3F1] bg-white p-4 space-y-3 shadow-2xs">
+          <div id="guest-rsvp" className="rounded-xl border border-[#EADBCE] bg-white p-4 space-y-3 shadow-2xs">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">Trip Invitation & RSVP</span>
-              <span className="text-xs text-[#5A7184]">Confirm spot with {organizerName || 'organizer'}</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-[#C65B32]">Trip Invitation & RSVP</span>
+              <span className="text-xs text-[#6B7C77]">Confirm spot with {organizerName || 'organizer'}</span>
             </div>
             <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-[#193953]">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-[#344F48]">
                 Your Name to RSVP
               </label>
               <div className="flex flex-col sm:flex-row gap-2">
@@ -591,7 +628,7 @@ export default function ReviewScreen({ inputs }: Props) {
                     setGuestError('');
                     setGuestName(cleanInputDisplayName(e.target.value));
                   }}
-                  className="flex-1 rounded-xl border border-[#E1ECF2] p-2.5 text-xs text-[#193953] placeholder:text-[#5A7184]/60 focus:border-[#176EA8] focus:outline-none"
+                  className="flex-1 rounded-xl border border-[#EADBCE] p-2.5 text-xs text-[#344F48] placeholder:text-[#6B7C77]/60 focus:border-[#C65B32] focus:outline-none"
                 />
                 <button
                   type="button"
@@ -609,69 +646,72 @@ export default function ReviewScreen({ inputs }: Props) {
           </div>
         )}
 
-        {/* Primary Action Buttons: Prioritize Share Trip (Gate 6) */}
+        {/* Primary Action Buttons: Prioritize Share Trip */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <button
+          <TactileButton
+            variant="primary"
+            size="md"
             onClick={handleCopyTripLink}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#176EA8] py-3.5 px-4 text-sm font-bold text-white shadow-xs hover:bg-[#135a8a] active:scale-[0.99] transition-all cursor-pointer"
+            className="w-full justify-center"
           >
             <span>🔗</span>
             <span>Share Trip (Copy Link)</span>
-          </button>
+          </TactileButton>
 
-          <button
+          <TactileButton
+            variant="secondary"
+            size="md"
             onClick={handleSaveTrip}
-            className={`w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 text-sm font-bold transition-all cursor-pointer border ${
-              savedSuccess
-                ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
-                : 'border-[#E1ECF2] bg-white text-[#193953] shadow-xs hover:bg-slate-50'
-            }`}
+            className="w-full justify-center"
           >
             <span>{savedSuccess ? '✓' : '💾'}</span>
             <span>{savedSuccess ? 'Saved to My Trip!' : 'Save Trip (This Device)'}</span>
-          </button>
+          </TactileButton>
         </div>
 
         {/* Supporting Quick Sharing Options */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
           <button
+            type="button"
             onClick={handleShareInviteWhatsApp}
             className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-3.5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
           >
             <span>💬</span> WhatsApp Invite
           </button>
           <button
+            type="button"
             onClick={handleCopySummary}
-            className="flex items-center justify-center gap-2 rounded-xl border border-[#E1ECF2] bg-white px-3.5 py-2.5 text-xs font-bold text-[#193953] hover:bg-slate-50 shadow-xs active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-[#EADBCE] bg-white px-3.5 py-2.5 text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] shadow-xs active:scale-[0.99] transition-all cursor-pointer"
           >
             <span>📋</span> Copy Text Summary
           </button>
           <button
+            type="button"
             onClick={handleShareSummaryWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl border border-[#E1ECF2] bg-white px-3.5 py-2.5 text-xs font-bold text-[#193953] hover:bg-slate-50 shadow-xs active:scale-[0.99] transition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 rounded-xl border border-[#EADBCE] bg-white px-3.5 py-2.5 text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] shadow-xs active:scale-[0.99] transition-all cursor-pointer"
           >
             <span>💬</span> WhatsApp Summary
           </button>
         </div>
 
         {/* Local Storage Disclosure */}
-        <p className="text-[11px] text-[#5A7184] bg-white p-3 rounded-xl border border-[#E1ECF2] leading-relaxed">
-          ℹ️ <strong>Account-Free Storage:</strong> "Save My Trip" bookmarks your plan locally in this browser. No login or account required. Clearing browser cache will remove it. To share across devices or with your crew, use the WhatsApp invitation link.
+        <p className="text-[11px] text-[#6B7C77] bg-white p-3 rounded-xl border border-[#EADBCE] leading-relaxed">
+          ℹ️ <strong>Account-Free Storage:</strong> "Save Trip" bookmarks your plan locally in this browser. No login or account required. Clearing browser cache will remove it. To share across devices or with your crew, use the WhatsApp invitation link.
         </p>
 
         {/* Toast confirmation feedback */}
         {toastMessage && (
           <p
             role="status"
-            className="text-center text-sm font-semibold text-[#176EA8] animate-fade-in py-1"
+            className="text-center text-sm font-semibold text-[#C65B32] animate-fade-in py-1"
           >
             ✓ {toastMessage}
           </p>
         )}
       </div>
 
-      <p className="text-center text-xs text-[#5A7184]">
-        Cost assumes {activeInputs.partySize} travelers sharing a car and room. Meals and personal expenses excluded. Route durations and most costs are unverified planning estimates.
+      <p className="text-center text-xs text-[#6B7C77]">
+        Cost assumes {activeInputs.partySize} travelers sharing {fleet.vehicles} vehicle{fleet.vehicles > 1 ? 's' : ''} and {Math.ceil(activeInputs.partySize / 2)} hotel room{Math.ceil(activeInputs.partySize / 2) > 1 ? 's' : ''}. Personal expenses and meals are excluded. Highway driving times include standard 20% traffic buffers.
       </p>
     </section>
   );

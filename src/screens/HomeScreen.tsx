@@ -4,38 +4,39 @@ import { getDestinationImage } from '../data/images';
 import TrustNote from '../components/TrustNote';
 import HowItWorksAnimation from '../components/HowItWorksAnimation';
 import TactileButton from '../components/ui/TactileButton';
+import ScenicBackground from '../components/scenic/ScenicBackground';
 
 export default function HomeScreen() {
   return (
     <div className="space-y-12 sm:space-y-16 pb-12">
-      {/* Center-Aligned Hero Section */}
-      <section className="relative overflow-hidden rounded-3xl border border-[#D0E2ED] bg-white text-[#193953] shadow-md p-5 sm:p-10 md:p-14 text-center">
-        {/* Subtle grid pattern background */}
-        <div className="absolute inset-0 opacity-30 bg-[radial-gradient(#176EA8_1px,transparent_1px)] [background-size:24px_24px] pointer-events-none" />
+      {/* Center-Aligned Hero Section with Scenic 2D Background */}
+      <section className="relative overflow-hidden rounded-3xl border border-[#EADBCE] bg-white text-[#344F48] shadow-sm p-6 sm:p-10 md:p-14 text-center">
+        {/* Scenic Background Layer */}
+        <ScenicBackground variant="hero" />
 
-        <div className="relative mx-auto max-w-3xl space-y-5 sm:space-y-6 flex flex-col items-center">
+        <div className="relative z-10 mx-auto max-w-3xl space-y-5 sm:space-y-6 flex flex-col items-center">
           {/* Badge */}
-          <div className="inline-flex items-center justify-center text-center gap-2 rounded-full bg-[#DDF0F6] border border-[#BAE3F1] px-3.5 py-1 text-[11px] sm:text-xs font-bold text-[#176EA8] shadow-2xs max-w-full">
-            <span className="flex h-2 w-2 shrink-0 rounded-full bg-[#176EA8] animate-pulse" />
+          <div className="inline-flex items-center justify-center text-center gap-2 rounded-full bg-[#F8E1D2] border border-[#EADBCE] px-4 py-1.5 text-xs font-bold text-[#C65B32] shadow-2xs max-w-full">
+            <span className="flex h-2 w-2 shrink-0 rounded-full bg-[#C65B32] animate-pulse" />
             <span>Bengaluru Weekend Escapes · 1 to 4 Days</span>
           </div>
 
           {/* Center-aligned headline */}
-          <h1 className="text-2xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tight leading-[1.18] text-[#193953] text-center">
+          <h1 className="text-3xl sm:text-5xl md:text-6xl font-black tracking-tight leading-[1.12] text-[#344F48]">
             Road trips,{' '}
-            <span className="block sm:inline text-[#176EA8] underline decoration-[#FF9870] underline-offset-6 sm:underline-offset-8">
+            <span className="text-[#C65B32] underline decoration-[#F8E1D2] underline-offset-8">
               without guesswork.
             </span>
           </h1>
 
           {/* Center-aligned explanatory text */}
-          <p className="text-sm sm:text-base md:text-lg text-[#5A7184] leading-relaxed max-w-2xl mx-auto px-1">
-            Set your departure and firm return deadline in IST. @48 models your real highway driving,
-            20% traffic buffers, landmark operating hours, and return margin deterministically—before you start the car.
+          <p className="text-base sm:text-lg text-[#6B7C77] leading-relaxed max-w-2xl mx-auto px-1">
+            Set your departure time and firm return deadline in Indian Standard Time (IST). @48 models your real highway driving,
+            mandatory 20% traffic buffers, landmark operating hours, and return margin deterministically—before you start the car.
           </p>
 
           {/* Center-aligned tactile primary & secondary CTAs */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2.5 sm:gap-3.5 pt-2 w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 pt-2 w-full sm:w-auto">
             <TactileButton
               variant="primary"
               size="lg"
@@ -55,24 +56,24 @@ export default function HomeScreen() {
             </TactileButton>
 
             <TactileButton
-              variant="marine"
+              variant="forest"
               size="lg"
-              to="/prototype/v2"
+              to="/compare"
               className="w-full sm:w-auto text-center"
             >
-              Prototype V2 ⚡
+              Compare Escapes →
             </TactileButton>
           </div>
 
           {/* Trust badges */}
-          <div className="pt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] sm:text-xs text-[#5A7184]">
-            <span className="font-bold text-[#193953]">✓ 100% Free & Account-Free</span>
+          <div className="pt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs text-[#6B7C77]">
+            <span className="font-bold text-[#344F48]">✓ 100% Free & Account-Free</span>
             <span>•</span>
-            <span className="font-bold text-[#193953]">✓ 20% Highway Buffers</span>
+            <span className="font-bold text-[#344F48]">✓ 20% Highway Contingency Buffers</span>
             <span>•</span>
-            <span className="font-bold text-[#193953]">✓ Return Feasibility</span>
+            <span className="font-bold text-[#344F48]">✓ Deterministic Return Feasibility</span>
             <span>•</span>
-            <span className="font-bold text-[#193953]">✓ WhatsApp RSVP</span>
+            <span className="font-bold text-[#344F48]">✓ WhatsApp Group RSVP</span>
           </div>
         </div>
       </section>
@@ -83,20 +84,20 @@ export default function HomeScreen() {
       </section>
 
       {/* Curated Destination Highlights */}
-      <section className="space-y-8">
+      <section className="space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-[#176EA8]">Curated Escapes</p>
-            <h2 className="mt-1 text-2xl font-black text-[#193953] sm:text-3xl">
+            <p className="text-xs font-bold uppercase tracking-widest text-[#C65B32]">Curated Escapes</p>
+            <h2 className="mt-1 text-2xl font-black text-[#344F48] sm:text-3xl">
               Four verified corridors from Bengaluru
             </h2>
-            <p className="mt-1 text-sm text-[#5A7184]">
+            <p className="mt-1 text-sm text-[#6B7C77]">
               Grounded with real highway waypoints, verified opening hours, and geographic coordinates.
             </p>
           </div>
           <Link
-            to="/plan"
-            className="text-sm font-bold text-[#176EA8] hover:text-[#135A8A] hover:underline"
+            to="/compare"
+            className="text-sm font-bold text-[#C65B32] hover:text-[#B04E27] hover:underline"
           >
             Compare All Four in Step 2 →
           </Link>
@@ -108,7 +109,7 @@ export default function HomeScreen() {
             return (
               <div
                 key={d.id}
-                className="flex flex-col overflow-hidden rounded-2xl border border-[#CBDDE9] bg-white shadow-xs hover:border-[#176EA8] hover:shadow-md transition-all group"
+                className="flex flex-col overflow-hidden rounded-2xl border border-[#EADBCE] bg-white shadow-xs hover:border-[#C65B32] hover:shadow-md transition-all group"
               >
                 <div className="relative aspect-[16/10] w-full overflow-hidden bg-slate-100">
                   {img ? (
@@ -132,22 +133,22 @@ export default function HomeScreen() {
                 </div>
 
                 <div className="flex flex-1 flex-col p-4">
-                  <h3 className="text-lg font-bold text-[#193953]">{d.name}</h3>
-                  <p className="text-xs text-[#176EA8] font-semibold mt-0.5">
+                  <h3 className="text-lg font-bold text-[#344F48]">{d.name}</h3>
+                  <p className="text-xs text-[#C65B32] font-semibold mt-0.5">
                     {d.routeName} · {d.oneWayDistanceKm} km
                   </p>
-                  <p className="mt-2 text-xs text-[#5A7184] leading-relaxed flex-1">
+                  <p className="mt-2 text-xs text-[#6B7C77] leading-relaxed flex-1">
                     {d.activities.map(a => a.name).join(', ')}
                   </p>
 
-                  <div className="mt-4 pt-3 border-t border-[#E1ECF2] flex items-center justify-between">
-                    <span className="text-[11px] text-[#5A7184]">
+                  <div className="mt-4 pt-3 border-t border-[#EADBCE] flex items-center justify-between">
+                    <span className="text-[11px] text-[#6B7C77]">
                       ~{Math.round(d.baselineOneWayDriveMinutes / 60)}h base drive
                     </span>
                     <TactileButton
                       variant="primary"
                       size="sm"
-                      to="/plan"
+                      to={`/schedule/${d.id}`}
                     >
                       Plan Trip →
                     </TactileButton>
@@ -163,9 +164,9 @@ export default function HomeScreen() {
       <TrustNote />
 
       {/* Bottom CTA Banner */}
-      <section className="rounded-3xl border border-[#CBDDE9] bg-white text-[#193953] p-8 sm:p-10 text-center space-y-4 shadow-sm">
-        <h2 className="text-2xl font-black sm:text-3xl text-[#193953]">Ready to test your weekend reality?</h2>
-        <p className="text-sm text-[#5A7184] max-w-xl mx-auto leading-relaxed">
+      <section className="rounded-3xl border border-[#EADBCE] bg-gradient-to-b from-[#F8E1D2]/40 to-white text-[#344F48] p-8 sm:p-10 text-center space-y-4 shadow-sm">
+        <h2 className="text-2xl font-black sm:text-3xl text-[#344F48]">Ready to test your weekend reality?</h2>
+        <p className="text-sm text-[#6B7C77] max-w-xl mx-auto leading-relaxed">
           It takes less than 60 seconds to set your limits, see usable destination free time, and send an invitation to your friends.
         </p>
         <div className="pt-2 flex justify-center">

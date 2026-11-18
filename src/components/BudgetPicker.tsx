@@ -48,24 +48,24 @@ export default function BudgetPicker({ budgetINR, onChange }: BudgetPickerProps)
   };
 
   return (
-    <div className="space-y-3.5 rounded-2xl border border-[#CBDDE9] bg-[#F4F9FC] p-4 sm:p-5 text-[#193953] shadow-xs">
+    <div className="space-y-3.5 rounded-2xl border border-[#EADBCE] bg-[#FAF2EB] p-4 sm:p-5 text-[#344F48] shadow-xs">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <span className="text-xs font-black uppercase tracking-wider text-[#5A7184]">
+          <span className="text-xs font-black uppercase tracking-wider text-[#6B7C77]">
             Budget Cap (Per Person)
           </span>
           <div className="flex items-baseline gap-1 mt-0.5">
-            <span className="text-xl font-bold text-[#176EA8]">₹</span>
-            <span className="text-2xl sm:text-3xl font-black text-[#193953]">
+            <span className="text-xl font-bold text-[#C65B32]">₹</span>
+            <span className="text-2xl sm:text-3xl font-black text-[#344F48]">
               {budgetINR.toLocaleString('en-IN')}
             </span>
-            <span className="text-xs font-semibold text-[#5A7184]">/ traveler</span>
+            <span className="text-xs font-semibold text-[#6B7C77]">/ traveler</span>
           </div>
         </div>
 
         {/* Custom amount direct input */}
         <div className="flex items-center gap-1.5">
-          <label htmlFor="budget-input" className="text-xs font-bold text-[#5A7184]">
+          <label htmlFor="budget-input" className="text-xs font-bold text-[#6B7C77]">
             Custom: ₹
           </label>
           <input
@@ -77,7 +77,7 @@ export default function BudgetPicker({ budgetINR, onChange }: BudgetPickerProps)
             onBlur={handleInputBlur}
             placeholder="0"
             aria-label="Custom per-person budget in rupees"
-            className="w-28 rounded-xl border border-[#CBDDE9] bg-white px-3 py-1.5 text-right text-sm font-black text-[#193953] focus:border-[#176EA8] focus:outline-none shadow-2xs"
+            className="w-28 rounded-xl border border-[#EADBCE] bg-white px-3 py-1.5 text-right text-sm font-black text-[#344F48] focus:border-[#C65B32] focus:outline-none shadow-2xs"
           />
         </div>
       </div>
@@ -91,8 +91,8 @@ export default function BudgetPicker({ budgetINR, onChange }: BudgetPickerProps)
             onClick={() => onChange(preset.val)}
             className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer ${
               budgetINR === preset.val
-                ? 'bg-[#176EA8] text-white shadow-xs'
-                : 'bg-white border border-[#CBDDE9] text-[#5A7184] hover:bg-[#E1ECF2]'
+                ? 'bg-[#C65B32] text-white shadow-xs'
+                : 'bg-white border border-[#EADBCE] text-[#6B7C77] hover:bg-[#F8E1D2]/60'
             }`}
           >
             {preset.label}
@@ -101,7 +101,7 @@ export default function BudgetPicker({ budgetINR, onChange }: BudgetPickerProps)
       </div>
 
       {/* Advisory explanation */}
-      <div className="rounded-xl bg-white border border-[#CBDDE9] p-3 text-xs text-[#5A7184] leading-relaxed shadow-2xs">
+      <div className="rounded-xl bg-white border border-[#EADBCE] p-3 text-xs text-[#6B7C77] leading-relaxed shadow-2xs">
         💡 <strong>Soft Reality Check:</strong> Budget caps are non-blocking advisory limits.
         If estimated fuel, tolls, stays, and entry tickets exceed your target, @48 shows a clear
         budget breakdown and advisory warning instead of preventing trip planning.

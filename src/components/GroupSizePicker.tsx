@@ -14,15 +14,15 @@ export default function GroupSizePicker({
 }: GroupSizePickerProps) {
   if (!isGroup) {
     return (
-      <div className="rounded-2xl border border-[#CBDDE9] bg-[#F4F9FC] p-4 text-xs text-[#5A7184] flex items-center justify-between">
+      <div className="rounded-2xl border border-[#EADBCE] bg-[#FAF2EB] p-4 text-xs text-[#6B7C77] flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xl">👤</span>
           <div>
-            <span className="font-bold text-[#193953] block">Solo Traveler (1 person)</span>
-            <span className="text-[11px] text-[#5A7184]">Modeled with single room & personal vehicle/car share</span>
+            <span className="font-bold text-[#344F48] block">Solo Traveler (1 person)</span>
+            <span className="text-[11px] text-[#6B7C77]">Modeled with single room & personal vehicle/car share</span>
           </div>
         </div>
-        <span className="rounded-lg bg-[#DDF0F6] px-2.5 py-1 text-xs font-bold text-[#176EA8]">
+        <span className="rounded-lg bg-[#F8E1D2] px-2.5 py-1 text-xs font-bold text-[#C65B32]">
           Solo Mode
         </span>
       </div>
@@ -76,15 +76,15 @@ export default function GroupSizePicker({
   const vehicleInfo = getVehicleArrangement(partySize);
 
   return (
-    <div className="space-y-3.5 rounded-2xl border border-[#CBDDE9] bg-[#F4F9FC] p-4 sm:p-5 text-[#193953] shadow-xs">
+    <div className="space-y-3.5 rounded-2xl border border-[#EADBCE] bg-[#FAF2EB] p-4 sm:p-5 text-[#344F48] shadow-xs">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <span className="text-xs font-black uppercase tracking-wider text-[#5A7184]">
+          <span className="text-xs font-black uppercase tracking-wider text-[#6B7C77]">
             Group Size & Vehicle Capacity
           </span>
           <div className="flex items-baseline gap-2 mt-0.5">
-            <span className="text-2xl sm:text-3xl font-black text-[#193953]">{partySize}</span>
-            <span className="text-xs sm:text-sm font-bold text-[#176EA8]">
+            <span className="text-2xl sm:text-3xl font-black text-[#344F48]">{partySize}</span>
+            <span className="text-xs sm:text-sm font-bold text-[#C65B32]">
               {partySize === 1 ? 'traveler' : 'travelers in group'}
             </span>
           </div>
@@ -110,7 +110,7 @@ export default function GroupSizePicker({
             onChange={handleInputChange}
             onBlur={handleBlur}
             aria-label="Group size numeric input"
-            className="w-16 rounded-xl border border-[#CBDDE9] bg-white py-1.5 text-center text-sm font-black text-[#193953] focus:border-[#176EA8] focus:outline-none shadow-2xs"
+            className="w-16 rounded-xl border border-[#EADBCE] bg-white py-1.5 text-center text-sm font-black text-[#344F48] focus:border-[#C65B32] focus:outline-none shadow-2xs"
           />
 
           <TactileButton
@@ -134,8 +134,8 @@ export default function GroupSizePicker({
             onClick={() => onChange(preset)}
             className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer ${
               partySize === preset
-                ? 'bg-[#176EA8] text-white shadow-xs'
-                : 'bg-white border border-[#CBDDE9] text-[#5A7184] hover:bg-[#E1ECF2]'
+                ? 'bg-[#C65B32] text-white shadow-xs'
+                : 'bg-white border border-[#EADBCE] text-[#6B7C77] hover:bg-[#F8E1D2]/60'
             }`}
           >
             {preset} {preset === 4 ? '(Car)' : preset === 6 ? '(SUV)' : preset >= 8 ? '(Tempo)' : ''}
@@ -144,9 +144,9 @@ export default function GroupSizePicker({
       </div>
 
       {/* Vehicle Capacity Modeling Card */}
-      <div className="rounded-xl bg-white border border-[#CBDDE9] p-3 text-xs space-y-1.5 shadow-2xs">
+      <div className="rounded-xl bg-white border border-[#EADBCE] p-3 text-xs space-y-1.5 shadow-2xs">
         <div className="flex items-center justify-between">
-          <span className="font-bold text-[#193953] flex items-center gap-1.5">
+          <span className="font-bold text-[#344F48] flex items-center gap-1.5">
             <span>🚗</span>
             <span>{vehicleInfo.type}</span>
           </span>
@@ -154,10 +154,10 @@ export default function GroupSizePicker({
             {vehicleInfo.badge}
           </span>
         </div>
-        <p className="text-[11px] text-[#5A7184] leading-relaxed">
+        <p className="text-[11px] text-[#6B7C77] leading-relaxed">
           {vehicleInfo.note}
         </p>
-        <div className="pt-1 border-t border-[#E1ECF2] flex justify-between text-[10px] text-[#5A7184]">
+        <div className="pt-1 border-t border-[#EADBCE] flex justify-between text-[10px] text-[#6B7C77]">
           <span>Estimated hotel rooms: {Math.ceil(partySize / 2)} (twin sharing)</span>
           <span>Vehicles modeled: {vehicleInfo.vehicleCount}</span>
         </div>

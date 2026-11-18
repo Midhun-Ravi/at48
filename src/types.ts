@@ -24,6 +24,9 @@ export interface UserConstraints {
   planningMode?: 'solo' | 'group'; // default 'group'
   destinationAdjustments?: Record<string, number>; // independent one-way adjustment minutes per destination ID
   customActivities?: CustomPlannedActivity[]; // user-planned activities inside unallocated free-time slots
+  activityDayAssignments?: Record<string, number>; // explicit assigned day per activity (1..N)
+  activityOrder?: string[]; // user-specified ordering of activity IDs
+  additionalActivities?: Activity[]; // extra Activity objects evaluated deterministically by the engine
 }
 
 export interface CustomPlannedActivity {
@@ -131,7 +134,7 @@ export type ViolationType =
   | 'INVALID_INPUT' | 'REQUIRED_ACTIVITY_UNAVAILABLE'
   | 'MISSED_DEADLINE' | 'REST_CONFLICT'
   | 'POTENTIAL_NIGHT_CURFEW' | 'BUDGET_OVERRUN'
-  | 'UNVERIFIED_OPENING_HOURS';
+  | 'UNVERIFIED_OPENING_HOURS' | 'OPERATING_HOURS_CONFLICT';
 export interface ConstraintViolation {
   type: ViolationType;
   severity: 'BLOCKER' | 'ADVISORY' | 'WARNING';
@@ -160,4 +163,50 @@ export interface FeasibilityResult {
   violations: ConstraintViolation[];
   activityOutcomes: ActivityOutcome[];
   timeline: TimetableEntry[];
+}
+
+export interface MoveActivityCandidate {
+  activityId: string;
+  name: string;
+  currentDay: number;
+  durationMinutes: number;
+  localTransferMinutes: number;
+  operatingWindow: string; // e.g. "10:00–17:30 (last entry 17:00)"
+  isOptional: boolean;
+  costINR: number;
+}
+
+export interface MoveActivityPreview {
+  activityId: string;
+  activityName: string;
+  fromDay: number;
+  toDay: number;
+  toPosition?: number;
+  isValid: boolean;
+  validationError?: string;
+  before: {
+    homeArrival: string;
+    returnMarginMinutes: number;
+    activityStartTime?: string;
+    activityEndTime?: string;
+    isFeasible: boolean;
+    violationsCount: number;
+    violations: ConstraintViolation[];
+  };
+  after: {
+    homeArrival: string;
+    returnMarginMinutes: number;
+    activityStartTime?: string;
+    activityEndTime?: string;
+    isFeasible: boolean;
+    violationsCount: number;
+    violations: ConstraintViolation[];
+  };
+  deltas: {
+    marginDeltaMinutes: number;
+    homeArrivalDeltaMinutes: number;
+    originalViolationResolved: boolean;
+    newConflicts: string[];
+    additionalTravelAllowanceMinutes: number;
+  };
 }

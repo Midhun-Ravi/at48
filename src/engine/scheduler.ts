@@ -158,8 +158,24 @@ export function evaluateFeasibility(
   }
 
   // Activity sorting & filtering
-  const sorted = [...destination.activities].sort((a, b) =>
-    Number(a.isOptional) - Number(b.isOptional) || a.priority - b.priority);
+  const combinedActivities = [...destination.activities, ...(input.additionalActivities ?? [])];
+
+  let sorted = [...combinedActivities];
+  if (input.activityOrder && input.activityOrder.length > 0) {
+    const orderMap = new Map(input.activityOrder.map((id, idx) => [id, idx]));
+    sorted.sort((a, b) => {
+      const idxA = orderMap.get(a.id);
+      const idxB = orderMap.get(b.id);
+      if (idxA !== undefined && idxB !== undefined) return idxA - idxB;
+      if (idxA !== undefined) return -1;
+      if (idxB !== undefined) return 1;
+      return Number(a.isOptional) - Number(b.isOptional) || a.priority - b.priority;
+    });
+  } else {
+    sorted.sort((a, b) =>
+      Number(a.isOptional) - Number(b.isOptional) || a.priority - b.priority);
+  }
+
   const enabled = sorted.filter(activity => {
     if (activity.isOptional && input.disabledActivityIds.includes(activity.id)) {
       activityOutcomes.push({ activityId: activity.id, status: 'omitted', reason: 'User removed optional activity.' });
@@ -167,6 +183,28 @@ export function evaluateFeasibility(
     }
     return true;
   });
+
+  function getAttemptFailureReason(activity: Activity, cursor: number, date: string, endCap: number): string {
+    const transferEnd = add(cursor, activity.localTransferMinutes);
+    const opening = at(date, activity.openTime);
+    const closing = at(date, activity.closeTime);
+    const lastEntry = activity.lastEntryTime ? at(date, activity.lastEntryTime) : closing;
+    const begin = Math.max(transferEnd, opening);
+    const finish = add(begin, activity.durationMinutes);
+    if (cursor >= endCap) {
+      return `Planning window for the day is already full (reached ${formatIST(endCap).slice(11)}).`;
+    }
+    if (begin > lastEntry) {
+      return `Arrival at ${formatIST(begin).slice(11)} is past last entry cutoff ${activity.lastEntryTime || activity.closeTime}.`;
+    }
+    if (finish > closing) {
+      return `Visit finishes at ${formatIST(finish).slice(11)}, which is past closing time ${activity.closeTime}.`;
+    }
+    if (finish > endCap) {
+      return `Visit extends past scheduled day limit (${formatIST(endCap).slice(11)}).`;
+    }
+    return 'Operating or transfer constraint exceeded.';
+  }
 
   function attempt(activity: Activity, cursor: number, date: string,
     endCap: number, day: number): number | undefined {
@@ -275,12 +313,35 @@ export function evaluateFeasibility(
     push('CHECK_IN', checkinLabel, day1Cursor, afterCheckin, 1);
     day1Cursor = afterCheckin;
 
-    // Day 1 activities
-    for (const activity of enabled) {
+    // Day 1 activities:
+    // Activities explicitly assigned to Day 1, or unassigned activities (defaulting to Day 1)
+    const day1Activities = enabled.filter(a => {
+      const assigned = input.activityDayAssignments?.[a.id];
+      return assigned === undefined || assigned === 1;
+    });
+    const laterDayActivities = enabled.filter(a => {
+      const assigned = input.activityDayAssignments?.[a.id];
+      return assigned !== undefined && assigned > 1;
+    });
+
+    for (const activity of day1Activities) {
       const next = attempt(activity, day1Cursor, day1, day1FreeEnd, 1);
-      if (next === undefined) remaining.push(activity);
-      else day1Cursor = next;
+      if (next === undefined) {
+        const isExplicitlyAssignedToDay1 = input.activityDayAssignments?.[activity.id] === 1;
+        const failReason = getAttemptFailureReason(activity, day1Cursor, day1, day1FreeEnd);
+        if (isExplicitlyAssignedToDay1) {
+          violation('OPERATING_HOURS_CONFLICT', 'BLOCKER',
+            `${activity.name} cannot fit on Day 1: ${failReason}`, activity.id);
+          activityOutcomes.push({ activityId: activity.id, status: 'unavailable', reason: failReason });
+        } else {
+          remaining.push(activity);
+        }
+      } else {
+        day1Cursor = next;
+      }
     }
+
+    remaining.push(...laterDayActivities);
 
     // Day 1 Dinner & Overnight Rest
     const dinnerStart = day1FreeEnd;
@@ -309,18 +370,35 @@ export function evaluateFeasibility(
         const dFreeEnd = at(curDate, '21:00');
         const dRestStart = at(curDate, '22:00');
 
-        // Attempt activities from remaining queue on this intermediate day
+        // Attempt activities assigned to day d, plus unassigned activities in remaining
+        const dayDActivities = remaining.filter(a => {
+          const assigned = input.activityDayAssignments?.[a.id];
+          return assigned === d || assigned === undefined;
+        });
+        const notTodayActivities = remaining.filter(a => {
+          const assigned = input.activityDayAssignments?.[a.id];
+          return assigned !== undefined && assigned !== d;
+        });
+
         const stillRemaining: Activity[] = [];
-        for (const activity of remaining) {
+        for (const activity of dayDActivities) {
           const next = attempt(activity, dCursorTime, curDate, dFreeEnd, d);
           if (next === undefined) {
-            stillRemaining.push(activity);
+            const isExplicitlyAssigned = input.activityDayAssignments?.[activity.id] === d;
+            const failReason = getAttemptFailureReason(activity, dCursorTime, curDate, dFreeEnd);
+            if (isExplicitlyAssigned) {
+              violation('OPERATING_HOURS_CONFLICT', 'BLOCKER',
+                `${activity.name} cannot fit on Day ${d}: ${failReason}`, activity.id);
+              activityOutcomes.push({ activityId: activity.id, status: 'unavailable', reason: failReason });
+            } else {
+              stillRemaining.push(activity);
+            }
           } else {
             dCursorTime = next;
           }
         }
         remaining.length = 0;
-        remaining.push(...stillRemaining);
+        remaining.push(...notTodayActivities, ...stillRemaining);
 
         // Schedule lunch on intermediate day
         const actualLunchStart = Math.max(dCursorTime, lunchStart);
@@ -362,8 +440,24 @@ export function evaluateFeasibility(
       return lEnd;
     };
 
+    const finalDayActivities = remaining.filter(a => {
+      const assigned = input.activityDayAssignments?.[a.id];
+      return assigned === finalDay || assigned === undefined;
+    });
+    const invalidDayActivities = remaining.filter(a => {
+      const assigned = input.activityDayAssignments?.[a.id];
+      return assigned !== undefined && assigned !== finalDay;
+    });
+
+    for (const a of invalidDayActivities) {
+      const assigned = input.activityDayAssignments?.[a.id];
+      violation('INVALID_INPUT', 'BLOCKER',
+        `${a.name} is assigned to Day ${assigned} which exceeds the ${numDays}-day trip duration.`, a.id);
+      activityOutcomes.push({ activityId: a.id, status: 'unavailable', reason: `Trip has only ${numDays} days.` });
+    }
+
     const finalRemaining: Activity[] = [];
-    for (const activity of remaining) {
+    for (const activity of finalDayActivities) {
       const endCap = activity.isOptional ? preferredReturnDeparture : latestReturnDeparture;
       const earliestStart = Math.max(add(finalCursor, activity.localTransferMinutes), at(finalDate, activity.openTime));
       if (!finalLunchDone && earliestStart >= finalLunchStart &&
@@ -372,7 +466,15 @@ export function evaluateFeasibility(
       }
       const next = attempt(activity, finalCursor, finalDate, endCap, finalDay);
       if (next === undefined) {
-        finalRemaining.push(activity);
+        const isExplicit = input.activityDayAssignments?.[activity.id] === finalDay;
+        const failReason = getAttemptFailureReason(activity, finalCursor, finalDate, endCap);
+        if (isExplicit) {
+          violation('OPERATING_HOURS_CONFLICT', 'BLOCKER',
+            `${activity.name} cannot fit on Day ${finalDay}: ${failReason}`, activity.id);
+          activityOutcomes.push({ activityId: activity.id, status: 'unavailable', reason: failReason });
+        } else {
+          finalRemaining.push(activity);
+        }
       } else {
         finalCursor = next;
       }

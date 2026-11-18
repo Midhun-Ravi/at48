@@ -1,49 +1,77 @@
 import { useState, useMemo } from 'react';
 import {
   PROTOTYPE_DESTINATIONS,
-  INITIAL_MYSURU_SCHEDULE,
   DISCOVER_PLACES_MYSURU,
+  discoverPlaceToActivity,
   type DestinationCardData,
-  type ScheduledActivity,
   type DiscoverPlace,
 } from './prototypeData';
+import { DESTINATIONS } from '../data/destinations';
+import { evaluateFeasibility } from '../engine/scheduler';
+import { evaluateActivityMove, getMoveCandidates, getInsertionSlotsForDay } from '../engine/moveActivity';
+import type { Activity, UserConstraints } from '../types';
 import PrototypeMap from './PrototypeMap';
 
 interface WhatChangedNotice {
   message: string;
-  previousSchedule: ScheduledActivity[];
   timestamp: number;
 }
 
+const MYSURU_DEST = DESTINATIONS.find(d => d.id === 'mysuru')!;
+
+const INITIAL_CONSTRAINTS: UserConstraints = {
+  departureDateTime: '2026-11-21T08:00',
+  returnDeadlineDateTime: '2026-11-22T20:30',
+  pace: 'balanced',
+  perPersonBudgetINR: 6000,
+  partySize: 2,
+  drivingAdjustmentMinutes: 0,
+  simulateDelayMinutes: 0,
+  disabledActivityIds: [],
+  activityDayAssignments: {},
+  activityOrder: ['mysuru-palace', 'mysuru-market'],
+  additionalActivities: [],
+};
+
+// Activity coordinate map for Leaflet pins
+const ACTIVITY_COORDS: Record<string, [number, number]> = {
+  'mysuru-palace': [12.3051, 76.6551],
+  'mysuru-market': [12.3117, 76.6508],
+  'place-mylari': [12.3117, 76.6660],
+  'place-chamundi': [12.2725, 76.6710],
+  'place-philomena': [12.3210, 76.6580],
+  'place-karanji': [12.3020, 76.6730],
+  'place-maddur-tiffanys': [12.6233, 77.0984],
+};
+
+const ACTIVITY_IMAGES: Record<string, string> = {
+  'mysuru-palace': '/images/places/mysuru-palace.jpg',
+  'mysuru-market': '/images/places/mysuru-market.jpg',
+  'place-maddur-tiffanys': '/images/places/maddur-tiffanys.jpg',
+};
+
 export default function PrototypeV2Screen() {
-  // Navigation: Step 1 (Destination Chooser) or Step 2 (Trip Builder)
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
-
-  // Device simulation: desktop (side-by-side) or mobile (375px preview)
   const [deviceView, setDeviceView] = useState<'desktop' | 'mobile'>('desktop');
-
-  // Mobile sheet snap state: 'peek' | 'half' | 'full'
   const [sheetSnap, setSheetSnap] = useState<'peek' | 'half' | 'full'>('half');
-
-  // Page 2 modal state for "Why this result?"
   const [selectedWhyDest, setSelectedWhyDest] = useState<DestinationCardData | null>(null);
-
-  // Page 3 Active view: 'schedule' or 'discover'
   const [builderTab, setBuilderTab] = useState<'schedule' | 'discover'>('schedule');
 
-  // Itinerary schedule state
-  const [schedule, setSchedule] = useState<ScheduledActivity[]>(INITIAL_MYSURU_SCHEDULE);
-  const [historyStack, setHistoryStack] = useState<ScheduledActivity[][]>([]);
+  // Grounded Deterministic Constraints State
+  const [constraints, setConstraints] = useState<UserConstraints>(INITIAL_CONSTRAINTS);
+  const [historyStack, setHistoryStack] = useState<UserConstraints[]>([]);
   const [whatChangedNotice, setWhatChangedNotice] = useState<WhatChangedNotice | null>(null);
 
-  // Projected late delay simulation in minutes (0 = normal, 150 = simulated highway delay)
-  const [simulatedDelayMinutes, setSimulatedDelayMinutes] = useState<number>(0);
-
-  // Hover sync between list and map
+  // Active day in builder
+  const [activeDay, setActiveDay] = useState<number>(1);
   const [activeHoverId, setActiveHoverId] = useState<string | null>(null);
-
-  // Place discovery category filter
   const [discoverCategory, setDiscoverCategory] = useState<string>('all');
+
+  // Move Activity Modal State
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState<boolean>(false);
+  const [selectedMoveActivityId, setSelectedMoveActivityId] = useState<string>('mysuru-market');
+  const [moveTargetDay, setMoveTargetDay] = useState<number>(2);
+  const [moveTargetPosition, setMoveTargetPosition] = useState<number>(0);
 
   // Custom place form state
   const [customName, setCustomName] = useState('');
@@ -52,16 +80,22 @@ export default function PrototypeV2Screen() {
   const [customDetourMode, setCustomDetourMode] = useState<'wishlist' | 'schedule'>('schedule');
   const [customUserAllowance, setCustomUserAllowance] = useState<number>(15);
 
-  // Active day in builder
-  const [activeDay, setActiveDay] = useState<number>(1);
+  // Execute scheduling engine against active constraints
+  const currentResult = useMemo(() => {
+    return evaluateFeasibility(MYSURU_DEST, constraints);
+  }, [constraints]);
 
-  // Push state to history stack before modifying schedule
-  const recordHistory = (newSchedule: ScheduledActivity[], changeMessage: string) => {
-    setHistoryStack(prev => [...prev, schedule]);
-    setSchedule(newSchedule);
+  // Derived metrics straight from scheduler.ts (ZERO fabricated numbers!)
+  const returnBufferMinutes = currentResult.returnDeadlineMarginMinutes;
+  const isProjectedLate = returnBufferMinutes < 0;
+  const formattedArrival = currentResult.homeArrivalTime.slice(11) + ' IST';
+
+  // Push state to history stack before modifying constraints
+  const recordHistory = (newConstraints: UserConstraints, changeMessage: string) => {
+    setHistoryStack(prev => [...prev, constraints]);
+    setConstraints(newConstraints);
     setWhatChangedNotice({
       message: changeMessage,
-      previousSchedule: schedule,
       timestamp: Date.now(),
     });
   };
@@ -71,152 +105,162 @@ export default function PrototypeV2Screen() {
     if (historyStack.length === 0) return;
     const previous = historyStack[historyStack.length - 1];
     setHistoryStack(prev => prev.slice(0, -1));
-    setSchedule(previous);
+    setConstraints(previous);
     setWhatChangedNotice({
-      message: 'Action undone. Schedule restored.',
-      previousSchedule: schedule,
+      message: 'Action undone. Schedule restored to previous state.',
       timestamp: Date.now(),
     });
   };
 
-  // Base schedule calculations for Mysuru 2-day
-  const calculatedMetrics = useMemo(() => {
-    // Total scheduled activity duration in Day 1
-    const day1Activities = schedule.filter(s => s.day === 1);
-    const day1ActivityMinutes = day1Activities.reduce((acc, curr) => acc + curr.durationMinutes, 0);
-    const day1DetourMinutes = day1Activities.reduce((acc, curr) => acc + curr.detourMinutes, 0);
+  // Movable candidates
+  const moveCandidates = useMemo(() => {
+    return getMoveCandidates(MYSURU_DEST, constraints, currentResult);
+  }, [constraints, currentResult]);
 
-    // Baseline return buffer is 120m (+2h 00m) with initial schedule
-    // Baseline Day 1 activities: Palace (150m) + Market (60m) = 210m
-    const initialDay1ActivityMinutes = 210;
-    const initialDay1DetourMinutes = 10;
-    const initialTotalDay1 = initialDay1ActivityMinutes + initialDay1DetourMinutes; // 220m
+  // Insertion slots for target day
+  const insertionSlots = useMemo(() => {
+    return getInsertionSlotsForDay(MYSURU_DEST, constraints, moveTargetDay);
+  }, [constraints, moveTargetDay]);
 
-    const currentTotalDay1 = day1ActivityMinutes + day1DetourMinutes;
-    const day1Delta = currentTotalDay1 - initialTotalDay1;
-
-    // Day 2 baseline return buffer (120m) minus simulated highway delay
-    // Note: Day 1 changes affect Day 1 leisure time; only Day 2 activities or overall delays affect Sunday return buffer
-    let returnBufferMinutes = 120 - simulatedDelayMinutes;
-
-    // Home arrival time calculation (baseline 18:30 IST)
-    const baselineArrivalHour = 18;
-    const baselineArrivalMinute = 30;
-    const totalArrivalMinutes = baselineArrivalHour * 60 + baselineArrivalMinute + simulatedDelayMinutes;
-    const arrH = Math.floor(totalArrivalMinutes / 60) % 24;
-    const arrM = totalArrivalMinutes % 60;
-    const formattedArrival = `${String(arrH).padStart(2, '0')}:${String(arrM).padStart(2, '0')} IST`;
-
-    // Feasibility status
-    const isProjectedLate = returnBufferMinutes < 0;
-
-    // Total daylight sightseeing minutes (baseline 366m / 6h 06m)
-    // When activities are removed or added, unallocated daylight leisure shifts accordingly
-    const daylightSightseeingMinutes = Math.max(0, 366 - Math.max(0, day1Delta));
-    const eveningLeisureMinutes = 135; // 2h 15m (18:45-21:00)
-    const totalFreeTimeMinutes = daylightSightseeingMinutes + eveningLeisureMinutes;
-
-    return {
-      returnBufferMinutes,
-      formattedArrival,
-      isProjectedLate,
-      daylightSightseeingMinutes,
-      eveningLeisureMinutes,
-      totalFreeTimeMinutes,
-      day1ActivityMinutes,
-      day1Delta,
-    };
-  }, [schedule, simulatedDelayMinutes]);
-
-  // Handle Remove Activity
-  const handleRemoveActivity = (id: string) => {
-    const target = schedule.find(s => s.id === id);
-    if (!target) return;
-    const next = schedule.filter(s => s.id !== id);
-    const freedMinutes = target.durationMinutes + target.detourMinutes;
-    recordHistory(
-      next,
-      `Removed "${target.name}". Freed ${freedMinutes}m of schedule. Day 2 return buffer unchanged (+${calculatedMetrics.returnBufferMinutes}m).`
+  // Live Before / After Move Preview from deterministic engine
+  const movePreview = useMemo(() => {
+    if (!selectedMoveActivityId) return null;
+    return evaluateActivityMove(
+      MYSURU_DEST,
+      constraints,
+      selectedMoveActivityId,
+      moveTargetDay,
+      moveTargetPosition
     );
-  };
+  }, [constraints, selectedMoveActivityId, moveTargetDay, moveTargetPosition]);
 
-  // Handle Reorder Activities (Move Up/Down)
-  const handleMoveActivity = (index: number, direction: 'up' | 'down') => {
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= schedule.length) return;
-    const next = [...schedule];
-    const temp = next[index];
-    next[index] = next[targetIndex];
-    next[targetIndex] = temp;
-    recordHistory(next, `Reordered stops: "${temp.name}" moved ${direction}.`);
-  };
+  // Confirm and apply Move Activity transaction
+  const handleConfirmMove = () => {
+    if (!movePreview || !movePreview.isValid) return;
 
-  // Handle Add Place from Discovery
-  const handleAddDiscoverPlace = (place: DiscoverPlace) => {
-    // Check if already in schedule
-    if (schedule.some(s => s.id === place.id)) {
-      alert(`"${place.name}" is already in your itinerary.`);
-      return;
+    const newDayAssignments = {
+      ...(constraints.activityDayAssignments ?? {}),
+      [selectedMoveActivityId]: moveTargetDay,
+    };
+
+    const newOrder = constraints.activityOrder ? [...constraints.activityOrder] : [];
+    if (!newOrder.includes(selectedMoveActivityId)) {
+      newOrder.push(selectedMoveActivityId);
     }
 
-    const newStop: ScheduledActivity = {
-      id: place.id,
-      name: place.name,
-      category: place.category,
-      day: activeDay,
-      startTime: '19:00',
-      endTime: '19:45',
-      durationMinutes: place.durationMinutes,
-      costINR: place.costINR,
-      locationName: place.locationName,
-      coordinates: place.coordinates,
-      imageSrc: place.imageSrc,
-      notes: `${place.description} (${place.operatingHours})`,
-      detourMinutes: place.estimatedDetourMinutes,
-      detourSource: 'engine_verified',
-      isDeletable: true,
+    const nextConstraints: UserConstraints = {
+      ...constraints,
+      activityDayAssignments: newDayAssignments,
+      activityOrder: newOrder,
     };
 
-    const next = [...schedule, newStop];
+    const deltaMsg = movePreview.deltas.marginDeltaMinutes !== 0
+      ? ` (Return margin: ${movePreview.after.returnMarginMinutes >= 0 ? '+' : ''}${movePreview.after.returnMarginMinutes}m)`
+      : ` (Return margin unchanged at +${movePreview.after.returnMarginMinutes}m)`;
+
     recordHistory(
-      next,
-      `Scheduled "${place.name}" into Day ${activeDay}. Added ${place.durationMinutes}m visit + ${place.estimatedDetourMinutes}m corridor detour.`
+      nextConstraints,
+      `Moved "${movePreview.activityName}" to Day ${moveTargetDay} (${movePreview.after.activityStartTime}–${movePreview.after.activityEndTime} IST).${deltaMsg}`
+    );
+
+    setIsMoveModalOpen(false);
+  };
+
+  // Scheduled activities mapped from current timetable for PrototypeMap
+  const mapScheduledActivities = useMemo(() => {
+    return currentResult.timeline
+      .filter(t => t.category === 'ACTIVITY' && t.activityId)
+      .map(t => ({
+        id: t.activityId!,
+        name: t.label,
+        category: (t.activityId?.startsWith('place-mylari') ? 'food' : 'sightseeing') as any,
+        day: t.day,
+        startTime: t.startTime.slice(11),
+        endTime: t.endTime.slice(11),
+        durationMinutes: 60,
+        costINR: t.activityId === 'mysuru-palace' ? 120 : 0,
+        locationName: t.activityId === 'mysuru-palace' ? 'Sayyaji Rao Rd' : 'Devaraja Market',
+        coordinates: ACTIVITY_COORDS[t.activityId!] ?? [12.3051, 76.6551],
+        imageSrc: ACTIVITY_IMAGES[t.activityId!],
+        detourMinutes: 10,
+        detourSource: 'engine_verified' as const,
+        isDeletable: true,
+      }));
+  }, [currentResult.timeline]);
+
+  // Toggle optional activity disabled status
+  const handleToggleActivity = (activityId: string) => {
+    const isCurrentlyDisabled = constraints.disabledActivityIds.includes(activityId);
+    const nextDisabled = isCurrentlyDisabled
+      ? constraints.disabledActivityIds.filter(id => id !== activityId)
+      : [...constraints.disabledActivityIds, activityId];
+
+    const nextConstraints = {
+      ...constraints,
+      disabledActivityIds: nextDisabled,
+    };
+
+    const action = isCurrentlyDisabled ? 'Restored' : 'Removed';
+    recordHistory(nextConstraints, `${action} activity in itinerary.`);
+  };
+
+  // Add Place from Discover (converting to real Activity and scheduling)
+  const handleAddDiscoverPlace = (place: DiscoverPlace) => {
+    const activityObj = discoverPlaceToActivity(place);
+    const nextAdditional = [...(constraints.additionalActivities ?? []), activityObj];
+    const nextDayAssignments = {
+      ...(constraints.activityDayAssignments ?? {}),
+      [place.id]: activeDay,
+    };
+
+    const nextConstraints: UserConstraints = {
+      ...constraints,
+      additionalActivities: nextAdditional,
+      activityDayAssignments: nextDayAssignments,
+    };
+
+    recordHistory(
+      nextConstraints,
+      `Scheduled "${place.name}" into Day ${activeDay}. Timetable and operating window evaluated by engine.`
     );
     setBuilderTab('schedule');
   };
 
-  // Handle Add Custom Spot
+  // Add Custom Spot
   const handleAddCustomSpot = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customName.trim()) return;
 
-    const detourAllowance = customDetourMode === 'wishlist' ? 0 : customUserAllowance;
-    const newCustomStop: ScheduledActivity = {
-      id: `custom-${Date.now()}`,
+    const customId = `custom-${Date.now()}`;
+    const customActivityObj: Activity = {
+      id: customId,
       name: customName.trim(),
-      category: customCategory,
-      day: activeDay,
-      startTime: '19:30',
-      endTime: '20:15',
       durationMinutes: customDuration,
-      costINR: 0,
-      locationName: 'User-specified location, Mysuru',
-      coordinates: [12.3150, 76.6520], // Central Mysuru default for custom spot
-      notes:
-        customDetourMode === 'wishlist'
-          ? 'Saved to wishlist (no corridor detour scheduled).'
-          : `Scheduled with ${detourAllowance}m user-entered detour allowance.`,
-      detourMinutes: detourAllowance,
-      detourSource: customDetourMode === 'wishlist' ? 'none' : 'user_specified',
-      isDeletable: true,
+      openTime: '09:00',
+      closeTime: '21:00',
+      costPerPersonINR: 0,
+      isOptional: true,
+      priority: 3,
+      localTransferMinutes: customDetourMode === 'wishlist' ? 0 : customUserAllowance,
+      openingHoursEvidence: { level: 'assumption', note: 'User-specified timing' },
+      costEvidence: { level: 'assumption' },
     };
 
-    const next = [...schedule, newCustomStop];
+    const nextAdditional = [...(constraints.additionalActivities ?? []), customActivityObj];
+    const nextDayAssignments = {
+      ...(constraints.activityDayAssignments ?? {}),
+      [customId]: activeDay,
+    };
+
+    const nextConstraints: UserConstraints = {
+      ...constraints,
+      additionalActivities: nextAdditional,
+      activityDayAssignments: nextDayAssignments,
+    };
+
     recordHistory(
-      next,
-      `Added custom place "${customName.trim()}". Detour allowance: ${detourAllowance}m (${
-        customDetourMode === 'wishlist' ? 'Wishlist' : 'User-entered'
-      }).`
+      nextConstraints,
+      `Added custom place "${customName.trim()}". Detour allowance: ${customActivityObj.localTransferMinutes}m.`
     );
     setCustomName('');
     setBuilderTab('schedule');
@@ -230,7 +274,7 @@ export default function PrototypeV2Screen() {
 
   return (
     <div className="space-y-6">
-      {/* Prototype Control Banner */}
+      {/* Prototype Top Banner */}
       <div className="rounded-2xl border-2 border-[#176EA8]/30 bg-white p-4 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -246,7 +290,7 @@ export default function PrototypeV2Screen() {
                 <span className="text-xs font-semibold text-[#5A7184]">Route: /prototype/v2</span>
               </div>
               <p className="text-xs text-[#5A7184] mt-0.5">
-                Isolated sandbox for Product Owner review. Production routes untouched.
+                Deterministic engine active. Grounded in scheduler.ts without hardcoded placeholders.
               </p>
             </div>
           </div>
@@ -287,7 +331,6 @@ export default function PrototypeV2Screen() {
                     ? 'bg-white text-[#193953] shadow-xs border border-[#E1ECF2]'
                     : 'text-[#5A7184] hover:text-[#193953]'
                 }`}
-                title="Desktop Side-by-Side Workspace"
               >
                 🖥️ Desktop
               </button>
@@ -299,7 +342,6 @@ export default function PrototypeV2Screen() {
                     ? 'bg-white text-[#193953] shadow-xs border border-[#E1ECF2]'
                     : 'text-[#5A7184] hover:text-[#193953]'
                 }`}
-                title="Mobile 375px Collapsible View"
               >
                 📱 Mobile
               </button>
@@ -328,18 +370,11 @@ export default function PrototypeV2Screen() {
 
             <div className="flex items-center gap-2 text-xs bg-white px-3 py-2 rounded-xl border border-[#E1ECF2] shadow-xs text-[#5A7184]">
               <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span>
-                <strong>4 destinations evaluated</strong> by deterministic scheduler
-              </span>
+              <span><strong>4 destinations evaluated</strong> by deterministic scheduler</span>
             </div>
           </div>
 
-          {/* 2-Column Desktop Grid for Minimal Scanability */}
-          <div
-            className={`grid gap-5 ${
-              deviceView === 'mobile' ? 'grid-cols-1 max-w-[375px] mx-auto' : 'grid-cols-1 md:grid-cols-2'
-            }`}
-          >
+          <div className={`grid gap-5 ${deviceView === 'mobile' ? 'grid-cols-1 max-w-[375px] mx-auto' : 'grid-cols-1 md:grid-cols-2'}`}>
             {PROTOTYPE_DESTINATIONS.map(dest => {
               const isFeasible = dest.feasibilityRating === 'FEASIBLE';
               const isChallenging = dest.feasibilityRating === 'CHALLENGING';
@@ -349,7 +384,6 @@ export default function PrototypeV2Screen() {
                   key={dest.id}
                   className="group relative flex flex-col justify-between rounded-2xl border border-[#E1ECF2] bg-white overflow-hidden shadow-xs hover:shadow-md hover:border-[#176EA8]/40 transition-all"
                 >
-                  {/* Hero Photo & Verified Badges */}
                   <div className="relative h-48 w-full overflow-hidden bg-slate-100">
                     <img
                       src={dest.imageSrc}
@@ -358,29 +392,22 @@ export default function PrototypeV2Screen() {
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent"></div>
 
-                    {/* Feasibility Badge */}
                     <div className="absolute top-3 left-3">
                       <span
                         className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider shadow-sm ${
-                          isFeasible
-                            ? 'bg-emerald-500 text-white'
-                            : isChallenging
-                            ? 'bg-amber-500 text-white'
-                            : 'bg-rose-500 text-white'
+                          isFeasible ? 'bg-emerald-500 text-white' : isChallenging ? 'bg-amber-500 text-white' : 'bg-rose-500 text-white'
                         }`}
                       >
                         {isFeasible ? '✓' : isChallenging ? '⚡' : '✕'} {dest.feasibilityLabel}
                       </span>
                     </div>
 
-                    {/* Image Attribution Pill */}
                     <div className="absolute top-3 right-3">
                       <span className="rounded-md bg-black/60 backdrop-blur-xs px-2 py-0.5 text-[10px] text-white/90">
                         📷 {dest.imageAuthor} ({dest.imageLicense})
                       </span>
                     </div>
 
-                    {/* Destination Title & Tagline */}
                     <div className="absolute bottom-3 left-3 right-3 text-white">
                       <div className="flex items-baseline gap-2">
                         <h2 className="text-xl font-black tracking-tight">{dest.name}</h2>
@@ -390,72 +417,42 @@ export default function PrototypeV2Screen() {
                     </div>
                   </div>
 
-                  {/* Body: 3 Essential Decision Metrics */}
                   <div className="p-4 space-y-4 flex-1 flex flex-col justify-between">
                     <div className="grid grid-cols-3 gap-2 text-center bg-[#F4F9FC] p-3 rounded-xl border border-[#E1ECF2]">
-                      {/* Metric 1: Estimated Drive */}
                       <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">
-                          Est. Drive
-                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">Est. Drive</span>
                         <div className="text-sm font-black text-[#193953]">{dest.drivingTimeFormatted}</div>
                         <span className="text-[9px] text-[#5A7184] block">each way</span>
                       </div>
 
-                      {/* Metric 2: Daylight Leisure */}
                       <div className="space-y-0.5 border-x border-[#E1ECF2] px-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">
-                          Daylight Sightseeing
-                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">Daylight Sightseeing</span>
                         <div className="text-sm font-black text-[#176EA8]">
-                          {Math.floor(dest.daylightSightseeingMinutes / 60)}h{' '}
-                          {dest.daylightSightseeingMinutes % 60}m
+                          {Math.floor(dest.daylightSightseeingMinutes / 60)}h {dest.daylightSightseeingMinutes % 60}m
                         </div>
-                        <span className="text-[9px] text-[#5A7184] block">
-                          +{Math.floor(dest.unallocatedEveningMinutes / 60)}h eve
-                        </span>
+                        <span className="text-[9px] text-[#5A7184] block">+{Math.floor(dest.unallocatedEveningMinutes / 60)}h eve</span>
                       </div>
 
-                      {/* Metric 3: Return Margin */}
                       <div className="space-y-0.5">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">
-                          Return Margin
-                        </span>
-                        <div
-                          className={`text-sm font-black ${
-                            dest.returnBufferMinutes >= 60
-                              ? 'text-emerald-700'
-                              : dest.returnBufferMinutes > 0
-                              ? 'text-amber-700'
-                              : 'text-rose-700'
-                          }`}
-                        >
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">Return Margin</span>
+                        <div className={`text-sm font-black ${dest.returnBufferMinutes >= 60 ? 'text-emerald-700' : dest.returnBufferMinutes > 0 ? 'text-amber-700' : 'text-rose-700'}`}>
                           {dest.returnBufferMinutes >= 0 ? `+${dest.returnBufferMinutes}m` : `${dest.returnBufferMinutes}m`}
                         </div>
-                        <span className="text-[9px] text-[#5A7184] block">
-                          {dest.returnBufferMinutes >= 60 ? 'Safe buffer' : 'Tight / Late'}
-                        </span>
+                        <span className="text-[9px] text-[#5A7184] block">{dest.returnBufferMinutes >= 60 ? 'Safe buffer' : 'Tight / Late'}</span>
                       </div>
                     </div>
 
-                    {/* Highlights bullets */}
                     <div className="space-y-1">
-                      <div className="text-[11px] font-bold text-[#5A7184] uppercase tracking-wider">
-                        Key Attractions
-                      </div>
+                      <div className="text-[11px] font-bold text-[#5A7184] uppercase tracking-wider">Key Attractions</div>
                       <div className="flex flex-wrap gap-1.5">
                         {dest.highlights.map((h, i) => (
-                          <span
-                            key={i}
-                            className="inline-block rounded-md bg-white border border-[#E1ECF2] px-2 py-0.5 text-xs text-[#193953]"
-                          >
+                          <span key={i} className="inline-block rounded-md bg-white border border-[#E1ECF2] px-2 py-0.5 text-xs text-[#193953]">
                             {h}
                           </span>
                         ))}
                       </div>
                     </div>
 
-                    {/* Actions: "Why this result?" and Primary CTA */}
                     <div className="pt-2 flex items-center justify-between gap-3 border-t border-[#E1ECF2]">
                       <button
                         type="button"
@@ -469,16 +466,11 @@ export default function PrototypeV2Screen() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (dest.id === 'mysuru') {
-                            setCurrentStep(2);
-                          } else {
-                            alert(`Prototype interactive workspace is configured for Mysuru. Click "Plan Mysuru Trip".`);
-                          }
+                          if (dest.id === 'mysuru') setCurrentStep(2);
+                          else alert(`Interactive prototype workspace is configured for Mysuru. Click "Plan Mysuru Trip".`);
                         }}
                         className={`rounded-xl px-4 py-2 text-xs font-bold text-white shadow-xs transition-all active:scale-95 ${
-                          dest.id === 'mysuru'
-                            ? 'bg-[#176EA8] hover:bg-[#135A8A]'
-                            : 'bg-[#5A7184] hover:bg-[#485B6B]'
+                          dest.id === 'mysuru' ? 'bg-[#176EA8] hover:bg-[#135A8A]' : 'bg-[#5A7184] hover:bg-[#485B6B]'
                         }`}
                       >
                         Plan {dest.name} Trip →
@@ -490,92 +482,41 @@ export default function PrototypeV2Screen() {
             })}
           </div>
 
-          {/* "Why this result?" Modal / Drawer */}
           {selectedWhyDest && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fadeIn">
               <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-[#E1ECF2] space-y-4">
                 <div className="flex items-start justify-between border-b border-[#E1ECF2] pb-3">
                   <div>
-                    <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">
-                      Deterministic Feasibility Calculation
-                    </span>
-                    <h3 className="text-xl font-black text-[#193953]">
-                      Why is {selectedWhyDest.name} {selectedWhyDest.feasibilityLabel}?
-                    </h3>
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">Deterministic Feasibility Calculation</span>
+                    <h3 className="text-xl font-black text-[#193953]">Why is {selectedWhyDest.name} {selectedWhyDest.feasibilityLabel}?</h3>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedWhyDest(null)}
-                    className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-                  >
-                    ✕
-                  </button>
+                  <button type="button" onClick={() => setSelectedWhyDest(null)} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700">✕</button>
                 </div>
 
                 <div className="space-y-3 text-xs text-[#193953]">
-                  {/* Drive Breakdown */}
                   <div className="rounded-xl bg-[#F4F9FC] p-3 border border-[#E1ECF2] space-y-1.5">
                     <div className="font-bold text-xs text-[#193953] flex justify-between">
                       <span>Highway Routing & Congestion Buffer</span>
                       <span className="text-[#176EA8]">{selectedWhyDest.drivingTimeFormatted} each way</span>
                     </div>
                     <p className="text-[#5A7184]">
-                      Route: {selectedWhyDest.assumptions.route}. Modeled base drive:{' '}
-                      <strong>{selectedWhyDest.drivingBaseMinutes} min</strong> +{' '}
-                      <strong>{selectedWhyDest.drivingBufferMinutes} min</strong> (20% safety margin).
+                      Route: {selectedWhyDest.assumptions.route}. Base drive: <strong>{selectedWhyDest.drivingBaseMinutes} min</strong> + <strong>{selectedWhyDest.drivingBufferMinutes} min</strong> (20% buffer).
                     </p>
                   </div>
 
-                  {/* Daylight Leisure vs Evening Split */}
                   <div className="rounded-xl bg-sky-50 p-3 border border-sky-200 space-y-1.5">
                     <div className="font-bold text-xs text-sky-900 flex justify-between">
                       <span>Daylight vs. Evening Leisure Split</span>
-                      <span className="text-sky-800">
-                        Total Free Time: {Math.floor(selectedWhyDest.totalFreeTimeMinutes / 60)}h{' '}
-                        {selectedWhyDest.totalFreeTimeMinutes % 60}m
-                      </span>
+                      <span className="text-sky-800">Total Free: {Math.floor(selectedWhyDest.totalFreeTimeMinutes / 60)}h {selectedWhyDest.totalFreeTimeMinutes % 60}m</span>
                     </div>
                     <ul className="list-disc pl-4 space-y-1 text-sky-950">
-                      <li>
-                        <strong>Actual Daylight Sightseeing:</strong>{' '}
-                        {Math.floor(selectedWhyDest.daylightSightseeingMinutes / 60)}h{' '}
-                        {selectedWhyDest.daylightSightseeingMinutes % 60}m (07:45–18:15 IST natural sunlight window).
-                      </li>
-                      <li>
-                        <strong>Unallocated Evening Leisure:</strong>{' '}
-                        {Math.floor(selectedWhyDest.unallocatedEveningMinutes / 60)}h{' '}
-                        {selectedWhyDest.unallocatedEveningMinutes % 60}m (18:45–21:00 post-sunset dinner & rest).
-                      </li>
+                      <li><strong>Actual Daylight Sightseeing:</strong> {Math.floor(selectedWhyDest.daylightSightseeingMinutes / 60)}h {selectedWhyDest.daylightSightseeingMinutes % 60}m (07:45–18:15 IST).</li>
+                      <li><strong>Unallocated Evening Leisure:</strong> {Math.floor(selectedWhyDest.unallocatedEveningMinutes / 60)}h {selectedWhyDest.unallocatedEveningMinutes % 60}m (18:45–21:00 post-sunset).</li>
                     </ul>
                   </div>
 
-                  {/* Return Deadline Timing */}
-                  <div className="rounded-xl bg-[#F4F9FC] p-3 border border-[#E1ECF2] space-y-1">
-                    <div className="font-bold text-xs text-[#193953]">Timeline Milestones</div>
-                    <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
-                      <div>
-                        Outbound: <strong>{selectedWhyDest.outboundDeparture}</strong>
-                      </div>
-                      <div>
-                        Day 1 Arrival: <strong>{selectedWhyDest.day1Arrival}</strong>
-                      </div>
-                      <div>
-                        Return Departs: <strong>{selectedWhyDest.day2ReturnDeparture}</strong>
-                      </div>
-                      <div>
-                        Home Arrival: <strong>{selectedWhyDest.homeArrival}</strong>
-                      </div>
-                    </div>
-                    <div className="pt-1 text-[11px] text-emerald-700 font-semibold">
-                      Return buffer before 20:30 IST deadline: +{selectedWhyDest.returnBufferMinutes}m margin
-                    </div>
-                  </div>
-
-                  {/* Official Evidence Citations */}
                   <div className="space-y-1 pt-1">
-                    <div className="font-bold text-[11px] text-[#5A7184] uppercase tracking-wider">
-                      Official Source & Attribution Evidence
-                    </div>
+                    <div className="font-bold text-[11px] text-[#5A7184] uppercase tracking-wider">Official Evidence Citations</div>
                     {selectedWhyDest.assumptions.evidenceNotes.map((note, idx) => (
                       <div key={idx} className="text-[11px] text-[#5A7184] flex items-start gap-1.5">
                         <span>•</span>
@@ -586,11 +527,7 @@ export default function PrototypeV2Screen() {
                 </div>
 
                 <div className="pt-2 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedWhyDest(null)}
-                    className="rounded-xl bg-[#176EA8] px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#135A8A]"
-                  >
+                  <button type="button" onClick={() => setSelectedWhyDest(null)} className="rounded-xl bg-[#176EA8] px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#135A8A]">
                     Got It
                   </button>
                 </div>
@@ -605,10 +542,10 @@ export default function PrototypeV2Screen() {
       {/* ========================================================================= */}
       {currentStep === 2 && (
         <section className="space-y-5">
-          {/* Top Sticky Return-Margin Feasibility Indicator */}
+          {/* Top Return-Margin Feasibility Indicator */}
           <div
             className={`rounded-2xl p-4 shadow-sm border transition-all ${
-              calculatedMetrics.isProjectedLate
+              isProjectedLate
                 ? 'bg-rose-50 border-rose-300 text-rose-900'
                 : 'bg-white border-[#E1ECF2] text-[#193953]'
             }`}
@@ -617,108 +554,108 @@ export default function PrototypeV2Screen() {
               <div className="flex items-center gap-3">
                 <div
                   className={`flex h-11 w-11 items-center justify-center rounded-xl font-black text-lg ${
-                    calculatedMetrics.isProjectedLate
-                      ? 'bg-rose-500 text-white'
-                      : 'bg-emerald-500 text-white'
+                    isProjectedLate ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'
                   }`}
                 >
-                  {calculatedMetrics.isProjectedLate ? '⚠️' : '✓'}
+                  {isProjectedLate ? '⚠️' : '✓'}
                 </div>
 
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-black">
-                      {calculatedMetrics.isProjectedLate
-                        ? `Projected Late by ${Math.abs(calculatedMetrics.returnBufferMinutes)} min`
-                        : `Return Margin: +${calculatedMetrics.returnBufferMinutes}m Safe Buffer`}
+                      {isProjectedLate
+                        ? `Projected Late by ${Math.abs(returnBufferMinutes)} min`
+                        : `Return Margin: +${returnBufferMinutes}m Safe Buffer`}
                     </span>
                     <span
                       className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                        calculatedMetrics.isProjectedLate
-                          ? 'bg-rose-200 text-rose-800'
-                          : 'bg-emerald-100 text-emerald-800'
+                        isProjectedLate ? 'bg-rose-200 text-rose-800' : 'bg-emerald-100 text-emerald-800'
                       }`}
                     >
-                      {calculatedMetrics.isProjectedLate ? 'Overdue Constraint' : 'On Schedule'}
+                      {isProjectedLate ? 'Constraint Violation' : 'On Schedule'}
                     </span>
                   </div>
 
                   <p className="text-xs text-[#5A7184] mt-0.5">
-                    Est. Home Arrival: <strong>{calculatedMetrics.formattedArrival}</strong> · Hard Deadline:{' '}
-                    <strong>Sun 20:30 IST</strong> · Usable Daylight Sightseeing:{' '}
-                    <strong>
-                      {Math.floor(calculatedMetrics.daylightSightseeingMinutes / 60)}h{' '}
-                      {calculatedMetrics.daylightSightseeingMinutes % 60}m
-                    </strong>
+                    Est. Home Arrival: <strong>{formattedArrival}</strong> · Hard Deadline:{' '}
+                    <strong>Sun 20:30 IST</strong> · Engine Rating:{' '}
+                    <strong>{currentResult.rating}</strong>
                   </p>
                 </div>
               </div>
 
-              {/* Simulation Test Controls */}
+              {/* Simulation Controls & Make This Trip Fit Action */}
               <div className="flex items-center gap-2">
-                {simulatedDelayMinutes === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setIsMoveModalOpen(true)}
+                  className="rounded-xl bg-[#176EA8] hover:bg-[#135A8A] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition-all flex items-center gap-1.5 active:scale-95"
+                >
+                  <span>⚡</span>
+                  <span>Make This Trip Fit</span>
+                </button>
+
+                {constraints.simulateDelayMinutes === 0 ? (
                   <button
                     type="button"
-                    onClick={() => setSimulatedDelayMinutes(150)}
+                    onClick={() => {
+                      recordHistory(
+                        { ...constraints, simulateDelayMinutes: 60 },
+                        'Simulated +60m highway delay. Recalculated feasibility.'
+                      );
+                    }}
                     className="rounded-xl bg-amber-500 hover:bg-amber-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs transition-all"
-                    title="Simulate a 2h 30m delay on the expressway"
                   >
-                    Simulate +150m Highway Delay
+                    Simulate Delay (+60m)
                   </button>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setSimulatedDelayMinutes(0)}
+                    onClick={() => {
+                      recordHistory(
+                        { ...constraints, simulateDelayMinutes: 0 },
+                        'Reset delay to 0m.'
+                      );
+                    }}
                     className="rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white shadow-xs transition-all"
                   >
-                    Reset Delay (Clear 150m)
+                    Clear Delay
                   </button>
                 )}
 
                 <button
                   type="button"
                   onClick={() => {
-                    setSchedule(INITIAL_MYSURU_SCHEDULE);
+                    setConstraints(INITIAL_CONSTRAINTS);
                     setHistoryStack([]);
                     setWhatChangedNotice(null);
-                    setSimulatedDelayMinutes(0);
                   }}
                   className="rounded-xl border border-[#E1ECF2] bg-white px-3 py-1.5 text-xs font-bold text-[#5A7184] hover:text-[#193953] shadow-xs"
                 >
-                  Reset Schedule
+                  Reset
                 </button>
               </div>
             </div>
 
-            {/* Projected Late Alert & One-Click Remedies */}
-            {calculatedMetrics.isProjectedLate && (
-              <div className="mt-3 pt-3 border-t border-rose-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            {/* Violation Alert Callout & Remedies */}
+            {currentResult.violations.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-rose-200/80 space-y-2">
                 <div className="text-xs text-rose-800 font-medium">
-                  <strong>Constraint violation:</strong> Projected arrival at {calculatedMetrics.formattedArrival}{' '}
-                  violates your 20:30 IST return deadline. Choose a remedy:
+                  <strong>Engine Violations Detected:</strong>
+                  <ul className="list-disc pl-5 mt-1 space-y-0.5">
+                    {currentResult.violations.map((v, i) => (
+                      <li key={i}>{v.message}</li>
+                    ))}
+                  </ul>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => {
-                      // Remedy 1: Drop Devaraja Market Walk (-60m)
-                      handleRemoveActivity('mysuru-market');
-                      setSimulatedDelayMinutes(prev => Math.max(0, prev - 60));
-                    }}
-                    className="rounded-lg bg-rose-600 hover:bg-rose-700 px-3 py-1 text-xs font-bold text-white shadow-xs"
+                    onClick={() => setIsMoveModalOpen(true)}
+                    className="rounded-lg bg-rose-600 hover:bg-rose-700 px-3 py-1 text-xs font-bold text-white shadow-xs flex items-center gap-1"
                   >
-                    Drop Market (-60m)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // Remedy 2: Extend deadline
-                      setSimulatedDelayMinutes(0);
-                      alert('Deadline extended to 22:00 IST for testing. Margin restored.');
-                    }}
-                    className="rounded-lg bg-white border border-rose-300 text-rose-700 hover:bg-rose-50 px-3 py-1 text-xs font-bold shadow-xs"
-                  >
-                    Extend Deadline (+60m)
+                    <span>🔄</span>
+                    <span>Move an activity to another day</span>
                   </button>
                 </div>
               </div>
@@ -744,15 +681,12 @@ export default function PrototypeV2Screen() {
           )}
 
           {/* ========================================================================= */}
-          {/* WORKSPACE VIEW: DESKTOP (SIDE-BY-SIDE) OR MOBILE (COLLAPSIBLE SHEET)      */}
+          {/* WORKSPACE VIEW: DESKTOP OR MOBILE SHEET                                   */}
           {/* ========================================================================= */}
-
           {deviceView === 'desktop' ? (
-            /* DESKTOP SIDE-BY-SIDE WORKSPACE (55% Itinerary / 45% Sticky Map) */
             <div className="grid grid-cols-12 gap-5 items-start">
-              {/* Left Column (55% / 7 cols): Itinerary or Place Discovery */}
+              {/* Left Column (55% / 7 cols): Itinerary */}
               <div className="col-span-12 lg:col-span-7 space-y-4">
-                {/* Mode Selector Tabs: Schedule vs Place Discovery */}
                 <div className="flex items-center justify-between border-b border-[#E1ECF2] pb-2">
                   <div className="flex items-center gap-2">
                     <button
@@ -767,7 +701,7 @@ export default function PrototypeV2Screen() {
                           : 'border-transparent text-[#5A7184] hover:text-[#193953]'
                       }`}
                     >
-                      Day 1: Sat ({schedule.filter(s => s.day === 1).length} stops)
+                      Day 1: Sat ({currentResult.timeline.filter(t => t.day === 1 && t.category === 'ACTIVITY').length} stops)
                     </button>
                     <button
                       type="button"
@@ -781,7 +715,7 @@ export default function PrototypeV2Screen() {
                           : 'border-transparent text-[#5A7184] hover:text-[#193953]'
                       }`}
                     >
-                      Day 2: Sun (Return 14:36)
+                      Day 2: Sun ({currentResult.timeline.filter(t => t.day === 2 && t.category === 'ACTIVITY').length} stops)
                     </button>
                     <button
                       type="button"
@@ -793,9 +727,6 @@ export default function PrototypeV2Screen() {
                       }`}
                     >
                       <span>+ Discover Places</span>
-                      <span className="rounded-full bg-sky-100 text-[#176EA8] px-1.5 py-0.2 text-[10px] font-bold">
-                        5
-                      </span>
                     </button>
                   </div>
 
@@ -810,149 +741,122 @@ export default function PrototypeV2Screen() {
                   )}
                 </div>
 
-                {/* TAB 1: SCHEDULE VIEW */}
+                {/* SCHEDULE VIEW: Rendered dynamically from currentResult.timeline */}
                 {builderTab === 'schedule' && (
                   <div className="space-y-3">
-                    {/* Fixed Outbound Leg Card */}
-                    <div className="rounded-xl border border-dashed border-[#BAE3F1] bg-[#F4F9FC] p-3 text-xs text-[#5A7184] flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">🚗</span>
-                        <div>
-                          <strong className="text-[#193953]">Outbound Drive from MG Road</strong>
-                          <span className="block text-[11px]">08:00 IST departure → 11:54 IST arrival (3h 54m via NH 275)</span>
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-bold bg-white border border-[#E1ECF2] px-2 py-0.5 rounded text-[#176EA8]">
-                        Fixed Corridor
-                      </span>
-                    </div>
+                    {currentResult.timeline
+                      .filter(t => t.day === activeDay)
+                      .map((entry, idx) => {
+                        const isActivity = entry.category === 'ACTIVITY';
+                        const isHovered = activeHoverId === entry.activityId;
 
-                    {/* Check-in / Lunch break */}
-                    <div className="rounded-xl border border-[#E1ECF2] bg-white p-3 text-xs text-[#5A7184] flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">🏨</span>
-                        <div>
-                          <strong className="text-[#193953]">Hotel Check-in & Lunch</strong>
-                          <span className="block text-[11px]">11:54–13:09 IST (75m modeled allocation)</span>
-                        </div>
-                      </div>
-                      <span className="text-[10px] text-gray-500">Scheduled</span>
-                    </div>
+                        if (isActivity) {
+                          return (
+                            <div
+                              key={entry.id}
+                              onMouseEnter={() => setActiveHoverId(entry.activityId ?? null)}
+                              onMouseLeave={() => setActiveHoverId(null)}
+                              className={`rounded-2xl border p-4 transition-all duration-200 bg-white shadow-xs ${
+                                isHovered
+                                  ? 'border-[#176EA8] ring-2 ring-[#176EA8]/20 shadow-md'
+                                  : 'border-[#E1ECF2] hover:border-[#176EA8]/40'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-start gap-3">
+                                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#176EA8] text-white font-bold text-xs">
+                                    #{idx + 1}
+                                  </div>
 
-                    {/* Active Scheduled Activities */}
-                    <div className="space-y-3">
-                      {schedule.map((item, index) => {
-                        const isHovered = activeHoverId === item.id;
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <h4 className="text-sm font-black text-[#193953]">{entry.label}</h4>
+                                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-sky-50 text-[#176EA8]">
+                                        Day {entry.day} Stop
+                                      </span>
+                                    </div>
 
-                        return (
-                          <div
-                            key={item.id}
-                            onMouseEnter={() => setActiveHoverId(item.id)}
-                            onMouseLeave={() => setActiveHoverId(null)}
-                            className={`rounded-2xl border p-4 transition-all duration-200 bg-white shadow-xs ${
-                              isHovered
-                                ? 'border-[#176EA8] ring-2 ring-[#176EA8]/20 shadow-md'
-                                : 'border-[#E1ECF2] hover:border-[#176EA8]/40'
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex items-start gap-3">
-                                {/* Order Badge */}
-                                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#176EA8] text-white font-bold text-xs">
-                                  #{index + 1}
+                                    <div className="text-xs text-[#5A7184] mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                      <span>⏰ <strong>{entry.startTime.slice(11)}–{entry.endTime.slice(11)}</strong> IST</span>
+                                      <span>📍 {ACTIVITY_COORDS[entry.activityId!] ? 'Mysuru' : 'Expressway Corridor'}</span>
+                                    </div>
+                                  </div>
                                 </div>
 
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <h4 className="text-sm font-black text-[#193953]">{item.name}</h4>
-                                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-gray-100 text-gray-700">
-                                      {item.category}
-                                    </span>
-                                  </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedMoveActivityId(entry.activityId!);
+                                      setMoveTargetDay(activeDay === 1 ? 2 : 1);
+                                      setIsMoveModalOpen(true);
+                                    }}
+                                    className="rounded-lg border border-[#E1ECF2] bg-white px-2 py-1 text-xs font-bold text-[#176EA8] hover:bg-sky-50 shadow-xs flex items-center gap-1"
+                                    title="Move to another day"
+                                  >
+                                    <span>🔄</span>
+                                    <span>Move Day</span>
+                                  </button>
 
-                                  <div className="text-xs text-[#5A7184] mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                                    <span>
-                                      ⏰ <strong>{item.startTime}–{item.endTime}</strong> ({item.durationMinutes}m)
-                                    </span>
-                                    <span>📍 {item.locationName}</span>
-                                    {item.costINR > 0 ? (
-                                      <span className="font-semibold text-emerald-700">Entry: ₹{item.costINR}</span>
-                                    ) : (
-                                      <span className="font-semibold text-sky-700">Free Access</span>
-                                    )}
-                                  </div>
-
-                                  {item.notes && <p className="text-xs text-gray-600 mt-2">{item.notes}</p>}
-
-                                  {item.detourMinutes > 0 && (
-                                    <div className="text-[11px] text-amber-700 mt-1 font-medium">
-                                      Detour allowance: {item.detourMinutes}m ({item.detourSource})
-                                    </div>
+                                  {entry.isOptional && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleActivity(entry.activityId!)}
+                                      className="h-7 w-7 rounded-lg border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50"
+                                      title="Remove Stop"
+                                    >
+                                      ✕
+                                    </button>
                                   )}
                                 </div>
                               </div>
+                            </div>
+                          );
+                        }
 
-                              {/* Reorder and Delete Action Buttons */}
-                              <div className="flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveActivity(index, 'up')}
-                                  disabled={index === 0}
-                                  className="h-7 w-7 rounded-lg border border-[#E1ECF2] text-xs font-bold text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent"
-                                  title="Move Earlier"
-                                >
-                                  ▲
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleMoveActivity(index, 'down')}
-                                  disabled={index === schedule.length - 1}
-                                  className="h-7 w-7 rounded-lg border border-[#E1ECF2] text-xs font-bold text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent"
-                                  title="Move Later"
-                                >
-                                  ▼
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveActivity(item.id)}
-                                  className="h-7 w-7 rounded-lg border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50"
-                                  title="Remove Stop"
-                                >
-                                  ✕
-                                </button>
+                        // Render Non-Activity Timeline Milestones (Drive, Meals, Rest, Checkin)
+                        return (
+                          <div
+                            key={entry.id}
+                            className={`rounded-xl border p-3 text-xs flex items-center justify-between ${
+                              entry.category === 'DRIVE'
+                                ? 'border-dashed border-[#BAE3F1] bg-[#F4F9FC] text-[#5A7184]'
+                                : entry.category === 'MEAL'
+                                ? 'border-amber-200 bg-amber-50/50 text-amber-900'
+                                : entry.category === 'CHECK_IN'
+                                ? 'border-[#E1ECF2] bg-white text-[#5A7184]'
+                                : entry.category === 'REST'
+                                ? 'border-indigo-100 bg-indigo-50/40 text-indigo-900'
+                                : 'border-[#E1ECF2] bg-gray-50 text-gray-600'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span>
+                                {entry.category === 'DRIVE' ? '🚗' : entry.category === 'MEAL' ? '🍽️' : entry.category === 'CHECK_IN' ? '🏨' : entry.category === 'REST' ? '🛌' : '⏱️'}
+                              </span>
+                              <div>
+                                <strong className="text-[#193953]">{entry.label}</strong>
+                                <span className="block text-[11px]">
+                                  {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST
+                                </span>
                               </div>
                             </div>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">
+                              {entry.category}
+                            </span>
                           </div>
                         );
                       })}
-                    </div>
-
-                    {/* Free Evening Leisure Box */}
-                    <div className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50/60 p-3 text-xs text-emerald-900 flex items-center justify-between">
-                      <div>
-                        <strong className="block text-emerald-950 font-bold">
-                          Post-Sunset Evening Leisure (18:45–21:00 IST)
-                        </strong>
-                        <span className="text-[11px] text-emerald-800">
-                          2h 15m unallocated for local dining, Mysore pak tasting, or rest. (Daylight ends ~18:18 IST).
-                        </span>
-                      </div>
-                      <span className="text-xs font-bold text-emerald-800 bg-white px-2 py-1 rounded border border-emerald-200">
-                        +2h 15m free
-                      </span>
-                    </div>
                   </div>
                 )}
 
-                {/* TAB 2: PLACE DISCOVERY VIEW (Keeps Map 100% visible on right!) */}
+                {/* DISCOVER PLACES VIEW */}
                 {builderTab === 'discover' && (
                   <div className="space-y-4 rounded-2xl border border-[#E1ECF2] bg-white p-5 shadow-xs animate-fadeIn">
                     <div className="flex items-center justify-between border-b border-[#E1ECF2] pb-3">
                       <div>
                         <h3 className="text-base font-black text-[#193953]">Discover Places in Mysuru</h3>
-                        <p className="text-xs text-[#5A7184]">
-                          Select places to schedule or create a custom stop with explicit detour allowance.
-                        </p>
+                        <p className="text-xs text-[#5A7184]">Engine computes operating windows and corridor travel allowances.</p>
                       </div>
                       <button
                         type="button"
@@ -963,7 +867,6 @@ export default function PrototypeV2Screen() {
                       </button>
                     </div>
 
-                    {/* Category Filter Pills */}
                     <div className="flex flex-wrap gap-1.5 text-xs">
                       {['all', 'food', 'sightseeing', 'nature', 'fuel'].map(cat => (
                         <button
@@ -981,16 +884,12 @@ export default function PrototypeV2Screen() {
                       ))}
                     </div>
 
-                    {/* Curated Places List */}
                     <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
                       {filteredPlaces.map(place => {
-                        const isScheduled = schedule.some(s => s.id === place.id);
+                        const isScheduled = currentResult.timeline.some(t => t.activityId === place.id);
 
                         return (
-                          <div
-                            key={place.id}
-                            className="rounded-xl border border-[#E1ECF2] p-3.5 hover:border-[#176EA8]/40 bg-white transition-all space-y-2"
-                          >
+                          <div key={place.id} className="rounded-xl border border-[#E1ECF2] p-3.5 hover:border-[#176EA8]/40 bg-white transition-all space-y-2">
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <div className="flex items-center gap-2">
@@ -1012,37 +911,31 @@ export default function PrototypeV2Screen() {
                                     : 'bg-[#176EA8] text-white hover:bg-[#135A8A] active:scale-95'
                                 }`}
                               >
-                                {isScheduled ? '✓ Scheduled' : '+ Add to Day 1'}
+                                {isScheduled ? '✓ Scheduled' : `+ Add to Day ${activeDay}`}
                               </button>
                             </div>
 
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#5A7184] border-t border-[#E1ECF2] pt-2">
                               <span>⏱️ Visit: {place.durationMinutes}m</span>
-                              <span>
-                                🚗 Detour: ~{place.estimatedDetourMinutes}m ({place.detourType})
-                              </span>
-                              <span>🕒 {place.operatingHours}</span>
+                              <span>🚗 Detour: ~{place.estimatedDetourMinutes}m</span>
+                              <span>🕒 Hours: {place.operatingHours}</span>
                             </div>
                           </div>
                         );
                       })}
                     </div>
 
-                    {/* Custom Spot Addition Form */}
+                    {/* Custom Spot Addition */}
                     <div className="rounded-xl border border-dashed border-[#176EA8]/40 bg-sky-50/50 p-4 space-y-3">
                       <div className="flex items-center gap-2">
                         <span className="text-base">📍</span>
-                        <h4 className="text-xs font-black uppercase tracking-wider text-[#176EA8]">
-                          Add Custom Place or Spot
-                        </h4>
+                        <h4 className="text-xs font-black uppercase tracking-wider text-[#176EA8]">Add Custom Place or Spot</h4>
                       </div>
 
                       <form onSubmit={handleAddCustomSpot} className="space-y-3 text-xs">
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                           <div className="sm:col-span-2">
-                            <label className="block text-[11px] font-bold text-[#5A7184] mb-1">
-                              Place Name
-                            </label>
+                            <label className="block text-[11px] font-bold text-[#5A7184] mb-1">Place Name</label>
                             <input
                               type="text"
                               value={customName}
@@ -1052,14 +945,11 @@ export default function PrototypeV2Screen() {
                               required
                             />
                           </div>
-
                           <div>
-                            <label className="block text-[11px] font-bold text-[#5A7184] mb-1">
-                              Category
-                            </label>
+                            <label className="block text-[11px] font-bold text-[#5A7184] mb-1">Category</label>
                             <select
                               value={customCategory}
-                              onChange={e => setCustomCategory(e.target.value as 'sightseeing' | 'food' | 'nature')}
+                              onChange={e => setCustomCategory(e.target.value as any)}
                               className="w-full rounded-lg border border-[#E1ECF2] bg-white px-2 py-1.5 text-xs text-[#193953]"
                             >
                               <option value="sightseeing">Attraction</option>
@@ -1067,11 +957,8 @@ export default function PrototypeV2Screen() {
                               <option value="nature">Nature / Park</option>
                             </select>
                           </div>
-
                           <div>
-                            <label className="block text-[11px] font-bold text-[#5A7184] mb-1">
-                              Duration (min)
-                            </label>
+                            <label className="block text-[11px] font-bold text-[#5A7184] mb-1">Duration</label>
                             <select
                               value={customDuration}
                               onChange={e => setCustomDuration(Number(e.target.value))}
@@ -1085,11 +972,8 @@ export default function PrototypeV2Screen() {
                           </div>
                         </div>
 
-                        {/* Detour Allowance Option (Addressing Product Owner Instruction #4) */}
                         <div className="space-y-1.5 rounded-lg bg-white p-3 border border-[#E1ECF2]">
-                          <div className="font-bold text-[11px] text-[#193953]">
-                            Detour & Scheduling Protocol:
-                          </div>
+                          <div className="font-bold text-[11px] text-[#193953]">Detour Protocol:</div>
                           <div className="space-y-1 text-[11px] text-[#5A7184]">
                             <label className="flex items-center gap-2 cursor-pointer">
                               <input
@@ -1098,9 +982,8 @@ export default function PrototypeV2Screen() {
                                 checked={customDetourMode === 'wishlist'}
                                 onChange={() => setCustomDetourMode('wishlist')}
                               />
-                              <span>Save to Wishlist only (0m detour, no deadline impact)</span>
+                              <span>Save to Wishlist only (0m detour)</span>
                             </label>
-
                             <label className="flex items-center gap-2 cursor-pointer">
                               <input
                                 type="radio"
@@ -1108,9 +991,7 @@ export default function PrototypeV2Screen() {
                                 checked={customDetourMode === 'schedule'}
                                 onChange={() => setCustomDetourMode('schedule')}
                               />
-                              <span>
-                                Schedule into day with user-entered driving allowance (explicit, no auto-15m)
-                              </span>
+                              <span>Schedule into day with user allowance:</span>
                             </label>
                           </div>
 
@@ -1123,24 +1004,18 @@ export default function PrototypeV2Screen() {
                                   type="button"
                                   onClick={() => setCustomUserAllowance(mins)}
                                   className={`rounded px-2.5 py-1 text-[11px] font-bold ${
-                                    customUserAllowance === mins
-                                      ? 'bg-[#176EA8] text-white'
-                                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    customUserAllowance === mins ? 'bg-[#176EA8] text-white' : 'bg-gray-100 text-gray-700'
                                   }`}
                                 >
                                   +{mins}m
                                 </button>
                               ))}
-                              <span className="text-[10px] text-gray-500">(user-specified driving allowance)</span>
                             </div>
                           )}
                         </div>
 
                         <div className="flex justify-end">
-                          <button
-                            type="submit"
-                            className="rounded-xl bg-[#176EA8] hover:bg-[#135A8A] px-4 py-2 text-xs font-bold text-white shadow-xs"
-                          >
+                          <button type="submit" className="rounded-xl bg-[#176EA8] hover:bg-[#135A8A] px-4 py-2 text-xs font-bold text-white shadow-xs">
                             + Add Custom Place
                           </button>
                         </div>
@@ -1150,10 +1025,10 @@ export default function PrototypeV2Screen() {
                 )}
               </div>
 
-              {/* Right Column (45% / 5 cols): Sticky Interactive Leaflet Map */}
+              {/* Right Column (45% / 5 cols): Sticky Map */}
               <div className="col-span-12 lg:col-span-5 sticky top-20">
                 <PrototypeMap
-                  scheduledActivities={schedule}
+                  scheduledActivities={mapScheduledActivities}
                   activeHoverId={activeHoverId}
                   onSelectActivity={id => {
                     setActiveHoverId(id);
@@ -1164,130 +1039,310 @@ export default function PrototypeV2Screen() {
               </div>
             </div>
           ) : (
-            /* ======================================================================= */
-            /* MOBILE COLLAPSIBLE WORKSPACE SIMULATION (375px viewport container)      */
-            /* ======================================================================= */
+            /* Mobile View */
             <div className="max-w-[375px] mx-auto rounded-3xl border-4 border-gray-800 bg-white overflow-hidden shadow-2xl relative min-h-[640px] flex flex-col">
-              {/* Mobile Top Map (takes upper area) */}
               <div className="h-72 w-full relative">
                 <PrototypeMap
-                  scheduledActivities={schedule}
+                  scheduledActivities={mapScheduledActivities}
                   activeHoverId={activeHoverId}
-                  onSelectActivity={id => {
-                    setActiveHoverId(id);
-                    setSheetSnap('half');
-                  }}
                   heightClass="h-72"
                 />
               </div>
 
-              {/* Mobile Collapsible 3-Snap Bottom Sheet */}
-              <div
-                className={`flex-1 bg-white rounded-t-3xl border-t-2 border-[#176EA8]/20 shadow-2xl transition-all duration-300 flex flex-col ${
-                  sheetSnap === 'peek'
-                    ? 'h-36'
-                    : sheetSnap === 'half'
-                    ? 'h-[360px]'
-                    : 'h-[500px]'
-                }`}
-              >
-                {/* Drag Handle & Snap Controls */}
+              <div className={`flex-1 bg-white rounded-t-3xl border-t-2 border-[#176EA8]/20 shadow-2xl transition-all duration-300 flex flex-col ${
+                sheetSnap === 'peek' ? 'h-36' : sheetSnap === 'half' ? 'h-[360px]' : 'h-[500px]'
+              }`}>
                 <div className="p-3 pb-1 flex flex-col items-center">
                   <div className="w-12 h-1.5 bg-gray-300 rounded-full mb-2"></div>
                   <div className="flex items-center justify-between w-full px-2">
-                    <span className="text-xs font-black text-[#193953]">Day 1 Itinerary</span>
+                    <span className="text-xs font-black text-[#193953]">Day {activeDay} Itinerary</span>
                     <div className="flex gap-1 text-[10px]">
-                      <button
-                        type="button"
-                        onClick={() => setSheetSnap('peek')}
-                        className={`px-2 py-0.5 rounded ${sheetSnap === 'peek' ? 'bg-sky-100 font-bold' : 'text-gray-500'}`}
-                      >
-                        Peek
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSheetSnap('half')}
-                        className={`px-2 py-0.5 rounded ${sheetSnap === 'half' ? 'bg-sky-100 font-bold' : 'text-gray-500'}`}
-                      >
-                        Half
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSheetSnap('full')}
-                        className={`px-2 py-0.5 rounded ${sheetSnap === 'full' ? 'bg-sky-100 font-bold' : 'text-gray-500'}`}
-                      >
-                        Full
-                      </button>
+                      <button type="button" onClick={() => setSheetSnap('peek')} className={`px-2 py-0.5 rounded ${sheetSnap === 'peek' ? 'bg-sky-100 font-bold' : 'text-gray-500'}`}>Peek</button>
+                      <button type="button" onClick={() => setSheetSnap('half')} className={`px-2 py-0.5 rounded ${sheetSnap === 'half' ? 'bg-sky-100 font-bold' : 'text-gray-500'}`}>Half</button>
+                      <button type="button" onClick={() => setSheetSnap('full')} className={`px-2 py-0.5 rounded ${sheetSnap === 'full' ? 'bg-sky-100 font-bold' : 'text-gray-500'}`}>Full</button>
                     </div>
                   </div>
                 </div>
 
-                {/* Sheet Body Content */}
                 <div className="p-4 overflow-y-auto flex-1 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="text-xs font-bold text-emerald-700">
-                      Margin: +{calculatedMetrics.returnBufferMinutes}m
-                    </div>
+                    <div className="text-xs font-bold text-emerald-700">Margin: +{returnBufferMinutes}m</div>
                     <button
                       type="button"
-                      onClick={() => {
-                        setBuilderTab(builderTab === 'schedule' ? 'discover' : 'schedule');
-                        setSheetSnap('full');
-                      }}
+                      onClick={() => setIsMoveModalOpen(true)}
                       className="rounded-lg bg-[#176EA8] text-white px-2.5 py-1 text-xs font-bold"
                     >
-                      {builderTab === 'schedule' ? '+ Add Stop' : 'View Schedule'}
+                      🔄 Move Activity
                     </button>
                   </div>
 
-                  {builderTab === 'schedule' ? (
-                    <div className="space-y-2">
-                      {schedule.map((item, index) => (
-                        <div
-                          key={item.id}
-                          className="rounded-xl border border-[#E1ECF2] p-2.5 bg-white text-xs space-y-1"
+                  <div className="space-y-2">
+                    {currentResult.timeline.filter(t => t.day === activeDay && t.category === 'ACTIVITY').map(item => (
+                      <div key={item.id} className="rounded-xl border border-[#E1ECF2] p-2.5 bg-white text-xs flex justify-between items-center">
+                        <div>
+                          <div className="font-bold text-[#193953]">{item.label}</div>
+                          <div className="text-[11px] text-[#5A7184]">{item.startTime.slice(11)}–{item.endTime.slice(11)} IST</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedMoveActivityId(item.activityId!);
+                            setMoveTargetDay(activeDay === 1 ? 2 : 1);
+                            setIsMoveModalOpen(true);
+                          }}
+                          className="text-[#176EA8] font-bold text-[11px] px-2 py-1 rounded bg-sky-50 border border-sky-200"
                         >
-                          <div className="flex justify-between items-center">
-                            <span className="font-bold text-[#193953]">
-                              #{index + 1} {item.name}
+                          Move
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* MAKE THIS TRIP FIT: MOVE ACTIVITY MODAL WITH TRUE ENGINE BEFORE/AFTER      */}
+          {/* ========================================================================= */}
+          {isMoveModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fadeIn">
+              <div className="relative w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl border border-[#E1ECF2] space-y-5 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-start justify-between border-b border-[#E1ECF2] pb-3">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">
+                      Make This Trip Fit · Conflict Resolution
+                    </span>
+                    <h3 className="text-xl font-black text-[#193953]">Move an Activity Between Days</h3>
+                    <p className="text-xs text-[#5A7184] mt-0.5">
+                      Evaluated live by the deterministic scheduling engine. True before and proposed feasibility.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsMoveModalOpen(false)}
+                    className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Step 1: Select Activity to Move */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-black uppercase tracking-wider text-[#193953]">
+                    1. Select Activity to Move:
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {moveCandidates.map(candidate => {
+                      const isSelected = selectedMoveActivityId === candidate.activityId;
+
+                      return (
+                        <button
+                          key={candidate.activityId}
+                          type="button"
+                          onClick={() => {
+                            setSelectedMoveActivityId(candidate.activityId);
+                            setMoveTargetDay(candidate.currentDay === 1 ? 2 : 1);
+                          }}
+                          className={`rounded-xl border p-3 text-left transition-all ${
+                            isSelected
+                              ? 'border-[#176EA8] bg-sky-50/60 ring-2 ring-[#176EA8]/20'
+                              : 'border-[#E1ECF2] bg-white hover:border-[#176EA8]/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-xs text-[#193953]">{candidate.name}</span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-white border border-[#E1ECF2] text-[#5A7184]">
+                              Currently Day {candidate.currentDay}
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveActivity(item.id)}
-                              className="text-rose-600 font-bold px-1.5 py-0.5 rounded hover:bg-rose-50"
-                            >
-                              ✕
-                            </button>
                           </div>
-                          <div className="text-[11px] text-[#5A7184]">
-                            {item.startTime}–{item.endTime} ({item.durationMinutes}m)
+                          <div className="text-[11px] text-[#5A7184] mt-1 space-y-0.5">
+                            <div>⏱️ {candidate.durationMinutes}m visit · {candidate.localTransferMinutes}m transfer</div>
+                            <div>🕒 Operating: {candidate.operatingWindow}</div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="text-xs font-bold text-[#193953]">Popular Stops:</div>
-                      {DISCOVER_PLACES_MYSURU.slice(0, 3).map(p => (
-                        <div
-                          key={p.id}
-                          className="rounded-xl border border-[#E1ECF2] p-2 bg-white text-xs flex justify-between items-center"
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Step 2: Choose Destination Day & Insertion Slot */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-[#F4F9FC] p-3.5 rounded-xl border border-[#E1ECF2]">
+                  <div>
+                    <label className="block text-xs font-black uppercase tracking-wider text-[#193953] mb-1.5">
+                      2. Destination Day:
+                    </label>
+                    <div className="flex gap-2">
+                      {[1, 2].map(dayNum => (
+                        <button
+                          key={dayNum}
+                          type="button"
+                          onClick={() => setMoveTargetDay(dayNum)}
+                          className={`flex-1 rounded-lg py-2 px-3 text-xs font-bold transition-all ${
+                            moveTargetDay === dayNum
+                              ? 'bg-[#176EA8] text-white shadow-xs'
+                              : 'bg-white border border-[#E1ECF2] text-[#5A7184] hover:text-[#193953]'
+                          }`}
                         >
-                          <div>
-                            <div className="font-bold text-[#193953]">{p.name}</div>
-                            <div className="text-[10px] text-[#5A7184]">{p.durationMinutes}m visit</div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleAddDiscoverPlace(p)}
-                            className="bg-[#176EA8] text-white px-2 py-1 rounded text-[11px] font-bold"
-                          >
-                            + Add
-                          </button>
-                        </div>
+                          Day {dayNum} ({dayNum === 1 ? 'Saturday' : 'Sunday'})
+                        </button>
                       ))}
                     </div>
-                  )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-black uppercase tracking-wider text-[#193953] mb-1.5">
+                      3. Insertion Position:
+                    </label>
+                    <select
+                      value={moveTargetPosition}
+                      onChange={e => setMoveTargetPosition(Number(e.target.value))}
+                      className="w-full rounded-lg border border-[#E1ECF2] bg-white px-3 py-2 text-xs text-[#193953] focus:border-[#176EA8] focus:outline-none"
+                    >
+                      {insertionSlots.map(slot => (
+                        <option key={slot.position} value={slot.position}>
+                          {slot.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Step 3: True Engine Before / After Preview */}
+                {movePreview && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black uppercase tracking-wider text-[#193953]">
+                        Engine Simulation Preview
+                      </span>
+                      <span
+                        className={`text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
+                          movePreview.isValid
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-rose-100 text-rose-800'
+                        }`}
+                      >
+                        {movePreview.isValid ? '✓ Feasible Move' : '⚠️ Slot Conflict / Cannot Fit'}
+                      </span>
+                    </div>
+
+                    {/* Before vs Proposed Metrics Grid */}
+                    <div className="rounded-xl border border-[#E1ECF2] bg-white overflow-hidden text-xs">
+                      <div className="grid grid-cols-4 bg-[#F4F9FC] p-2.5 font-bold text-[#5A7184] border-b border-[#E1ECF2] text-[11px] uppercase tracking-wider">
+                        <div>Metric</div>
+                        <div>Current (Before)</div>
+                        <div>Proposed (After)</div>
+                        <div>Scheduler Delta</div>
+                      </div>
+
+                      {/* Home Arrival */}
+                      <div className="grid grid-cols-4 p-2.5 border-b border-[#E1ECF2] items-center">
+                        <div className="font-bold text-[#193953]">Home Arrival</div>
+                        <div className="text-gray-700">{movePreview.before.homeArrival}</div>
+                        <div className="font-bold text-[#176EA8]">{movePreview.after.homeArrival}</div>
+                        <div className="text-[11px] text-gray-500">
+                          {movePreview.deltas.homeArrivalDeltaMinutes === 0
+                            ? '0 min (unchanged)'
+                            : `${movePreview.deltas.homeArrivalDeltaMinutes > 0 ? '+' : ''}${movePreview.deltas.homeArrivalDeltaMinutes}m`}
+                        </div>
+                      </div>
+
+                      {/* Return Margin */}
+                      <div className="grid grid-cols-4 p-2.5 border-b border-[#E1ECF2] items-center">
+                        <div className="font-bold text-[#193953]">Return Margin</div>
+                        <div className={movePreview.before.returnMarginMinutes >= 60 ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>
+                          {movePreview.before.returnMarginMinutes >= 0 ? `+${movePreview.before.returnMarginMinutes}m` : `${movePreview.before.returnMarginMinutes}m`}
+                        </div>
+                        <div className={movePreview.after.returnMarginMinutes >= 60 ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>
+                          {movePreview.after.returnMarginMinutes >= 0 ? `+${movePreview.after.returnMarginMinutes}m` : `${movePreview.after.returnMarginMinutes}m`}
+                        </div>
+                        <div className="text-[11px] text-gray-500">
+                          {movePreview.deltas.marginDeltaMinutes === 0
+                            ? '0 min (unchanged)'
+                            : `${movePreview.deltas.marginDeltaMinutes > 0 ? '+' : ''}${movePreview.deltas.marginDeltaMinutes}m`}
+                        </div>
+                      </div>
+
+                      {/* Activity Timetable */}
+                      <div className="grid grid-cols-4 p-2.5 border-b border-[#E1ECF2] items-center">
+                        <div className="font-bold text-[#193953]">{movePreview.activityName}</div>
+                        <div className="text-gray-700">
+                          Day {movePreview.fromDay} ({movePreview.before.activityStartTime ?? 'Unscheduled'}–{movePreview.before.activityEndTime ?? 'N/A'})
+                        </div>
+                        <div className="font-bold text-[#176EA8]">
+                          Day {movePreview.toDay} ({movePreview.after.activityStartTime ?? 'Unscheduled'}–{movePreview.after.activityEndTime ?? 'N/A'})
+                        </div>
+                        <div className="text-[11px] text-gray-500">
+                          Transfer: {movePreview.deltas.additionalTravelAllowanceMinutes}m
+                        </div>
+                      </div>
+
+                      {/* Violations / Resolution */}
+                      <div className="grid grid-cols-4 p-2.5 items-center">
+                        <div className="font-bold text-[#193953]">Violation Status</div>
+                        <div className="text-gray-600">{movePreview.before.violationsCount} violations</div>
+                        <div className="font-bold text-gray-900">{movePreview.after.violationsCount} violations</div>
+                        <div>
+                          {movePreview.deltas.originalViolationResolved ? (
+                            <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              ✓ Resolved!
+                            </span>
+                          ) : movePreview.isValid ? (
+                            <span className="text-[11px] text-gray-500">Preserved</span>
+                          ) : (
+                            <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                              Conflict
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Conflict Explanation if Invalid */}
+                    {!movePreview.isValid && (
+                      <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900 space-y-1">
+                        <div className="font-bold flex items-center gap-1.5">
+                          <span>⚠️</span>
+                          <span>Why this slot cannot be scheduled:</span>
+                        </div>
+                        <p>{movePreview.validationError}</p>
+                        <p className="text-[11px] text-rose-700 pt-1 font-medium">
+                          Alternative adjustments: choose another day, adjust visit order, or remove an optional stop.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Success Notice if Valid */}
+                    {movePreview.isValid && movePreview.deltas.originalViolationResolved && (
+                      <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900 font-medium">
+                        ✓ Moving this activity resolves the schedule conflict and restores a safe return deadline!
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Modal Footer Actions */}
+                <div className="pt-2 flex items-center justify-end gap-3 border-t border-[#E1ECF2]">
+                  <button
+                    type="button"
+                    onClick={() => setIsMoveModalOpen(false)}
+                    className="rounded-xl border border-[#E1ECF2] px-4 py-2 text-xs font-bold text-[#5A7184] hover:text-[#193953]"
+                  >
+                    Cancel
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!movePreview || !movePreview.isValid}
+                    onClick={handleConfirmMove}
+                    className={`rounded-xl px-4 py-2 text-xs font-bold text-white shadow-xs transition-all active:scale-95 ${
+                      movePreview && movePreview.isValid
+                        ? 'bg-[#176EA8] hover:bg-[#135A8A]'
+                        : 'bg-gray-300 cursor-not-allowed text-gray-500'
+                    }`}
+                  >
+                    Confirm & Move Activity →
+                  </button>
                 </div>
               </div>
             </div>

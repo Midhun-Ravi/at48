@@ -346,3 +346,44 @@ export const DISCOVER_PLACES_MYSURU: DiscoverPlace[] = [
     officialSource: 'Official highway node OSM: 14076079701.',
   },
 ];
+
+import type { Activity } from '../types';
+
+export function discoverPlaceToActivity(place: DiscoverPlace): Activity {
+  let openTime = '09:00';
+  let closeTime = '18:00';
+  let lastEntryTime: string | undefined = undefined;
+
+  if (place.id === 'place-mylari') {
+    openTime = '06:30';
+    closeTime = '20:30';
+  } else if (place.id === 'place-chamundi') {
+    openTime = '07:30';
+    closeTime = '21:00';
+  } else if (place.id === 'place-philomena') {
+    openTime = '05:00';
+    closeTime = '18:00';
+  } else if (place.id === 'place-karanji') {
+    openTime = '08:30';
+    closeTime = '17:30';
+    lastEntryTime = '17:00';
+  } else if (place.id === 'place-maddur-tiffanys') {
+    openTime = '06:00';
+    closeTime = '22:00';
+  }
+
+  return {
+    id: place.id,
+    name: place.name,
+    durationMinutes: place.durationMinutes,
+    openTime,
+    closeTime,
+    lastEntryTime,
+    costPerPersonINR: place.costINR,
+    isOptional: true,
+    priority: 3,
+    localTransferMinutes: place.estimatedDetourMinutes,
+    openingHoursEvidence: { level: 'official', note: place.officialSource },
+    costEvidence: { level: 'official' },
+  };
+}

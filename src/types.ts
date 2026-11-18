@@ -165,28 +165,47 @@ export interface FeasibilityResult {
   timeline: TimetableEntry[];
 }
 
+export type ActivityScheduleStatus = 'scheduled' | 'unavailable' | 'unscheduled';
+
 export interface MoveActivityCandidate {
   activityId: string;
   name: string;
-  currentDay: number;
+  scheduleStatus: ActivityScheduleStatus;
+  currentDay?: number;
+  assignedDay?: number;
   durationMinutes: number;
   localTransferMinutes: number;
   operatingWindow: string; // e.g. "10:00–17:30 (last entry 17:00)"
   isOptional: boolean;
   costINR: number;
+  conflictReason?: string;
 }
 
-export type MoveResolutionStatus = 'VALID_AND_RESOLVED' | 'VALID_UNRESOLVED' | 'INVALID';
+export type MoveResolutionStatus =
+  | 'MOVE_FITS'
+  | 'CONFLICT_RESOLVED'
+  | 'MORE_CHANGES_NEEDED'
+  | 'CANNOT_FIT'
+  | 'VALID_AND_RESOLVED'
+  | 'VALID_UNRESOLVED'
+  | 'INVALID';
+
+export type MoveResolutionLabel =
+  | 'Move Fits'
+  | 'Conflict Resolved'
+  | 'More Changes Needed'
+  | 'Cannot Fit';
 
 export interface MoveActivityPreview {
   activityId: string;
   activityName: string;
-  fromDay: number;
+  fromDay?: number;
   toDay: number;
   toPosition?: number;
   isValid: boolean;
   validationError?: string;
   resolutionStatus: MoveResolutionStatus;
+  resolutionLabel: MoveResolutionLabel;
   resolutionMessage: string;
   proposedConstraints: UserConstraints;
   before: {

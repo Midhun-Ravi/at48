@@ -89,6 +89,10 @@ export default function PrototypeV2Screen() {
   // Derived metrics straight from scheduler.ts (ZERO fabricated numbers!)
   const returnBufferMinutes = currentResult.returnDeadlineMarginMinutes;
   const isProjectedLate = returnBufferMinutes < 0;
+  const activeBlockers = currentResult.violations.filter(v => v.severity === 'BLOCKER');
+  const hasScheduleBlocker = activeBlockers.length > 0;
+  const isTripFeasible = !isProjectedLate && !hasScheduleBlocker && currentResult.rating !== 'Not Recommended';
+  const primaryBlocker = activeBlockers[0];
   const formattedArrival = currentResult.homeArrivalTime.slice(11) + ' IST';
 
   // Push state to history stack before modifying constraints
@@ -591,7 +595,7 @@ export default function PrototypeV2Screen() {
           {/* Top Return-Margin Feasibility Indicator */}
           <div
             className={`rounded-2xl p-4 shadow-sm border transition-all ${
-              isProjectedLate
+              !isTripFeasible
                 ? 'bg-rose-50 border-rose-300 text-rose-900'
                 : 'bg-white border-[#E1ECF2] text-[#193953]'
             }`}
@@ -600,10 +604,10 @@ export default function PrototypeV2Screen() {
               <div className="flex items-center gap-3">
                 <div
                   className={`flex h-11 w-11 items-center justify-center rounded-xl font-black text-lg ${
-                    isProjectedLate ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'
+                    !isTripFeasible ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'
                   }`}
                 >
-                  {isProjectedLate ? '⚠️' : '✓'}
+                  {!isTripFeasible ? '⚠️' : '✓'}
                 </div>
 
                 <div>
@@ -611,21 +615,34 @@ export default function PrototypeV2Screen() {
                     <span className="text-sm font-black">
                       {isProjectedLate
                         ? `Projected Late by ${Math.abs(returnBufferMinutes)} min`
+                        : hasScheduleBlocker
+                        ? `Schedule Conflict: ${primaryBlocker.message}`
                         : `Return Margin: +${returnBufferMinutes}m Safe Buffer`}
                     </span>
                     <span
                       className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                        isProjectedLate ? 'bg-rose-200 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                        !isTripFeasible ? 'bg-rose-200 text-rose-800' : 'bg-emerald-100 text-emerald-800'
                       }`}
                     >
-                      {isProjectedLate ? 'Constraint Violation' : 'On Schedule'}
+                      {isProjectedLate
+                        ? 'Deadline Breach'
+                        : hasScheduleBlocker
+                        ? 'Schedule Blocked'
+                        : 'On Schedule'}
                     </span>
                   </div>
 
                   <p className="text-xs text-[#5A7184] mt-0.5">
                     Est. Home Arrival: <strong>{formattedArrival}</strong> · Hard Deadline:{' '}
                     <strong>Sun 20:30 IST</strong> · Engine Rating:{' '}
-                    <strong>{currentResult.rating}</strong>
+                    <strong className={!isTripFeasible ? 'text-rose-700' : 'text-emerald-700'}>
+                      {currentResult.rating}
+                    </strong>
+                    {hasScheduleBlocker && !isProjectedLate && (
+                      <span className="text-rose-600 ml-1.5 font-medium">
+                        (Activity operating constraint violated)
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -1247,13 +1264,35 @@ export default function PrototypeV2Screen() {
                     {moveCandidates.map(candidate => {
                       const isSelected = selectedMoveActivityId === candidate.activityId;
 
+                      let statusBadge = null;
+                      if (candidate.scheduleStatus === 'scheduled') {
+                        statusBadge = (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-50 border border-sky-200 text-[#176EA8]">
+                            Day {candidate.currentDay}
+                          </span>
+                        );
+                      } else if (candidate.scheduleStatus === 'unavailable') {
+                        statusBadge = (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-rose-700">
+                            Unavailable {candidate.assignedDay ? `(Day ${candidate.assignedDay})` : '(Conflict)'}
+                          </span>
+                        );
+                      } else {
+                        statusBadge = (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 border border-gray-200 text-gray-600">
+                            Unscheduled
+                          </span>
+                        );
+                      }
+
                       return (
                         <button
                           key={candidate.activityId}
                           type="button"
                           onClick={() => {
                             setSelectedMoveActivityId(candidate.activityId);
-                            setMoveTargetDay(candidate.currentDay === 1 ? 2 : 1);
+                            const current = candidate.currentDay ?? candidate.assignedDay ?? 1;
+                            setMoveTargetDay(current === 1 ? 2 : 1);
                           }}
                           className={`rounded-xl border p-3 text-left transition-all ${
                             isSelected
@@ -1261,15 +1300,18 @@ export default function PrototypeV2Screen() {
                               : 'border-[#E1ECF2] bg-white hover:border-[#176EA8]/40'
                           }`}
                         >
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-xs text-[#193953]">{candidate.name}</span>
-                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-white border border-[#E1ECF2] text-[#5A7184]">
-                              Currently Day {candidate.currentDay}
-                            </span>
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="font-bold text-xs text-[#193953] truncate">{candidate.name}</span>
+                            {statusBadge}
                           </div>
                           <div className="text-[11px] text-[#5A7184] mt-1 space-y-0.5">
                             <div>⏱️ {candidate.durationMinutes}m visit · {candidate.localTransferMinutes}m transfer</div>
                             <div>🕒 Operating: {candidate.operatingWindow}</div>
+                            {candidate.scheduleStatus === 'unavailable' && candidate.conflictReason && (
+                              <div className="text-rose-600 font-medium text-[10px] line-clamp-1">
+                                ⚠️ {candidate.conflictReason}
+                              </div>
+                            )}
                           </div>
                         </button>
                       );
@@ -1326,19 +1368,24 @@ export default function PrototypeV2Screen() {
                       <span className="text-xs font-black uppercase tracking-wider text-[#193953]">
                         Engine Simulation Preview
                       </span>
-                      {movePreview.resolutionStatus === 'VALID_AND_RESOLVED' && (
+                      {movePreview.resolutionLabel === 'Move Fits' && (
                         <span className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                          ✓ Feasible · Conflict Resolved
+                          ✓ Move Fits
                         </span>
                       )}
-                      {movePreview.resolutionStatus === 'VALID_UNRESOLVED' && (
+                      {movePreview.resolutionLabel === 'Conflict Resolved' && (
+                        <span className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                          ✓ Conflict Resolved
+                        </span>
+                      )}
+                      {movePreview.resolutionLabel === 'More Changes Needed' && (
                         <span className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
-                          ⚠️ Valid Slot · Conflict Unresolved
+                          ⚠️ More Changes Needed
                         </span>
                       )}
-                      {movePreview.resolutionStatus === 'INVALID' && (
+                      {movePreview.resolutionLabel === 'Cannot Fit' && (
                         <span className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800">
-                          ✕ Cannot Fit / Conflict
+                          ✕ Cannot Fit
                         </span>
                       )}
                     </div>
@@ -1384,10 +1431,20 @@ export default function PrototypeV2Screen() {
                       <div className="grid grid-cols-4 p-2.5 border-b border-[#E1ECF2] items-center">
                         <div className="font-bold text-[#193953]">{movePreview.activityName}</div>
                         <div className="text-gray-700">
-                          Day {movePreview.fromDay} ({movePreview.before.activityStartTime ?? 'Unscheduled'}–{movePreview.before.activityEndTime ?? 'N/A'})
+                          {movePreview.before.activityStartTime && movePreview.before.activityEndTime && movePreview.fromDay ? (
+                            `Day ${movePreview.fromDay} (${movePreview.before.activityStartTime}–${movePreview.before.activityEndTime})`
+                          ) : movePreview.fromDay ? (
+                            `Day ${movePreview.fromDay} (Unavailable)`
+                          ) : (
+                            'Unscheduled'
+                          )}
                         </div>
                         <div className="font-bold text-[#176EA8]">
-                          Day {movePreview.toDay} ({movePreview.after.activityStartTime ?? 'Unscheduled'}–{movePreview.after.activityEndTime ?? 'N/A'})
+                          {movePreview.after.activityStartTime && movePreview.after.activityEndTime ? (
+                            `Day ${movePreview.toDay} (${movePreview.after.activityStartTime}–${movePreview.after.activityEndTime})`
+                          ) : (
+                            `Day ${movePreview.toDay} (Cannot Fit)`
+                          )}
                         </div>
                         <div className="text-[11px] text-gray-500">
                           Transfer: {movePreview.deltas.additionalTravelAllowanceMinutes}m
@@ -1396,39 +1453,43 @@ export default function PrototypeV2Screen() {
 
                       {/* Violations / Resolution */}
                       <div className="grid grid-cols-4 p-2.5 items-center">
-                        <div className="font-bold text-[#193953]">Violation Status</div>
+                        <div className="font-bold text-[#193953]">Resolution Verdict</div>
                         <div className="text-gray-600">{movePreview.before.violationsCount} violations</div>
                         <div className="font-bold text-gray-900">{movePreview.after.violationsCount} violations</div>
                         <div>
-                          {movePreview.resolutionStatus === 'VALID_AND_RESOLVED' ? (
-                            <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                              ✓ Resolved!
-                            </span>
-                          ) : movePreview.resolutionStatus === 'VALID_UNRESOLVED' ? (
-                            <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                              Unresolved
-                            </span>
-                          ) : (
-                            <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                              Conflict
-                            </span>
-                          )}
+                          <span
+                            className={`text-[11px] font-bold px-2 py-0.5 rounded border ${
+                              movePreview.resolutionLabel === 'Move Fits' || movePreview.resolutionLabel === 'Conflict Resolved'
+                                ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                : movePreview.resolutionLabel === 'More Changes Needed'
+                                ? 'text-amber-700 bg-amber-50 border-amber-200'
+                                : 'text-rose-700 bg-rose-50 border-rose-200'
+                            }`}
+                          >
+                            {movePreview.resolutionLabel}
+                          </span>
                         </div>
                       </div>
                     </div>
 
                     {/* Resolution Banner */}
-                    {movePreview.resolutionStatus === 'VALID_AND_RESOLVED' && (
+                    {movePreview.resolutionLabel === 'Move Fits' && (
                       <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900 font-medium">
-                        ✓ {movePreview.resolutionMessage}
+                        ✓ <strong>Move Fits:</strong> {movePreview.resolutionMessage}
                       </div>
                     )}
 
-                    {movePreview.resolutionStatus === 'VALID_UNRESOLVED' && (
+                    {movePreview.resolutionLabel === 'Conflict Resolved' && (
+                      <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900 font-medium">
+                        ✓ <strong>Conflict Resolved:</strong> {movePreview.resolutionMessage}
+                      </div>
+                    )}
+
+                    {movePreview.resolutionLabel === 'More Changes Needed' && (
                       <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-1">
                         <div className="font-bold flex items-center gap-1.5">
                           <span>⚠️</span>
-                          <span>Slot is valid, but trip constraints remain:</span>
+                          <span>More Changes Needed:</span>
                         </div>
                         <p>{movePreview.resolutionMessage}</p>
                         <p className="text-[11px] text-amber-800 pt-0.5 font-medium">
@@ -1437,7 +1498,7 @@ export default function PrototypeV2Screen() {
                       </div>
                     )}
 
-                    {movePreview.resolutionStatus === 'INVALID' && (
+                    {movePreview.resolutionLabel === 'Cannot Fit' && (
                       <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900 space-y-1">
                         <div className="font-bold flex items-center gap-1.5">
                           <span>✕</span>

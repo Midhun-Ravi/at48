@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DESTINATIONS } from '../data/destinations';
 import { evaluateFeasibility } from '../engine/scheduler';
 import { evaluateActivityMove, getMoveCandidates, getInsertionSlotsForDay } from '../engine/moveActivity';
-import type { Activity, UserConstraints } from '../types';
+import type { UserConstraints } from '../types';
 
 describe('@48 V2.1 — Make This Trip Fit: Move Activity Between Days', () => {
   const mysuru = DESTINATIONS.find(d => d.id === 'mysuru')!;
@@ -26,12 +26,14 @@ describe('@48 V2.1 — Make This Trip Fit: Move Activity Between Days', () => {
     expect(candidates.length).toBeGreaterThanOrEqual(2);
     const palace = candidates.find(c => c.activityId === 'mysuru-palace')!;
     expect(palace.name).toBe('Mysore Palace');
+    expect(palace.scheduleStatus).toBe('scheduled');
     expect(palace.currentDay).toBe(1);
     expect(palace.durationMinutes).toBe(150);
     expect(palace.operatingWindow).toContain('10:00–17:30');
 
     const market = candidates.find(c => c.activityId === 'mysuru-market')!;
     expect(market.name).toBe('Devaraja Market Walk');
+    expect(market.scheduleStatus).toBe('scheduled');
     expect(market.currentDay).toBe(1);
     expect(market.durationMinutes).toBe(60);
   });
@@ -97,7 +99,8 @@ describe('@48 V2.1 — Make This Trip Fit: Move Activity Between Days', () => {
 
     // Engine must catch the displacement and refuse to approve the move
     expect(preview.isValid).toBe(false);
-    expect(preview.resolutionStatus).toBe('INVALID');
+    expect(preview.resolutionStatus).toBe('CANNOT_FIT');
+    expect(preview.resolutionLabel).toBe('Cannot Fit');
     expect(preview.deltas.displacedActivities).toContain('Devaraja Market Walk');
     expect(preview.validationError).toContain('displaces previously scheduled activity');
   });
@@ -117,14 +120,15 @@ describe('@48 V2.1 — Make This Trip Fit: Move Activity Between Days', () => {
     }, 'coorg-abbey', 1);
 
     expect(preview.isValid).toBe(false);
-    expect(preview.resolutionStatus).toBe('INVALID');
+    expect(preview.resolutionStatus).toBe('CANNOT_FIT');
+    expect(preview.resolutionLabel).toBe('Cannot Fit');
     expect(preview.validationError).toBeDefined();
     expect(preview.validationError).toContain('Abbey Falls cannot fit on Day 1');
     expect(preview.validationError).toContain('past closing time 17:00');
   });
 
-  // REQUIREMENT 5: A move that does not fix lateness is not labeled "Resolved"
-  it('Requirement 5: A move that does not fix lateness is not labeled "Resolved"', () => {
+  // REQUIREMENT 5: A move that does not fix lateness/conflicts is labeled "More Changes Needed"
+  it('Requirement 5: A move that does not fix conflicts is labeled "More Changes Needed"', () => {
     // Crowded scenario with Chamundi Hills and outbound delay:
     // Palace has an OPERATING_HOURS_CONFLICT because it finishes at 18:21 (past closing time 17:30).
     const crowdedConstraints: UserConstraints = {
@@ -169,8 +173,9 @@ describe('@48 V2.1 — Make This Trip Fit: Move Activity Between Days', () => {
     // The slot is valid for Market, but the trip's conflicts are NOT resolved!
     expect(preview.isValid).toBe(true);
     expect(preview.deltas.originalViolationResolved).toBe(false);
-    expect(preview.resolutionStatus).toBe('VALID_UNRESOLVED');
-    expect(preview.resolutionMessage).toContain('trip remains overdue or has unresolved constraints');
+    expect(preview.resolutionStatus).toBe('MORE_CHANGES_NEEDED');
+    expect(preview.resolutionLabel).toBe('More Changes Needed');
+    expect(preview.resolutionMessage).toContain('additional itinerary changes are needed');
   });
 
   // REQUIREMENT 6: Wishlist-only places do not affect scheduling (0m impact)
@@ -178,8 +183,6 @@ describe('@48 V2.1 — Make This Trip Fit: Move Activity Between Days', () => {
     const baseResult = evaluateFeasibility(mysuru, baseMysuruConstraints);
 
     // In the application, wishlist places are saved to local wishlist state and NOT added to additionalActivities.
-    // If a custom place is created with 0m detour in wishlist mode, verify that base constraints without it
-    // have identical return margin, identical arrival, and identical scheduled stops.
     const wishlistPlace = {
       id: 'wishlist-mysore-sandalwood',
       name: 'Government Sandalwood Oil Factory',
@@ -244,58 +247,153 @@ describe('@48 V2.1 — Make This Trip Fit: Move Activity Between Days', () => {
     expect(restoredTimeline).toEqual(initialTimeline);
   });
 
-  // Conflict Resolution scenario
-  it('Conflict Resolution: moving an activity resolves a Day 1 scheduling conflict caused by delay', () => {
-    // Add third activity (Chamundi Hills) to Day 1 with explicit day assignment and 60m delay
-    const chamundiActivity: Activity = {
-      id: 'mysuru-chamundi',
-      name: 'Chamundi Hill Temple',
-      durationMinutes: 90,
-      openTime: '07:30',
-      closeTime: '21:00',
-      costPerPersonINR: 0,
-      isOptional: false,
-      priority: 2,
-      localTransferMinutes: 25,
-      openingHoursEvidence: { level: 'official' },
-      costEvidence: { level: 'official' },
+  // FOCUSED TEST: Top Feasibility Indicator reflecting activity blockers
+  it('Top Feasibility Indicator: reflects blocking scheduling violations and never reports "On Schedule" when an activity has a blocker', () => {
+    const delayedConstraints: UserConstraints = {
+      ...baseMysuruConstraints,
+      drivingAdjustmentMinutes: 60,
+      simulateDelayMinutes: 60,
+      activityDayAssignments: { 'mysuru-palace': 1 },
+      activityOrder: ['mysuru-palace', 'mysuru-market'],
     };
 
-    const crowdedConstraints: UserConstraints = {
+    const res = evaluateFeasibility(mysuru, delayedConstraints);
+
+    // Return margin is +120m (home arrival 18:30 IST vs 20:30 deadline)
+    expect(res.returnDeadlineMarginMinutes).toBe(120);
+    expect(res.returnDeadlineMarginMinutes).toBeGreaterThanOrEqual(0);
+
+    // BUT Mysore Palace has a BLOCKER violation (finishes at 18:21, past 17:30 closing)
+    const blockers = res.violations.filter(v => v.severity === 'BLOCKER');
+    expect(blockers.length).toBeGreaterThan(0);
+    expect(blockers[0].type).toBe('OPERATING_HOURS_CONFLICT');
+    expect(blockers[0].activityId).toBe('mysuru-palace');
+
+    // Engine rating is strictly 'Not Recommended'
+    expect(res.rating).toBe('Not Recommended');
+
+    // Feasibility status check: MUST NOT be considered feasible
+    const isProjectedLate = res.returnDeadlineMarginMinutes < 0;
+    const hasScheduleBlocker = blockers.length > 0;
+    const isTripFeasible = !isProjectedLate && !hasScheduleBlocker && res.rating !== 'Not Recommended';
+
+    expect(isProjectedLate).toBe(false);
+    expect(hasScheduleBlocker).toBe(true);
+    expect(isTripFeasible).toBe(false); // Top indicator must be FALSE (blocked), NEVER green On Schedule!
+  });
+
+  // FOCUSED TEST: Distinguish the 4 Move Resolution Statuses & Labels
+  it('Trust-Language Distinctions: distinguishes Move Fits, Conflict Resolved, More Changes Needed, and Cannot Fit', () => {
+    // 1. Move Fits: Valid move in an already feasible trip
+    const previewFits = evaluateActivityMove(mysuru, baseMysuruConstraints, 'mysuru-market', 2);
+    expect(previewFits.isValid).toBe(true);
+    expect(previewFits.resolutionStatus).toBe('MOVE_FITS');
+    expect(previewFits.resolutionLabel).toBe('Move Fits');
+
+    // 2. Conflict Resolved: Valid move that fixes an actual conflict
+    const delayedTripConstraints: UserConstraints = {
       ...baseMysuruConstraints,
-      simulateDelayMinutes: 60, // 1h delay on outbound
-      additionalActivities: [chamundiActivity],
-      // Explicitly lock all three activities to Day 1
+      drivingAdjustmentMinutes: 60,
+      simulateDelayMinutes: 60,
+      activityDayAssignments: { 'mysuru-palace': 1 },
+      activityOrder: ['mysuru-palace', 'mysuru-market'],
+    };
+    // Palace on Day 1 has an operating hours blocker; moving it to Day 2 resolves it completely!
+    const previewResolved = evaluateActivityMove(mysuru, delayedTripConstraints, 'mysuru-palace', 2);
+    expect(previewResolved.isValid).toBe(true);
+    expect(previewResolved.resolutionStatus).toBe('CONFLICT_RESOLVED');
+    expect(previewResolved.resolutionLabel).toBe('Conflict Resolved');
+    expect(previewResolved.deltas.originalViolationResolved).toBe(true);
+
+    // 3. More Changes Needed: Valid move with remaining issues
+    const crowdedTripConstraints: UserConstraints = {
+      ...baseMysuruConstraints,
+      drivingAdjustmentMinutes: 60,
+      simulateDelayMinutes: 60,
+      additionalActivities: [
+        {
+          id: 'mysuru-chamundi',
+          name: 'Chamundi Hill Temple',
+          durationMinutes: 90,
+          openTime: '07:30',
+          closeTime: '21:00',
+          costPerPersonINR: 0,
+          isOptional: false,
+          priority: 2,
+          localTransferMinutes: 25,
+          openingHoursEvidence: { level: 'official' },
+          costEvidence: { level: 'official' },
+        },
+      ],
       activityDayAssignments: {
         'mysuru-palace': 1,
         'mysuru-chamundi': 1,
         'mysuru-market': 1,
       },
+      activityOrder: ['mysuru-palace', 'mysuru-chamundi', 'mysuru-market'],
     };
+    // Moving Market to Day 2 fits Market, but Palace on Day 1 remains in conflict
+    const previewRemaining = evaluateActivityMove(mysuru, crowdedTripConstraints, 'mysuru-market', 2);
+    expect(previewRemaining.isValid).toBe(true);
+    expect(previewRemaining.resolutionStatus).toBe('MORE_CHANGES_NEEDED');
+    expect(previewRemaining.resolutionLabel).toBe('More Changes Needed');
+    expect(previewRemaining.deltas.originalViolationResolved).toBe(false);
 
-    // Before move: 3 activities explicitly locked to Day 1 with 60m delay cannot all fit before 21:00
-    const beforeResult = evaluateFeasibility(mysuru, crowdedConstraints);
-    const hasConflict = beforeResult.violations.some(
-      v => v.type === 'OPERATING_HOURS_CONFLICT' && v.activityId === 'mysuru-market'
-    );
-    expect(hasConflict).toBe(true);
-
-    // Move Devaraja Market to Day 2
-    const preview = evaluateActivityMove(mysuru, crowdedConstraints, 'mysuru-market', 2);
-
-    expect(preview.isValid).toBe(true);
-    expect(preview.resolutionStatus).toBe('VALID_AND_RESOLVED');
-    expect(preview.deltas.originalViolationResolved).toBe(true);
-    expect(preview.after.violations.some(v => v.type === 'OPERATING_HOURS_CONFLICT')).toBe(false);
+    // 4. Cannot Fit: Invalid move (violates operating hours or limits)
+    const previewCannotFit = evaluateActivityMove(mysuru, baseMysuruConstraints, 'mysuru-palace', 1, 1);
+    expect(previewCannotFit.isValid).toBe(false);
+    expect(previewCannotFit.resolutionStatus).toBe('CANNOT_FIT');
+    expect(previewCannotFit.resolutionLabel).toBe('Cannot Fit');
   });
 
-  it('detects closing-hour conflict when reordering activities within Day 1', () => {
-    // Reorder: Market first (position 0), Palace second (position 1)
-    // Market runs 14:45-15:45. Palace starts 16:15 + 150m = finishes 18:45. Palace closes at 17:30!
-    const preview = evaluateActivityMove(mysuru, baseMysuruConstraints, 'mysuru-palace', 1, 1);
+  // FOCUSED TEST: Candidate Classification (scheduled, unavailable, unscheduled)
+  it('Candidate Classification: distinguishes scheduled, unavailable, and unscheduled candidates without listing unscheduled activities as Day 1', () => {
+    // In this scenario:
+    // - Palace has an operating hours conflict on Day 1 and CANNOT be scheduled
+    // - Market is scheduled on Day 1
+    // - An optional added activity is disabled (unscheduled)
+    const testConstraints: UserConstraints = {
+      ...baseMysuruConstraints,
+      drivingAdjustmentMinutes: 60,
+      simulateDelayMinutes: 60,
+      additionalActivities: [
+        {
+          id: 'custom-somnathpur',
+          name: 'Somnathpur Temple',
+          durationMinutes: 60,
+          openTime: '09:00',
+          closeTime: '18:00',
+          costPerPersonINR: 50,
+          isOptional: true,
+          priority: 3,
+          localTransferMinutes: 30,
+          openingHoursEvidence: { level: 'assumption' },
+          costEvidence: { level: 'assumption' },
+        },
+      ],
+      disabledActivityIds: ['custom-somnathpur'],
+      activityDayAssignments: { 'mysuru-palace': 1 },
+      activityOrder: ['mysuru-palace', 'mysuru-market'],
+    };
 
-    expect(preview.isValid).toBe(false);
-    expect(preview.resolutionStatus).toBe('INVALID');
-    expect(preview.validationError).toContain('past closing time 17:30');
+    const res = evaluateFeasibility(mysuru, testConstraints);
+    const candidates = getMoveCandidates(mysuru, testConstraints, res);
+
+    // 1. Devaraja Market: Scheduled on Day 1
+    const market = candidates.find(c => c.activityId === 'mysuru-market')!;
+    expect(market.scheduleStatus).toBe('scheduled');
+    expect(market.currentDay).toBe(1);
+
+    // 2. Mysore Palace: UNAVAILABLE due to operating hours conflict (NOT listed as Day 1!)
+    const palace = candidates.find(c => c.activityId === 'mysuru-palace')!;
+    expect(palace.scheduleStatus).toBe('unavailable');
+    expect(palace.currentDay).toBeUndefined(); // NEVER defaulted to Day 1!
+    expect(palace.assignedDay).toBe(1);
+    expect(palace.conflictReason).toContain('closing time 17:30');
+
+    // 3. Somnathpur: UNSCHEDULED because it is disabled
+    const somnathpur = candidates.find(c => c.activityId === 'custom-somnathpur')!;
+    expect(somnathpur.scheduleStatus).toBe('unscheduled');
+    expect(somnathpur.currentDay).toBeUndefined(); // NEVER defaulted to Day 1!
   });
 });

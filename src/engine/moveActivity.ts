@@ -1,9 +1,11 @@
 import type {
   Activity,
+  ActivityScheduleStatus,
   Destination,
   FeasibilityResult,
   MoveActivityCandidate,
   MoveActivityPreview,
+  MoveResolutionLabel,
   MoveResolutionStatus,
   UserConstraints,
 } from '../types';
@@ -11,7 +13,7 @@ import { evaluateFeasibility, getCalendarDaysCount, parseIST } from './scheduler
 
 /**
  * Extract movable activities from a destination and constraints,
- * determining their currently scheduled day and operating constraints.
+ * accurately distinguishing scheduled, unavailable, and unscheduled candidates.
  */
 export function getMoveCandidates(
   destination: Destination,
@@ -23,13 +25,30 @@ export function getMoveCandidates(
     ...(constraints.additionalActivities ?? []),
   ];
 
+  const disabledSet = new Set(constraints.disabledActivityIds ?? []);
+
   return allActivities.map(activity => {
     // Find where activity is currently scheduled in timeline
     const timelineEntry = currentResult.timeline.find(t => t.activityId === activity.id);
     const outcome = currentResult.activityOutcomes.find(o => o.activityId === activity.id);
-    let currentDay = timelineEntry ? timelineEntry.day : 1;
-    if (!timelineEntry && outcome?.status.startsWith('day')) {
-      currentDay = Number(outcome.status.replace('day', ''));
+    const assignedDay = constraints.activityDayAssignments?.[activity.id];
+
+    let scheduleStatus: ActivityScheduleStatus;
+    let currentDay: number | undefined = undefined;
+    let conflictReason: string | undefined = undefined;
+
+    if (timelineEntry) {
+      scheduleStatus = 'scheduled';
+      currentDay = timelineEntry.day;
+    } else if (disabledSet.has(activity.id) || outcome?.status === 'omitted') {
+      scheduleStatus = 'unscheduled';
+      conflictReason = outcome?.reason ?? 'Optional activity omitted from schedule.';
+    } else if (outcome?.status === 'unavailable' || outcome?.status?.startsWith('day')) {
+      scheduleStatus = 'unavailable';
+      conflictReason = outcome?.reason ?? 'Operating constraint conflict prevented scheduling.';
+    } else {
+      scheduleStatus = 'unscheduled';
+      conflictReason = outcome?.reason ?? 'Not currently scheduled.';
     }
 
     const lastEntryStr = activity.lastEntryTime ? ` (last entry ${activity.lastEntryTime})` : '';
@@ -38,12 +57,15 @@ export function getMoveCandidates(
     return {
       activityId: activity.id,
       name: activity.name,
+      scheduleStatus,
       currentDay,
+      assignedDay,
       durationMinutes: activity.durationMinutes,
       localTransferMinutes: activity.localTransferMinutes,
       operatingWindow,
       isOptional: activity.isOptional,
       costINR: activity.costPerPersonINR,
+      conflictReason,
     };
   });
 }
@@ -95,7 +117,7 @@ export function evaluateActivityMove(
   // 1. Evaluate baseline (Before)
   const beforeResult = evaluateFeasibility(destination, baseConstraints);
   const beforeTimelineEntry = beforeResult.timeline.find(t => t.activityId === activityId);
-  const fromDay = beforeTimelineEntry ? beforeTimelineEntry.day : (baseConstraints.activityDayAssignments?.[activityId] ?? 1);
+  const fromDay = beforeTimelineEntry ? beforeTimelineEntry.day : baseConstraints.activityDayAssignments?.[activityId];
 
   const beforeStartTime = beforeTimelineEntry ? beforeTimelineEntry.startTime.slice(11) : undefined;
   const beforeEndTime = beforeTimelineEntry ? beforeTimelineEntry.endTime.slice(11) : undefined;
@@ -112,7 +134,8 @@ export function evaluateActivityMove(
       toPosition: targetPosition,
       isValid: false,
       validationError: `Target Day ${targetDay} is outside trip window (1 to ${totalDays} days).`,
-      resolutionStatus: 'INVALID',
+      resolutionStatus: 'CANNOT_FIT',
+      resolutionLabel: 'Cannot Fit',
       resolutionMessage: `Target Day ${targetDay} is outside trip window (1 to ${totalDays} days).`,
       proposedConstraints: baseConstraints,
       before: {
@@ -298,40 +321,44 @@ export function evaluateActivityMove(
     .map(v => v.message);
 
   // Detailed violation resolution analysis
-  const hadDeadlineBlocker = beforeResult.returnDeadlineMarginMinutes < 0;
-  const hadActivityBlocker = beforeResult.violations.some(
-    v => v.severity === 'BLOCKER' && v.activityId === activityId
-  );
-  const beforeBlockerCount = beforeResult.violations.filter(v => v.severity === 'BLOCKER').length;
+  const hadInitialConflicts =
+    beforeResult.returnDeadlineMarginMinutes < 0 ||
+    beforeResult.violations.some(v => v.severity === 'BLOCKER') ||
+    beforeResult.rating === 'Not Recommended';
 
-  const deadlineOkNow = afterResult.returnDeadlineMarginMinutes >= 0;
-  const blockersNow = afterResult.violations.filter(v => v.severity === 'BLOCKER').length;
+  const hasRemainingConflicts =
+    afterResult.returnDeadlineMarginMinutes < 0 ||
+    afterResult.violations.some(v => v.severity === 'BLOCKER') ||
+    afterResult.rating === 'Not Recommended';
 
   let originalViolationResolved = false;
   let resolutionStatus: MoveResolutionStatus;
+  let resolutionLabel: MoveResolutionLabel;
   let resolutionMessage: string;
 
   if (!isValid) {
-    resolutionStatus = 'INVALID';
-    resolutionMessage = validationError || 'Proposed slot is invalid.';
+    resolutionStatus = 'CANNOT_FIT';
+    resolutionLabel = 'Cannot Fit';
+    resolutionMessage = validationError || 'Proposed slot cannot fit schedule constraints.';
     originalViolationResolved = false;
+  } else if (!hadInitialConflicts) {
+    // 1. Valid move in an already feasible trip: "Move Fits"
+    resolutionStatus = 'MOVE_FITS';
+    resolutionLabel = 'Move Fits';
+    resolutionMessage = 'Valid move: Activity fits comfortably into schedule while maintaining full trip feasibility.';
+    originalViolationResolved = true;
+  } else if (!hasRemainingConflicts) {
+    // 2. Valid move that fixes an actual conflict: "Conflict Resolved"
+    resolutionStatus = 'CONFLICT_RESOLVED';
+    resolutionLabel = 'Conflict Resolved';
+    resolutionMessage = 'Valid move: Successfully resolves the scheduling conflict and restores a feasible trip.';
+    originalViolationResolved = true;
   } else {
-    // If the trip had a blocker or lateness conflict
-    if (hadDeadlineBlocker || hadActivityBlocker || beforeBlockerCount > 0) {
-      if (deadlineOkNow && blockersNow === 0) {
-        originalViolationResolved = true;
-        resolutionStatus = 'VALID_AND_RESOLVED';
-        resolutionMessage = 'Valid move: Successfully resolves the scheduling conflict and restores a feasible trip.';
-      } else {
-        originalViolationResolved = false;
-        resolutionStatus = 'VALID_UNRESOLVED';
-        resolutionMessage = 'Valid slot: Activity fits on target day, but trip remains overdue or has unresolved constraints.';
-      }
-    } else {
-      originalViolationResolved = true;
-      resolutionStatus = 'VALID_AND_RESOLVED';
-      resolutionMessage = 'Valid move: Activity rescheduled with 0 constraint conflicts.';
-    }
+    // 3. Valid move with remaining issues: "More Changes Needed"
+    resolutionStatus = 'MORE_CHANGES_NEEDED';
+    resolutionLabel = 'More Changes Needed';
+    resolutionMessage = 'Valid slot: Activity fits on target day, but additional itinerary changes are needed to achieve feasibility.';
+    originalViolationResolved = false;
   }
 
   return {
@@ -343,6 +370,7 @@ export function evaluateActivityMove(
     isValid,
     validationError,
     resolutionStatus,
+    resolutionLabel,
     resolutionMessage,
     proposedConstraints,
     before: {

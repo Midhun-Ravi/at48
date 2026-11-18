@@ -22,8 +22,10 @@ interface WhyModalData {
 }
 
 export default function CompareScreen({ inputs, setInputs }: Props) {
+  const [searchParams] = useSearchParams();
   const [activeGuideId, setActiveGuideId] = useState<string | null>(null);
   const [whyModalData, setWhyModalData] = useState<WhyModalData | null>(null);
+  const [expandedCardId, setExpandedCardId] = useState<string | null>(() => searchParams.get('expand') || null);
   const navigate = useNavigate();
   const adjustments = inputs.destinationAdjustments ?? {};
   const getAdj = (destId: string) => adjustments[destId] ?? 0;
@@ -43,8 +45,6 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
     const current = getAdj(destId);
     setExactAdj(destId, current + delta);
   };
-
-  const [searchParams] = useSearchParams();
 
   // If query params are present, defensively merge into activeInputs
   const activeInputs = useMemo<UserConstraints>(() => {
@@ -96,7 +96,7 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
               Step 2 · Destination Chooser
             </span>
             <h1 className="text-2xl sm:text-3xl font-black text-[#344F48] tracking-tight leading-snug">
-              Can your trip fit before the deadline?
+              Compare weekend escapes before you commit
             </h1>
             <p className="text-xs sm:text-sm text-[#6B7C77] max-w-2xl leading-relaxed">
               Deterministic feasibility calculations for your <strong className="text-[#344F48]">{numDays} calendar date(s)</strong> ({durationHours} hours).
@@ -127,7 +127,7 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
         </span>
       </div>
 
-      {/* 2-Column Desktop / 1-Column Mobile Comparison Grid */}
+      {/* 2-Column Desktop / 1-Column Mobile Calm Comparison Grid */}
       <div className="grid gap-6 md:grid-cols-2">
         {verifiedRecs.map(rec => {
           const d = rec.destination!;
@@ -151,37 +151,42 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
 
           const isComfortable = r.rating === 'Comfortable';
           const isTight = r.rating === 'Tight';
+          const isExpanded = expandedCardId === d.id;
 
           return (
             <article
               key={d.id}
-              className="group flex flex-col justify-between rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white overflow-hidden shadow-xs hover:shadow-lg hover:border-[#C65B32]/40 transition-all duration-300"
+              className="group flex flex-col justify-between rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white overflow-hidden shadow-xs hover:shadow-md hover:border-[#C65B32]/40 transition-all duration-300"
             >
               <div>
-                {/* Destination Photo Header */}
-                <div className="relative h-48 sm:h-56 w-full overflow-hidden bg-slate-100">
+                {/* 1. Large Real Destination Photo Header with Subtle Bottom Gradient */}
+                <div className="relative h-52 sm:h-60 w-full overflow-hidden bg-slate-100">
                   {img && (
                     <img
                       src={img.src}
                       alt={img.alt}
                       loading="lazy"
-                      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
+                      className="h-full w-full object-cover group-hover:scale-102 transition-transform duration-500 ease-out"
                     />
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/10" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10" />
 
-                  {/* Feasibility Pill Badge */}
+                  {/* Grounded Feasibility Verdict Pill */}
                   <div className="absolute top-3 left-3">
                     <span
-                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider shadow-sm backdrop-blur-md ${
+                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider shadow-sm backdrop-blur-md ${
                         isComfortable
-                          ? 'bg-emerald-600/95 text-white'
+                          ? 'bg-[#344F48]/95 text-white'
                           : isTight
-                          ? 'bg-amber-600/95 text-white'
-                          : 'bg-rose-600/95 text-white'
+                          ? 'bg-amber-800/95 text-white'
+                          : 'bg-rose-900/95 text-white'
                       }`}
                     >
-                      <span>{isComfortable ? '✓' : isTight ? '⚠️' : '✕'}</span>
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          isComfortable ? 'bg-[#A3B5A4]' : isTight ? 'bg-amber-300' : 'bg-rose-400'
+                        }`}
+                      />
                       <span>{isComfortable ? 'Comfortable' : isTight ? 'Tight Schedule' : 'Not Recommended'}</span>
                     </span>
                   </div>
@@ -189,18 +194,18 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                   {/* Verified Photo Attribution */}
                   {img && (
                     <div className="absolute top-3 right-3">
-                      <span className="rounded-full bg-black/60 backdrop-blur-md px-2.5 py-1 text-[10px] font-medium text-white/90">
+                      <span className="rounded-full bg-black/50 backdrop-blur-md px-2.5 py-0.5 text-[10px] font-medium text-white/90">
                         📷 {img.author}
                       </span>
                     </div>
                   )}
 
-                  {/* Destination Title & Corridor Info */}
-                  <div className="absolute bottom-3 left-4 right-4 text-white">
-                    <div className="flex items-baseline gap-2">
+                  {/* 2. Destination Name, Short Subtitle & Distance */}
+                  <div className="absolute bottom-3.5 left-4 right-4 text-white">
+                    <div className="flex items-baseline justify-between gap-2">
                       <h3 className="text-xl sm:text-2xl font-black tracking-tight drop-shadow-xs">{d.name}</h3>
                       {rec.tierLabel && (
-                        <span className="text-[10px] font-bold text-[#F8E1D2] uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-full backdrop-blur-xs">
+                        <span className="text-[10px] font-bold text-[#F8E1D2] uppercase tracking-wider bg-white/20 px-2.5 py-0.5 rounded-full backdrop-blur-xs">
                           {rec.tierLabel}
                         </span>
                       )}
@@ -211,50 +216,50 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                   </div>
                 </div>
 
-                {/* Card Body */}
+                {/* Card Body — Calm Default View */}
                 <div className="p-4 sm:p-5 space-y-4">
-                  {/* Editorial Why Recommended Chip */}
+                  {/* Short Subtitle / Editorial Highlight */}
                   {rec.whyRecommended && (
-                    <p className="text-xs font-semibold text-[#344F48] bg-[#FAF2EB] border border-[#EADBCE] px-3 py-2 rounded-xl leading-relaxed">
-                      💡 {rec.whyRecommended}
+                    <p className="text-xs sm:text-sm font-medium text-[#4A5D57] leading-relaxed line-clamp-2">
+                      {rec.whyRecommended}
                     </p>
                   )}
 
-                  {/* 3-Column Core Metrics Bar */}
-                  <div className="grid grid-cols-3 gap-2 text-center bg-[#FAF2EB] p-3 rounded-xl sm:rounded-2xl border border-[#EADBCE]">
-                    {/* Metric 1: Est. Drive */}
+                  {/* 3. Three Prominent Metrics Bar */}
+                  <div className="grid grid-cols-3 gap-2 bg-[#FAF2EB] p-3 sm:p-3.5 rounded-2xl border border-[#EADBCE] text-center">
+                    {/* Metric 1: One-Way Drive Time (including buffer) */}
                     <div className="space-y-0.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#6B7C77]">
-                        Est. Drive
+                      <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-[#6B7C77] block">
+                        One-Way Drive
                       </span>
-                      <div className="text-sm sm:text-base font-black text-[#344F48]">
+                      <div className="text-base sm:text-lg font-black text-[#344F48]">
                         {formatDuration(totalOneWayMinutes)}
                       </div>
                       <span className="text-[10px] text-[#6B7C77] block">
-                        each way (+20% traffic)
+                        incl. +20% traffic
                       </span>
                     </div>
 
-                    {/* Metric 2: Usable Daylight */}
+                    {/* Metric 2: Usable Sightseeing Time */}
                     <div className="space-y-0.5 border-x border-[#EADBCE] px-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#6B7C77]">
-                        Usable Daylight
+                      <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-[#6B7C77] block">
+                        Sightseeing
                       </span>
-                      <div className="text-sm sm:text-base font-black text-[#C65B32]">
-                        {formatDuration(daylightMins)}
+                      <div className="text-base sm:text-lg font-black text-[#C65B32]">
+                        {formatDuration(totalSlack)}
                       </div>
                       <span className="text-[10px] text-[#6B7C77] block">
-                        +{formatDuration(eveningMins)} evening
+                        usable leisure
                       </span>
                     </div>
 
-                    {/* Metric 3: Return Margin */}
+                    {/* Metric 3: Return-Deadline Margin */}
                     <div className="space-y-0.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#6B7C77]">
+                      <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-[#6B7C77] block">
                         Return Margin
                       </span>
                       <div
-                        className={`text-sm sm:text-base font-black ${
+                        className={`text-base sm:text-lg font-black ${
                           r.returnDeadlineMarginMinutes >= 60
                             ? 'text-emerald-700'
                             : r.returnDeadlineMarginMinutes >= 0
@@ -268,251 +273,266 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                       </div>
                       <span className="text-[10px] text-[#6B7C77] block">
                         {r.returnDeadlineMarginMinutes >= 60
-                          ? 'Safe return buffer'
+                          ? 'safe return buffer'
                           : r.returnDeadlineMarginMinutes >= 0
-                          ? 'Narrow margin'
+                          ? 'narrow margin'
                           : 'projected late'}
                       </span>
                     </div>
                   </div>
 
-                  {/* HERO METRIC 1: Will I return before my deadline? */}
-                  <div
-                    className={`rounded-xl border p-3.5 space-y-1.5 transition-colors ${
-                      r.returnDeadlineMarginMinutes >= 60
-                        ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
-                        : r.returnDeadlineMarginMinutes >= 0
-                        ? 'bg-amber-50/80 border-amber-200 text-amber-950'
-                        : 'bg-red-50/80 border-red-200 text-red-950'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wider text-[#6B7C77]">
-                        Will I return before my deadline?
-                      </span>
-                      <strong
-                        className={`text-sm sm:text-base font-black ${
-                          r.returnDeadlineMarginMinutes >= 60
-                            ? 'text-emerald-700'
-                            : r.returnDeadlineMarginMinutes >= 0
-                            ? 'text-amber-700'
-                            : 'text-red-700'
-                        }`}
-                      >
-                        {r.returnDeadlineMarginMinutes >= 0
-                          ? `+${formatDuration(r.returnDeadlineMarginMinutes)} margin`
-                          : `−${formatDuration(Math.abs(r.returnDeadlineMarginMinutes))} projected late`}
-                      </strong>
-                    </div>
-
-                    <p className="text-xs leading-relaxed font-medium">
-                      {r.returnDeadlineMarginMinutes >= 60 ? (
-                        <>
-                          <strong className="text-emerald-800">✓ Safe return buffer:</strong> You arrive back in Bengaluru around{' '}
-                          <strong>{formatReadableDateTime(r.homeArrivalTime)}</strong>, comfortably ahead of your{' '}
-                          <strong>{formatReadableDateTime(activeInputs.returnDeadlineDateTime)}</strong> return deadline.
-                        </>
-                      ) : r.returnDeadlineMarginMinutes >= 0 ? (
-                        <>
-                          <strong className="text-amber-800">⚠️ Narrow buffer:</strong> You arrive back in Bengaluru around{' '}
-                          <strong>{formatReadableDateTime(r.homeArrivalTime)}</strong>, leaving only{' '}
-                          <strong>{formatDuration(r.returnDeadlineMarginMinutes)}</strong> before your deadline. Highway slowdowns risk arriving late.
-                        </>
-                      ) : (
-                        <>
-                          <strong className="text-red-800">❌ Return deadline missed by {formatDuration(Math.abs(r.returnDeadlineMarginMinutes))}:</strong> Expected return arrival is{' '}
-                          <strong>{formatReadableDateTime(r.homeArrivalTime)}</strong>, which exceeds your{' '}
-                          <strong>{formatReadableDateTime(activeInputs.returnDeadlineDateTime)}</strong> return deadline. You need an earlier departure or later deadline.
-                        </>
-                      )}
-                    </p>
-                  </div>
-
-                  {/* HERO METRIC 2: Usable Destination Leisure Time */}
-                  <div className="grid grid-cols-2 gap-3 rounded-xl bg-[#FAF2EB] p-3 text-xs border border-[#EADBCE]">
-                    <div>
-                      <span className="text-[#6B7C77] block font-medium">Usable Destination Leisure Time:</span>
-                      <strong className="text-base sm:text-lg font-black text-[#344F48] block">
-                        {formatDuration(r.destinationSlackMinutes)}
-                      </strong>
-                      <span className="text-[11px] text-[#6B7C77] block mt-0.5">
-                        Daylight sightseeing & evening relaxation
-                      </span>
-                    </div>
-
-                    <div>
-                      <span className="text-[#6B7C77] block font-medium">Journey Windows:</span>
-                      <span className="text-xs font-semibold text-[#344F48] block">
-                        Depart: {formatReadableDateTime(activeInputs.departureDateTime)}
-                      </span>
-                      <span className="text-xs font-semibold text-[#344F48] block">
-                        Return: {formatReadableDateTime(r.homeArrivalTime)}
-                      </span>
-                      <span className="text-[11px] text-[#6B7C77] block mt-0.5">
-                        Est. Cost: ₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 20% Highway Traffic Buffer Explanation */}
-                  <div className="rounded-xl border border-[#EADBCE] bg-white p-3 text-xs space-y-1">
-                    <div className="flex items-center justify-between text-[11px] font-bold text-[#344F48]">
-                      <span>Drive Breakdown (One Way):</span>
-                      <span className="text-[#C65B32]">
-                        {formatDuration(baseDriveMinutes)} base + {formatDuration(trafficBufferMinutes)} traffic buffer
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-[#6B7C77] leading-relaxed">
-                      Includes 20% traffic contingency buffer to account for NICE Road toll plaza queues, highway construction, and weekend outbound congestion.
-                    </p>
-                  </div>
-
-                  {/* Delay Scenarios: What if the drive takes longer? */}
-                  <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB]/70 p-3.5 space-y-3 text-xs">
-                    <div className="flex flex-wrap items-center justify-between gap-1">
-                      <div>
-                        <h4 className="font-bold text-[#344F48] text-xs sm:text-sm">
-                          What if the drive takes longer?
-                        </h4>
-                        <p className="text-[11px] text-[#6B7C77] mt-0.5">
-                          Add extra travel time to see how it affects your itinerary and return deadline.
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-white border border-[#EADBCE] px-2 py-0.5 text-[10px] font-semibold text-[#344F48]">
-                        Planning scenario · Not live GPS
-                      </span>
-                    </div>
-
-                    {/* Manual Driving Allowance Controls & Presets */}
-                    <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <span className="text-[11px] font-bold text-[#344F48]">Extra travel allowance:</span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => updateAdj(d.id, -15)}
-                          disabled={adj <= -60}
-                          className="h-7 w-7 rounded-lg bg-white border border-[#EADBCE] text-xs font-bold text-[#344F48] hover:bg-[#F8E1D2] disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                          title="Reduce allowance by 15m"
-                        >
-                          −15
-                        </button>
-                        <span className="min-w-12 text-center text-xs font-extrabold text-[#C65B32]">
-                          {adj > 0 ? `+${adj}m` : adj < 0 ? `${adj}m` : '0m'}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => updateAdj(d.id, 15)}
-                          disabled={adj >= 120}
-                          className="h-7 w-7 rounded-lg bg-white border border-[#EADBCE] text-xs font-bold text-[#344F48] hover:bg-[#F8E1D2] disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                          title="Add 15m delay allowance"
-                        >
-                          +15
-                        </button>
-                      </div>
-
-                      {/* Quick Scenario Presets */}
-                      <div className="flex items-center gap-1.5 ml-auto">
-                        {([0, 30, 45, 60] as const).map(preset => (
-                          <button
-                            key={preset}
-                            type="button"
-                            onClick={() => setExactAdj(d.id, preset)}
-                            className={`rounded-lg px-2.5 py-1 text-[11px] font-bold cursor-pointer transition-colors ${
-                              adj === preset
-                                ? 'bg-[#C65B32] text-white shadow-xs'
-                                : 'bg-white border border-[#EADBCE] text-[#344F48] hover:bg-[#FAF2EB]'
-                            }`}
-                          >
-                            {preset === 0 ? 'Baseline' : `+${preset}m`}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Before & After Trade-Off Impact Display */}
-                    {adj !== 0 ? (
-                      <div className="rounded-lg bg-white border border-[#EADBCE] p-3 space-y-2 text-[11px]">
-                        <div className="flex items-center justify-between font-bold text-[#C65B32]">
-                          <span>Trade-Off Impact of {adj > 0 ? `+${adj}m delay scenario` : `${adj}m shorter drive`}:</span>
-                          {baseFeasibility.rating !== r.rating && (
-                            <span className="text-red-700 font-extrabold">
-                              ⚠️ Verdict shifts: {baseFeasibility.rating} → {r.rating}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-2 text-center">
-                          <div className="bg-[#FAF2EB] p-2 rounded-lg border border-[#EADBCE]">
-                            <span className="block text-[#6B7C77] text-[10px]">One-Way Drive</span>
-                            <span className="font-extrabold text-[#344F48]">
-                              {formatDuration(baseFeasibility.outboundDriveMinutes)} → {formatDuration(r.outboundDriveMinutes)}
-                            </span>
-                          </div>
-                          <div className="bg-[#FAF2EB] p-2 rounded-lg border border-[#EADBCE]">
-                            <span className="block text-[#6B7C77] text-[10px]">Leisure Time</span>
-                            <span className="font-extrabold text-[#344F48]">
-                              {formatDuration(baseFeasibility.destinationSlackMinutes)} → {formatDuration(r.destinationSlackMinutes)}
-                            </span>
-                          </div>
-                          <div className="bg-[#FAF2EB] p-2 rounded-lg border border-[#EADBCE]">
-                            <span className="block text-[#6B7C77] text-[10px]">Return Margin</span>
-                            <span
-                              className={`font-extrabold ${
-                                r.returnDeadlineMarginMinutes >= 60
-                                  ? 'text-emerald-700'
-                                  : r.returnDeadlineMarginMinutes >= 0
-                                  ? 'text-amber-700'
-                                  : 'text-red-700'
-                              }`}
-                            >
-                              {formatDuration(baseFeasibility.returnDeadlineMarginMinutes, true)} → {formatDuration(r.returnDeadlineMarginMinutes, true)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+                  {/* 4. One Concise, Plain-Language Feasibility Explanation */}
+                  <div className="rounded-xl bg-[#FAF2EB]/70 border border-[#EADBCE] p-3 text-xs leading-relaxed text-[#344F48]">
+                    {r.returnDeadlineMarginMinutes >= 60 ? (
+                      <p>
+                        <strong className="text-emerald-800">✓ On schedule:</strong> You arrive back in Bengaluru around{' '}
+                        <strong>{formatReadableDateTime(r.homeArrivalTime)}</strong>, comfortably ahead of your{' '}
+                        <strong>{formatReadableDateTime(activeInputs.returnDeadlineDateTime)}</strong> return deadline with traffic contingency included.
+                      </p>
+                    ) : r.returnDeadlineMarginMinutes >= 0 ? (
+                      <p>
+                        <strong className="text-amber-800">⚠️ Narrow buffer:</strong> You arrive back around{' '}
+                        <strong>{formatReadableDateTime(r.homeArrivalTime)}</strong>, leaving only{' '}
+                        <strong>{formatDuration(r.returnDeadlineMarginMinutes)}</strong> before your deadline. Highway slowdowns risk cutting into return buffer.
+                      </p>
                     ) : (
-                      <p className="text-[11px] text-[#6B7C77] leading-relaxed">
-                        Currently showing baseline calculation with standard 20% highway traffic buffer included. Select +30m or +45m above to test how highway delays impact your return deadline.
+                      <p>
+                        <strong className="text-rose-800">✕ Projected late:</strong> Expected return arrival is{' '}
+                        <strong>{formatReadableDateTime(r.homeArrivalTime)}</strong>, which exceeds your{' '}
+                        <strong>{formatReadableDateTime(activeInputs.returnDeadlineDateTime)}</strong> deadline by{' '}
+                        <strong>{formatDuration(Math.abs(r.returnDeadlineMarginMinutes))}</strong>.
                       </p>
                     )}
                   </div>
 
-                  {/* Route Restriction / Curfew Warning */}
-                  {d.routeRestriction && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
-                      ⚠️ <strong>Night Curfew:</strong> {d.routeRestriction.name} ({d.routeRestriction.startTime}–{d.routeRestriction.endTime} closure). Transit through reserve must clear before 21:00.
+                  {/* EXPANDABLE DETAILS PANEL (Moved out of default view, fully accessible) */}
+                  {isExpanded && (
+                    <div className="rounded-2xl border border-[#EADBCE] bg-[#FAF2EB]/40 p-4 space-y-4 text-xs animate-in fade-in duration-200">
+                      {/* Checkpoint Timeline & Will I Return Box */}
+                      <div className="rounded-xl border border-[#EADBCE] bg-white p-3 space-y-2">
+                        <div className="flex items-center justify-between font-bold text-[#344F48]">
+                          <span>Will I return before my deadline?</span>
+                          <span
+                            className={`font-black ${
+                              r.returnDeadlineMarginMinutes >= 60
+                                ? 'text-emerald-700'
+                                : r.returnDeadlineMarginMinutes >= 0
+                                ? 'text-amber-700'
+                                : 'text-rose-700'
+                            }`}
+                          >
+                            {r.returnDeadlineMarginMinutes >= 0
+                              ? `+${formatDuration(r.returnDeadlineMarginMinutes)} margin`
+                              : `−${formatDuration(Math.abs(r.returnDeadlineMarginMinutes))} projected late`}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] text-[#6B7C77] pt-1 border-t border-[#EADBCE]">
+                          <div>
+                            <span className="block font-medium">Depart Bangalore:</span>
+                            <strong className="text-[#344F48]">{formatReadableDateTime(activeInputs.departureDateTime)}</strong>
+                          </div>
+                          <div>
+                            <span className="block font-medium">Return Arrival:</span>
+                            <strong className="text-[#344F48]">{formatReadableDateTime(r.homeArrivalTime)}</strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Usable Destination Leisure Time Breakdown */}
+                      <div className="rounded-xl border border-[#EADBCE] bg-white p-3 space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-[#344F48]">
+                          <span>Usable Destination Leisure Time</span>
+                          <span className="text-[#C65B32] font-black">{formatDuration(totalSlack)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-[#6B7C77]">
+                          <span>Usable Daylight: <strong className="text-[#344F48]">{formatDuration(daylightMins)}</strong></span>
+                          <span>Evening Leisure: <strong className="text-[#344F48]">+{formatDuration(eveningMins)} evening</strong></span>
+                        </div>
+                      </div>
+
+                      {/* 20% Highway Traffic Buffer Breakdown */}
+                      <div className="rounded-xl border border-[#EADBCE] bg-white p-3 space-y-1">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-[#344F48]">
+                          <span>Drive Breakdown (One Way):</span>
+                          <span className="text-[#C65B32]">
+                            {formatDuration(baseDriveMinutes)} base + {formatDuration(trafficBufferMinutes)} traffic buffer
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#6B7C77] leading-relaxed">
+                          Includes 20% traffic contingency buffer to account for NICE Road toll plaza queues, highway construction, and weekend outbound congestion.
+                        </p>
+                      </div>
+
+                      {/* Delay Scenarios: What if the drive takes longer? */}
+                      <div className="rounded-xl border border-[#EADBCE] bg-white p-3.5 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-1">
+                          <div>
+                            <h4 className="font-bold text-[#344F48] text-xs">
+                              What if the drive takes longer?
+                            </h4>
+                            <p className="text-[11px] text-[#6B7C77] mt-0.5">
+                              Add extra travel time to see how it affects your itinerary and return deadline.
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-2 py-0.5 text-[10px] font-semibold text-[#344F48]">
+                            Planning scenario · Not live GPS
+                          </span>
+                        </div>
+
+                        {/* Allowance Adjustment Controls & Presets */}
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <span className="text-[11px] font-bold text-[#344F48]">Extra travel allowance:</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => updateAdj(d.id, -15)}
+                              disabled={adj <= -60}
+                              className="h-7 w-7 rounded-lg bg-[#FAF2EB] border border-[#EADBCE] text-xs font-bold text-[#344F48] hover:bg-[#F8E1D2] disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                              title="Reduce allowance by 15m"
+                            >
+                              −15
+                            </button>
+                            <span className="min-w-12 text-center text-xs font-extrabold text-[#C65B32]">
+                              {adj > 0 ? `+${adj}m` : adj < 0 ? `${adj}m` : '0m'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => updateAdj(d.id, 15)}
+                              disabled={adj >= 120}
+                              className="h-7 w-7 rounded-lg bg-[#FAF2EB] border border-[#EADBCE] text-xs font-bold text-[#344F48] hover:bg-[#F8E1D2] disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                              title="Add 15m delay allowance"
+                            >
+                              +15
+                            </button>
+                          </div>
+
+                          {/* Quick Presets */}
+                          <div className="flex items-center gap-1.5 ml-auto">
+                            {([0, 30, 45, 60] as const).map(preset => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => setExactAdj(d.id, preset)}
+                                className={`rounded-lg px-2.5 py-1 text-[11px] font-bold cursor-pointer transition-colors ${
+                                  adj === preset
+                                    ? 'bg-[#C65B32] text-white shadow-xs'
+                                    : 'bg-[#FAF2EB] border border-[#EADBCE] text-[#344F48] hover:bg-white'
+                                }`}
+                              >
+                                {preset === 0 ? 'Baseline' : `+${preset}m`}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Trade-Off Impact */}
+                        {adj !== 0 ? (
+                          <div className="rounded-lg bg-[#FAF2EB] border border-[#EADBCE] p-2.5 space-y-1.5 text-[11px]">
+                            <div className="flex items-center justify-between font-bold text-[#C65B32]">
+                              <span>Trade-Off Impact of {adj > 0 ? `+${adj}m delay scenario` : `${adj}m shorter drive`}:</span>
+                              {baseFeasibility.rating !== r.rating && (
+                                <span className="text-red-700 font-extrabold">
+                                  ⚠️ Verdict shifts: {baseFeasibility.rating} → {r.rating}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2 text-center">
+                              <div className="bg-white p-2 rounded-lg border border-[#EADBCE]">
+                                <span className="block text-[#6B7C77] text-[10px]">One-Way Drive</span>
+                                <span className="font-extrabold text-[#344F48]">
+                                  {formatDuration(baseFeasibility.outboundDriveMinutes)} → {formatDuration(r.outboundDriveMinutes)}
+                                </span>
+                              </div>
+                              <div className="bg-white p-2 rounded-lg border border-[#EADBCE]">
+                                <span className="block text-[#6B7C77] text-[10px]">Leisure Time</span>
+                                <span className="font-extrabold text-[#344F48]">
+                                  {formatDuration(baseFeasibility.destinationSlackMinutes)} → {formatDuration(r.destinationSlackMinutes)}
+                                </span>
+                              </div>
+                              <div className="bg-white p-2 rounded-lg border border-[#EADBCE]">
+                                <span className="block text-[#6B7C77] text-[10px]">Return Margin</span>
+                                <span
+                                  className={`font-extrabold ${
+                                    r.returnDeadlineMarginMinutes >= 60
+                                      ? 'text-emerald-700'
+                                      : r.returnDeadlineMarginMinutes >= 0
+                                      ? 'text-amber-700'
+                                      : 'text-red-700'
+                                  }`}
+                                >
+                                  {formatDuration(baseFeasibility.returnDeadlineMarginMinutes, true)} → {formatDuration(r.returnDeadlineMarginMinutes, true)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-[#6B7C77] leading-relaxed">
+                            Currently showing baseline calculation with standard 20% highway traffic buffer included. Select +30m or +45m above to test how highway delays impact your return deadline.
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Curfew Warning (if present) */}
+                      {d.routeRestriction && (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
+                          ⚠️ <strong>Night Curfew:</strong> {d.routeRestriction.name} ({d.routeRestriction.startTime}–{d.routeRestriction.endTime} closure). Transit through reserve must clear before 21:00.
+                        </div>
+                      )}
+
+                      {/* Secondary Actions inside Expanded Drawer */}
+                      <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#EADBCE]">
+                        <button
+                          type="button"
+                          onClick={() => setWhyModalData({ dest: d, feasibility: r, baseFeasibility, adj })}
+                          className="text-xs font-bold text-[#6B7C77] hover:text-[#C65B32] py-2 px-3 rounded-xl border border-[#EADBCE] bg-white hover:bg-[#FAF2EB] transition-colors"
+                        >
+                          Detailed Mathematical Breakdown ℹ️
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setActiveGuideId(d.id)}
+                          className="text-xs font-bold text-[#344F48] hover:text-[#C65B32] py-2 px-3 rounded-xl border border-[#EADBCE] bg-white hover:bg-[#FAF2EB] transition-colors"
+                        >
+                          Explore Guide 📖
+                        </button>
+
+                        <TactileButton
+                          variant="secondary"
+                          size="sm"
+                          to={`/schedule/${d.id}?${buildShareableParams(d.id, activeInputs).toString()}`}
+                          className="ml-auto text-xs"
+                        >
+                          Select & Build Itinerary →
+                        </TactileButton>
+                      </div>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Action Buttons Row */}
-              <div className="p-4 sm:p-5 pt-0 mt-2 border-t border-[#EADBCE] flex flex-col sm:flex-row items-center gap-2 pt-4">
+              {/* 5. Primary CTA and 6. Secondary Expandable Action Footer */}
+              <div className="p-4 sm:p-5 pt-0 mt-1 border-t border-[#EADBCE] flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-3.5">
+                {/* Secondary Action: Why this result? / Trip details */}
                 <button
                   type="button"
-                  onClick={() => setWhyModalData({ dest: d, feasibility: r, baseFeasibility, adj })}
-                  className="w-full sm:w-auto text-xs font-bold text-[#6B7C77] hover:text-[#C65B32] flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl border border-[#EADBCE] hover:bg-[#FAF2EB] transition-colors"
+                  onClick={() => setExpandedCardId(isExpanded ? null : d.id)}
+                  className="order-2 sm:order-1 text-xs font-bold text-[#344F48] hover:text-[#C65B32] flex items-center justify-center gap-1.5 py-2.5 px-3.5 rounded-xl border border-[#EADBCE] bg-[#FAF2EB]/70 hover:bg-[#F8E1D2] transition-colors cursor-pointer"
+                  aria-expanded={isExpanded}
                 >
-                  <span>Why this result?</span>
-                  <span className="text-xs">ℹ️</span>
+                  <span>{isExpanded ? 'Hide details' : 'Why this result? / Trip details'}</span>
+                  <span className={`text-[10px] transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
                 </button>
 
-                <TactileButton
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setActiveGuideId(d.id)}
-                  className="w-full sm:w-auto justify-center"
-                >
-                  Explore Guide 📖
-                </TactileButton>
-
+                {/* Primary CTA: Explore This Trip */}
                 <TactileButton
                   variant="primary"
                   size="sm"
                   to={`/schedule/${d.id}?${buildShareableParams(d.id, activeInputs).toString()}`}
-                  className="w-full sm:flex-1 justify-center text-xs"
+                  className="order-1 sm:order-2 sm:flex-1 justify-center text-xs font-bold"
                 >
-                  Select & Build Itinerary →
+                  Explore This Trip →
                 </TactileButton>
               </div>
             </article>
@@ -536,7 +556,7 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
               <button
                 type="button"
                 onClick={() => setWhyModalData(null)}
-                className="rounded-full h-8 w-8 flex items-center justify-center bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm"
+                className="rounded-full h-8 w-8 flex items-center justify-center bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm cursor-pointer"
               >
                 ✕
               </button>
@@ -642,7 +662,7 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
                   navigate(`/schedule/${targetId}?${buildShareableParams(targetId, activeInputs).toString()}`);
                 }}
               >
-                Select {whyModalData.dest.name} & Customize Itinerary →
+                Select & Build Itinerary →
               </TactileButton>
             </div>
           </div>

@@ -4,6 +4,8 @@ import { evaluateFeasibility } from '../engine/scheduler';
 import {
   evaluateFreeTimeUsage,
   evaluateTransferAdjustment,
+  evaluateVisitScheduling,
+  findAlternativeValidTimes,
   getTransferDetails,
 } from '../engine/timelineEditing';
 import { UserConstraints } from '../types';
@@ -350,4 +352,229 @@ describe('V2.1 Timeline Editing UX & Correctness Gates', () => {
       expect(transfer.destinationLabel).toBeDefined();
     }
   });
+
+  it('10. acceptance scenario: Saturday free time 18:45–21:00 with café at 19:30 (45m visit, 15m transfer)', () => {
+    // 1. Verify Saturday has free time 18:45–21:00 in base schedule
+    const baseline = evaluateFeasibility(mysuru, baseConstraints);
+    const saturdayFree = baseline.timeline.find(
+      t => t.day === 1 && t.category === 'FREE' && t.startTime.slice(11) === '18:45'
+    );
+    expect(saturdayFree).toBeDefined();
+    expect(saturdayFree!.endTime.slice(11)).toBe('21:00');
+
+    // 2. Traveler selects café:
+    // Visit start: 19:30
+    // Visit duration: 45m
+    // Transfer allowance: 15m
+    const preview = evaluateVisitScheduling(
+      {
+        name: 'Green Hotel Café',
+        day: 1,
+        visitStartTime: '19:30',
+        durationMinutes: 45,
+        transferMinutes: 15,
+        openTime: '08:00',
+        closeTime: '22:00',
+      },
+      mysuru,
+      baseConstraints
+    );
+
+    expect(preview.isValid).toBe(true);
+
+    // 3. Verify previewed timeline breakdown matches acceptance scenario exactly:
+    expect(preview.details.transferStartTime.slice(11)).toBe('19:15');
+    expect(preview.details.transferEndTime.slice(11)).toBe('19:30');
+    expect(preview.details.visitStartTime.slice(11)).toBe('19:30');
+    expect(preview.details.visitEndTime.slice(11)).toBe('20:15');
+
+    // 4. Apply to engine and verify actual recalculated timeline
+    const applied = evaluateFeasibility(mysuru, preview.proposedConstraints);
+
+    // Verify café transfer: 19:15–19:30
+    const cafeTransfer = applied.timeline.find(
+      t => t.day === 1 && t.category === 'TRANSFER' && t.label.includes('Green Hotel Café')
+    );
+    expect(cafeTransfer).toBeDefined();
+    expect(cafeTransfer!.startTime.slice(11)).toBe('19:15');
+    expect(cafeTransfer!.endTime.slice(11)).toBe('19:30');
+
+    // Verify café visit: 19:30–20:15 (NOT placed at 18:45 or another time!)
+    const cafeVisit = applied.timeline.find(
+      t => t.day === 1 && t.category === 'ACTIVITY' && t.label === 'Green Hotel Café'
+    );
+    expect(cafeVisit).toBeDefined();
+    expect(cafeVisit!.startTime.slice(11)).toBe('19:30');
+    expect(cafeVisit!.endTime.slice(11)).toBe('20:15');
+
+    // Verify remaining free time: 18:45–19:15 and 20:15–21:00
+    const precedingFree = applied.timeline.find(
+      t => t.day === 1 && t.category === 'FREE' && t.startTime.slice(11) === '18:45'
+    );
+    expect(precedingFree).toBeDefined();
+    expect(precedingFree!.endTime.slice(11)).toBe('19:15');
+
+    const followingFree = applied.timeline.find(
+      t => t.day === 1 && t.category === 'FREE' && t.startTime.slice(11) === '20:15'
+    );
+    expect(followingFree).toBeDefined();
+    expect(followingFree!.endTime.slice(11)).toBe('21:00');
+  });
+
+  it('11. traveler-controlled visit duration & timing edits on a scheduled attraction ("Edit Visit")', () => {
+    // In baseline, Mysore Palace is 14:45–17:15 (150m duration, 30m transfer from check-in ending 14:15)
+    // Traveler clicks "Edit Visit" on Mysore Palace and sets:
+    // Visit start: 15:00
+    // Visit duration: 120m (2 hours)
+    // Transfer allowance: 25m
+    const preview = evaluateVisitScheduling(
+      {
+        activityId: 'mysuru-palace',
+        name: 'Mysore Palace',
+        day: 1,
+        visitStartTime: '15:00',
+        durationMinutes: 120,
+        transferMinutes: 25,
+      },
+      mysuru,
+      baseConstraints
+    );
+
+    expect(preview.isValid).toBe(true);
+
+    const applied = evaluateFeasibility(mysuru, preview.proposedConstraints);
+    const palace = applied.timeline.find(t => t.activityId === 'mysuru-palace' && t.category === 'ACTIVITY')!;
+    expect(palace).toBeDefined();
+    expect(palace.startTime.slice(11)).toBe('15:00');
+    expect(palace.endTime.slice(11)).toBe('17:00'); // Exactly 120m duration
+
+    const palaceTransfer = applied.timeline.find(t => t.activityId === 'mysuru-palace' && t.category === 'TRANSFER')!;
+    expect(palaceTransfer).toBeDefined();
+    expect(palaceTransfer.startTime.slice(11)).toBe('14:35'); // 15:00 - 25m
+    expect(palaceTransfer.endTime.slice(11)).toBe('15:00');
+
+    // Preceding free time between check-in (14:15) and transfer start (14:35) is preserved
+    const preFree = applied.timeline.find(
+      t => t.day === 1 && t.category === 'FREE' && t.startTime.slice(11) === '14:15'
+    );
+    expect(preFree).toBeDefined();
+    expect(preFree!.endTime.slice(11)).toBe('14:35');
+  });
+
+  it('12. rejects visit timing past operating hours and provides alternative valid times', () => {
+    // Devaraja Market Walk closes at 20:00
+    // Traveler attempts to schedule visit 19:30–20:30 (finishes 30m after closing)
+    const preview = evaluateVisitScheduling(
+      {
+        activityId: 'mysuru-market',
+        name: 'Devaraja Market Walk',
+        day: 1,
+        visitStartTime: '19:30',
+        durationMinutes: 60,
+        transferMinutes: 15,
+        closeTime: '20:00',
+      },
+      mysuru,
+      baseConstraints
+    );
+
+    expect(preview.isValid).toBe(false);
+    expect(preview.validationError).toContain('closing time 20:00');
+
+    // System offers alternative valid times within operating hours
+    expect(preview.alternativeTimes.length).toBeGreaterThan(0);
+    for (const alt of preview.alternativeTimes) {
+      expect(alt.startTime < '20:00').toBe(true);
+    }
+  });
+
+  it('13. rejects visit timing that collides with an existing stop and offers alternative valid times', () => {
+    // On Day 1, Mysore Palace is scheduled until 17:15.
+    // Traveler attempts to schedule a custom spot with visit start 16:30 and 15m transfer (needs transfer at 16:15)
+    const preview = evaluateVisitScheduling(
+      {
+        name: 'Chamundi Hill Viewpoint',
+        day: 1,
+        visitStartTime: '16:30',
+        durationMinutes: 45,
+        transferMinutes: 15,
+      },
+      mysuru,
+      baseConstraints
+    );
+
+    expect(preview.isValid).toBe(false);
+    expect(preview.validationError).toContain('conflicts with previously scheduled activities');
+    expect(preview.alternativeTimes.length).toBeGreaterThan(0);
+
+    const directAlternatives = findAlternativeValidTimes(1, 45, 15, mysuru, baseConstraints);
+    expect(directAlternatives.length).toBeGreaterThan(0);
+  });
+
+  it('14. downstream schedule recalculation when an earlier visit duration is changed', () => {
+    // Mysore Palace duration reduced from 150m to 90m
+    const preview = evaluateVisitScheduling(
+      {
+        activityId: 'mysuru-palace',
+        name: 'Mysore Palace',
+        day: 1,
+        visitStartTime: '14:45',
+        durationMinutes: 90,
+        transferMinutes: 30,
+      },
+      mysuru,
+      baseConstraints
+    );
+
+    expect(preview.isValid).toBe(true);
+    const applied = evaluateFeasibility(mysuru, preview.proposedConstraints);
+
+    // Mysore Palace finishes at 16:15 instead of 17:15 (60m saved)
+    const palace = applied.timeline.find(t => t.activityId === 'mysuru-palace' && t.category === 'ACTIVITY')!;
+    expect(palace.endTime.slice(11)).toBe('16:15');
+
+    // Devaraja Market shifts earlier: transfer 16:15–16:45, visit 16:45–17:45
+    const market = applied.timeline.find(t => t.activityId === 'mysuru-market' && t.category === 'ACTIVITY')!;
+    expect(market.startTime.slice(11)).toBe('16:45');
+    expect(market.endTime.slice(11)).toBe('17:45');
+
+    // Downstream free time increases by 60m
+    expect(applied.destinationSlackMinutes).toBe(baselineSlackPlus60(mysuru, baseConstraints));
+  });
+
+  it('15. transactional undo restores the exact prior schedule, return margin, and constraints', () => {
+    const baseline = evaluateFeasibility(mysuru, baseConstraints);
+    const baselineMargin = baseline.returnDeadlineMarginMinutes;
+    const baselineArrival = baseline.homeArrivalTime;
+    const baselineSlack = baseline.destinationSlackMinutes;
+
+    // Apply visit schedule
+    const preview = evaluateVisitScheduling(
+      {
+        name: 'Green Hotel Café',
+        day: 1,
+        visitStartTime: '19:30',
+        durationMinutes: 45,
+        transferMinutes: 15,
+      },
+      mysuru,
+      baseConstraints
+    );
+    expect(preview.isValid).toBe(true);
+
+    const editedSchedule = evaluateFeasibility(mysuru, preview.proposedConstraints);
+    expect(editedSchedule.timeline.some(t => t.label === 'Green Hotel Café')).toBe(true);
+
+    // Transactional Undo restores baseConstraints
+    const restoredSchedule = evaluateFeasibility(mysuru, baseConstraints);
+    expect(restoredSchedule.timeline.some(t => t.label === 'Green Hotel Café')).toBe(false);
+    expect(restoredSchedule.destinationSlackMinutes).toBe(baselineSlack);
+    expect(restoredSchedule.returnDeadlineMarginMinutes).toBe(baselineMargin);
+    expect(restoredSchedule.homeArrivalTime).toBe(baselineArrival);
+  });
 });
+
+function baselineSlackPlus60(destination: any, constraints: UserConstraints): number {
+  const base = evaluateFeasibility(destination, constraints);
+  return base.destinationSlackMinutes + 60;
+}

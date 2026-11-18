@@ -4,7 +4,7 @@ import {
   TimetableEntry,
   UserConstraints,
 } from '../types';
-import { evaluateFeasibility, formatIST, parseIST } from './scheduler';
+import { add, at, evaluateFeasibility, formatIST, parseIST } from './scheduler';
 
 const MINUTE_MS = 60 * 1000;
 
@@ -731,5 +731,412 @@ export function evaluateFreeTimeUsage(
     before: baselineState,
     after: baselineState,
     deltas: { marginDeltaMinutes: 0, homeArrivalDeltaMinutes: 0, freeTimeDeltaMinutes: 0 },
+  };
+}
+
+export interface AlternativeValidTime {
+  startTime: string; // HH:mm
+  label: string; // e.g. "17:30 (Day 1 Daytime)"
+  day: number;
+}
+
+export interface VisitSchedulingParams {
+  activityId?: string; // catalog activity ID if existing
+  customId?: string; // custom activity ID if editing existing custom place
+  name: string;
+  day: number;
+  visitStartTime: string; // HH:mm or YYYY-MM-DDTHH:mm
+  durationMinutes: number;
+  transferMinutes: number;
+  costPerPersonINR?: number;
+  openTime?: string;
+  closeTime?: string;
+  lastEntryTime?: string;
+  isRestBuffer?: boolean;
+}
+
+export interface VisitSchedulingPreview {
+  params: VisitSchedulingParams;
+  isValid: boolean;
+  validationError?: string;
+  alternativeTimes: AlternativeValidTime[];
+  proposedConstraints: UserConstraints;
+  details: {
+    activityName: string;
+    day: number;
+    transferStartTime: string;
+    transferEndTime: string;
+    visitStartTime: string;
+    visitEndTime: string;
+    precedingFreeTime?: { startTime: string; endTime: string; durationMinutes: number };
+    followingFreeTime?: { startTime: string; endTime: string; durationMinutes: number };
+  };
+  before: {
+    homeArrival: string;
+    returnMarginMinutes: number;
+    destinationSlackMinutes: number;
+    isFeasible: boolean;
+  };
+  after: {
+    homeArrival: string;
+    returnMarginMinutes: number;
+    destinationSlackMinutes: number;
+    isFeasible: boolean;
+  };
+  deltas: {
+    marginDeltaMinutes: number;
+    homeArrivalDeltaMinutes: number;
+    freeTimeDeltaMinutes: number;
+    displacedActivities: string[];
+  };
+}
+
+/**
+ * Scans the schedule for valid alternative start times on a target day.
+ */
+export function findAlternativeValidTimes(
+  day: number,
+  durationMinutes: number,
+  transferMinutes: number,
+  destination: Destination,
+  constraints: UserConstraints,
+  openTime?: string,
+  closeTime?: string,
+  lastEntryTime?: string,
+  excludeActivityId?: string
+): AlternativeValidTime[] {
+  const tempConstraints: UserConstraints = {
+    ...constraints,
+    disabledActivityIds: excludeActivityId
+      ? [...constraints.disabledActivityIds, excludeActivityId]
+      : constraints.disabledActivityIds,
+    customActivities: (constraints.customActivities ?? []).filter(
+      ca => ca.id !== excludeActivityId
+    ),
+  };
+
+  const baseline = evaluateFeasibility(destination, tempConstraints);
+  const freeWindows = baseline.timeline.filter(t => t.day === day && t.category === 'FREE');
+
+  const suggestions: AlternativeValidTime[] = [];
+  const totalNeeded = durationMinutes + transferMinutes;
+
+  for (const win of freeWindows) {
+    const winStartEpoch = parseIST(win.startTime);
+    const winEndEpoch = parseIST(win.endTime);
+    const dateStr = win.startTime.slice(0, 10);
+
+    const winDurationMins = Math.round((winEndEpoch - winStartEpoch) / MINUTE_MS);
+    if (winDurationMins < totalNeeded) continue;
+
+    const earliestVisitStartEpoch = add(winStartEpoch, transferMinutes);
+    let effectiveEarliest = earliestVisitStartEpoch;
+    if (openTime) {
+      const openEpoch = at(dateStr, openTime);
+      effectiveEarliest = Math.max(effectiveEarliest, openEpoch);
+    }
+
+    let effectiveLatestVisitEnd = winEndEpoch;
+    if (closeTime) {
+      const closeEpoch = at(dateStr, closeTime);
+      effectiveLatestVisitEnd = Math.min(effectiveLatestVisitEnd, closeEpoch);
+    }
+
+    let effectiveLatestVisitStart = add(effectiveLatestVisitEnd, -durationMinutes);
+    if (lastEntryTime) {
+      const lastEntryEpoch = at(dateStr, lastEntryTime);
+      effectiveLatestVisitStart = Math.min(effectiveLatestVisitStart, lastEntryEpoch);
+    }
+
+    if (effectiveEarliest <= effectiveLatestVisitStart) {
+      let cursor = effectiveEarliest;
+      while (cursor <= effectiveLatestVisitStart && suggestions.length < 4) {
+        const timeStr = formatIST(cursor).slice(11, 16);
+        const label = `${timeStr} (Day ${day} ${timeStr >= '18:15' ? 'Evening' : 'Daytime'})`;
+        if (!suggestions.some(s => s.startTime === timeStr)) {
+          suggestions.push({ startTime: timeStr, label, day });
+        }
+        cursor = add(cursor, 30);
+      }
+    }
+  }
+
+  return suggestions;
+}
+
+/**
+ * Traveler-Controlled Visit Scheduling Engine
+ * Evaluates explicit user-chosen day, start time, visit duration and transfer allowance.
+ * Enforces opening hours, collisions, anti-displacement and return deadline feasibility.
+ */
+export function evaluateVisitScheduling(
+  params: VisitSchedulingParams,
+  destination: Destination,
+  constraints: UserConstraints
+): VisitSchedulingPreview {
+  const allActivities = [...destination.activities, ...(constraints.additionalActivities ?? [])];
+  const catalogActivity = params.activityId ? allActivities.find(a => a.id === params.activityId) : undefined;
+  const activityName = catalogActivity?.name ?? params.name;
+
+  const baselineResult = evaluateFeasibility(destination, constraints);
+  const baselineSlack = baselineResult.destinationSlackMinutes;
+  const isBaselineFeasible =
+    baselineResult.returnDeadlineMarginMinutes >= 0 &&
+    !baselineResult.violations.some(v => v.severity === 'BLOCKER');
+
+  const baselineState = {
+    homeArrival: baselineResult.homeArrivalTime,
+    returnMarginMinutes: baselineResult.returnDeadlineMarginMinutes,
+    destinationSlackMinutes: baselineSlack,
+    isFeasible: isBaselineFeasible,
+  };
+
+  const depDate = constraints.departureDateTime.slice(0, 10);
+  const dayEntry = baselineResult.timeline.find(t => t.day === params.day);
+  const dayDate = dayEntry
+    ? dayEntry.startTime.slice(0, 10)
+    : new Date(Date.parse(`${depDate}T00:00:00Z`) + (params.day - 1) * 86400000).toISOString().slice(0, 10);
+  const visitStartTimeIso = params.visitStartTime.includes('T')
+    ? params.visitStartTime
+    : `${dayDate}T${params.visitStartTime}`;
+
+  const visitStartEpoch = parseIST(visitStartTimeIso);
+  const transferMinutes = Math.max(0, params.transferMinutes);
+  const transferStartEpoch = add(visitStartEpoch, -transferMinutes);
+  const visitEndEpoch = add(visitStartEpoch, params.durationMinutes);
+
+  const transferStartTime = formatIST(transferStartEpoch);
+  const transferEndTime = formatIST(visitStartEpoch);
+  const visitStartTime = formatIST(visitStartEpoch);
+  const visitEndTime = formatIST(visitEndEpoch);
+
+  const defaultDetails = {
+    activityName,
+    day: params.day,
+    transferStartTime,
+    transferEndTime,
+    visitStartTime,
+    visitEndTime,
+  };
+
+  // 1. Duration validation
+  const minDuration = params.isRestBuffer ? 10 : 15;
+  if (params.durationMinutes < minDuration) {
+    const alternativeTimes = findAlternativeValidTimes(
+      params.day,
+      minDuration,
+      transferMinutes,
+      destination,
+      constraints,
+      params.openTime ?? catalogActivity?.openTime,
+      params.closeTime ?? catalogActivity?.closeTime,
+      params.lastEntryTime ?? catalogActivity?.lastEntryTime,
+      params.activityId ?? params.customId
+    );
+    return {
+      params,
+      isValid: false,
+      validationError: `Visit duration must be at least ${minDuration} minutes.`,
+      alternativeTimes,
+      proposedConstraints: constraints,
+      details: defaultDetails,
+      before: baselineState,
+      after: baselineState,
+      deltas: { marginDeltaMinutes: 0, homeArrivalDeltaMinutes: 0, freeTimeDeltaMinutes: 0, displacedActivities: [] },
+    };
+  }
+
+  // 2. Transfer allowance validation
+  if (!params.isRestBuffer && params.transferMinutes < 5) {
+    const alternativeTimes = findAlternativeValidTimes(
+      params.day,
+      params.durationMinutes,
+      5,
+      destination,
+      constraints,
+      params.openTime ?? catalogActivity?.openTime,
+      params.closeTime ?? catalogActivity?.closeTime,
+      params.lastEntryTime ?? catalogActivity?.lastEntryTime,
+      params.activityId ?? params.customId
+    );
+    return {
+      params,
+      isValid: false,
+      validationError: 'An explicit planning allowance (minimum 5 minutes) is required for transit.',
+      alternativeTimes,
+      proposedConstraints: constraints,
+      details: defaultDetails,
+      before: baselineState,
+      after: baselineState,
+      deltas: { marginDeltaMinutes: 0, homeArrivalDeltaMinutes: 0, freeTimeDeltaMinutes: 0, displacedActivities: [] },
+    };
+  }
+
+  // 3. Construct proposed constraints
+  let proposedConstraints: UserConstraints;
+
+  if (params.activityId) {
+    const nextCustomizations = {
+      ...(constraints.activityCustomizations ?? {}),
+      [params.activityId]: {
+        day: params.day,
+        startTime: visitStartTimeIso,
+        durationMinutes: params.durationMinutes,
+        transferMinutes: params.transferMinutes,
+      },
+    };
+    const nextDayAssignments = {
+      ...(constraints.activityDayAssignments ?? {}),
+      [params.activityId]: params.day,
+    };
+    let nextOrder = constraints.activityOrder ? [...constraints.activityOrder] : allActivities.map(a => a.id);
+    if (!nextOrder.includes(params.activityId)) {
+      nextOrder.push(params.activityId);
+    }
+    const nextDisabled = constraints.disabledActivityIds.filter(id => id !== params.activityId);
+
+    proposedConstraints = {
+      ...constraints,
+      disabledActivityIds: nextDisabled,
+      activityDayAssignments: nextDayAssignments,
+      activityCustomizations: nextCustomizations,
+      activityOrder: nextOrder,
+    };
+  } else {
+    const customId = params.customId || `custom-act-${Date.now()}`;
+    const newCustom: CustomPlannedActivity = {
+      id: customId,
+      day: params.day,
+      name: params.name.trim() || 'Custom Stop',
+      durationMinutes: params.durationMinutes,
+      transferMinutes: params.transferMinutes,
+      costPerPersonINR: params.costPerPersonINR ?? 0,
+      slotStart: visitStartTimeIso,
+      openTime: params.openTime,
+      closeTime: params.closeTime,
+      lastEntryTime: params.lastEntryTime,
+      isRestBuffer: params.isRestBuffer,
+    };
+
+    const existingCustoms = (constraints.customActivities ?? []).filter(ca => ca.id !== customId);
+    proposedConstraints = {
+      ...constraints,
+      customActivities: [...existingCustoms, newCustom],
+    };
+  }
+
+  // 4. Run engine feasibility check
+  const proposedResult = evaluateFeasibility(destination, proposedConstraints);
+
+  // Compare scheduled activities before and after to prevent silent displacement
+  const beforeScheduledActivityIds = baselineResult.timeline
+    .filter(t => t.category === 'ACTIVITY' && !t.isRestBuffer && t.activityId)
+    .map(t => t.activityId!);
+
+  const afterScheduledActivityIds = proposedResult.timeline
+    .filter(t => t.category === 'ACTIVITY' && !t.isRestBuffer && t.activityId)
+    .map(t => t.activityId!);
+
+  const displacedActivityIds = beforeScheduledActivityIds.filter(
+    id => !afterScheduledActivityIds.includes(id) && id !== params.activityId
+  );
+  const displacedActivityNames = displacedActivityIds.map(id => {
+    const act = allActivities.find(a => a.id === id);
+    return act?.name ?? id;
+  });
+
+  const blocker = proposedResult.violations.find(v => v.severity === 'BLOCKER');
+
+  let isValid = true;
+  let validationError: string | undefined;
+
+  if (displacedActivityNames.length > 0) {
+    isValid = false;
+    validationError = `Cannot apply schedule: Displaces previously scheduled stop "${displacedActivityNames.join(', ')}".`;
+  } else if (blocker) {
+    isValid = false;
+    validationError = blocker.message;
+  } else if (proposedResult.returnDeadlineMarginMinutes < 0) {
+    isValid = false;
+    validationError = `Return departure is delayed past deadline: return arrival is ${proposedResult.homeArrivalTime.slice(11)} against requested deadline ${constraints.returnDeadlineDateTime.slice(11)}.`;
+  }
+
+  const alternativeTimes = !isValid
+    ? findAlternativeValidTimes(
+        params.day,
+        params.durationMinutes,
+        params.transferMinutes,
+        destination,
+        constraints,
+        params.openTime ?? catalogActivity?.openTime,
+        params.closeTime ?? catalogActivity?.closeTime,
+        params.lastEntryTime ?? catalogActivity?.lastEntryTime,
+        params.activityId ?? params.customId
+      )
+    : [];
+
+  // Extract preceding and following free time on target day
+  const precedingFree = proposedResult.timeline.find(
+    t => t.day === params.day && t.category === 'FREE' && t.endTime === transferStartTime
+  );
+  const followingFree = proposedResult.timeline.find(
+    t => t.day === params.day && t.category === 'FREE' && t.startTime === visitEndTime
+  );
+
+  const precedingFreeTime = precedingFree
+    ? {
+        startTime: precedingFree.startTime,
+        endTime: precedingFree.endTime,
+        durationMinutes: Math.round(
+          (parseIST(precedingFree.endTime) - parseIST(precedingFree.startTime)) / MINUTE_MS
+        ),
+      }
+    : undefined;
+
+  const followingFreeTime = followingFree
+    ? {
+        startTime: followingFree.startTime,
+        endTime: followingFree.endTime,
+        durationMinutes: Math.round(
+          (parseIST(followingFree.endTime) - parseIST(followingFree.startTime)) / MINUTE_MS
+        ),
+      }
+    : undefined;
+
+  const proposedSlack = proposedResult.destinationSlackMinutes;
+
+  return {
+    params,
+    isValid,
+    validationError,
+    alternativeTimes,
+    proposedConstraints,
+    details: {
+      activityName,
+      day: params.day,
+      transferStartTime,
+      transferEndTime,
+      visitStartTime,
+      visitEndTime,
+      precedingFreeTime,
+      followingFreeTime,
+    },
+    before: baselineState,
+    after: {
+      homeArrival: proposedResult.homeArrivalTime,
+      returnMarginMinutes: proposedResult.returnDeadlineMarginMinutes,
+      destinationSlackMinutes: proposedSlack,
+      isFeasible: proposedResult.returnDeadlineMarginMinutes >= 0 && !blocker,
+    },
+    deltas: {
+      marginDeltaMinutes:
+        proposedResult.returnDeadlineMarginMinutes - baselineResult.returnDeadlineMarginMinutes,
+      homeArrivalDeltaMinutes: Math.round(
+        (parseIST(proposedResult.homeArrivalTime) - parseIST(baselineResult.homeArrivalTime)) /
+          MINUTE_MS
+      ),
+      freeTimeDeltaMinutes: proposedSlack - baselineSlack,
+      displacedActivities: displacedActivityNames,
+    },
   };
 }

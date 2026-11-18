@@ -7,13 +7,13 @@ import {
   type DiscoverPlace,
 } from './prototypeData';
 import { DESTINATIONS } from '../data/destinations';
-import { evaluateFeasibility, parseIST } from '../engine/scheduler';
+import { evaluateFeasibility, formatIST, parseIST } from '../engine/scheduler';
 import { evaluateActivityMove, getMoveCandidates, getInsertionSlotsForDay } from '../engine/moveActivity';
 import {
   getTransferDetails,
   evaluateTransferAdjustment,
-  evaluateFreeTimeUsage,
-  type FreeTimeAction,
+  evaluateVisitScheduling,
+  type VisitSchedulingPreview,
 } from '../engine/timelineEditing';
 import type { Activity, TimetableEntry, UserConstraints } from '../types';
 import PrototypeMap from './PrototypeMap';
@@ -92,18 +92,21 @@ export default function PrototypeV2Screen() {
   const [selectedTransferEntry, setSelectedTransferEntry] = useState<TimetableEntry | null>(null);
   const [transferMinutesInput, setTransferMinutesInput] = useState<number>(30);
 
-  // Free Time Modal State
-  const [isFreeTimeModalOpen, setIsFreeTimeModalOpen] = useState<boolean>(false);
-  const [selectedFreeEntry, setSelectedFreeEntry] = useState<TimetableEntry | null>(null);
-  const [freeTimeTab, setFreeTimeTab] = useState<'buffer' | 'activity'>('buffer');
-  const [freeBufferName, setFreeBufferName] = useState<string>('Personal Rest Buffer');
-  const [freeBufferDuration, setFreeBufferDuration] = useState<number>(30);
-  const [freeActivityMode, setFreeActivityMode] = useState<'existing' | 'custom'>('existing');
-  const [freeSelectedActivityId, setFreeSelectedActivityId] = useState<string>('mysuru-market');
-  const [freeCustomName, setFreeCustomName] = useState<string>('');
-  const [freeCustomDuration, setFreeCustomDuration] = useState<number>(45);
-  const [freeCustomTransfer, setFreeCustomTransfer] = useState<number>(15);
-  const [freeCustomCost, setFreeCustomCost] = useState<number>(0);
+  // Traveler-Controlled Visit Scheduling Editor State
+  const [isVisitEditorOpen, setIsVisitEditorOpen] = useState<boolean>(false);
+  const [editorMode, setEditorMode] = useState<'schedule_free' | 'edit_visit'>('schedule_free');
+  const [editorTargetDay, setEditorTargetDay] = useState<number>(1);
+  const [editorActivityType, setEditorActivityType] = useState<'curated' | 'custom' | 'buffer'>('custom');
+  const [editorActivityId, setEditorActivityId] = useState<string>('mysuru-market');
+  const [editorCustomId, setEditorCustomId] = useState<string | undefined>(undefined);
+  const [editorName, setEditorName] = useState<string>('');
+  const [editorVisitStartTime, setEditorVisitStartTime] = useState<string>('19:30');
+  const [editorDurationMinutes, setEditorDurationMinutes] = useState<number>(45);
+  const [editorTransferMinutes, setEditorTransferMinutes] = useState<number>(15);
+  const [editorCostPerPerson, setEditorCostPerPerson] = useState<number>(0);
+  const [selectedFreeWindowInfo, setSelectedFreeWindowInfo] = useState<{ start: string; end: string; mins: number } | null>(null);
+
+
 
   // Execute scheduling engine against active constraints
   const currentResult = useMemo(() => {
@@ -219,80 +222,125 @@ export default function PrototypeV2Screen() {
     setSelectedTransferEntry(null);
   };
 
-  // Open Free Time Modal
-  const handleOpenFreeTimeModal = (entry: TimetableEntry) => {
-    setSelectedFreeEntry(entry);
-    setFreeTimeTab('buffer');
-    setFreeBufferName('Personal Rest Buffer');
-    setFreeBufferDuration(30);
-    setFreeActivityMode('existing');
-    const candidate = moveCandidates.find(c => c.scheduleStatus !== 'scheduled') || moveCandidates[0];
-    if (candidate) {
-      setFreeSelectedActivityId(candidate.activityId);
-    }
-    setFreeCustomName('');
-    setFreeCustomDuration(45);
-    setFreeCustomTransfer(15);
-    setFreeCustomCost(0);
-    setIsFreeTimeModalOpen(true);
-  };
 
-  // Free Time Preview
-  const freeTimePreview = useMemo(() => {
-    if (!selectedFreeEntry) return null;
-    let action: FreeTimeAction;
-    if (freeTimeTab === 'buffer') {
-      action = {
-        type: 'RESERVE_BUFFER',
-        name: freeBufferName,
-        durationMinutes: freeBufferDuration,
-      };
-    } else if (freeActivityMode === 'existing') {
-      action = {
-        type: 'SCHEDULE_ACTIVITY',
-        activityId: freeSelectedActivityId,
-      };
-    } else {
-      action = {
-        type: 'ADD_CUSTOM_PLACE',
-        name: freeCustomName.trim() || 'Custom Stop',
-        durationMinutes: freeCustomDuration,
-        transferMinutes: freeCustomTransfer,
-        costPerPersonINR: freeCustomCost,
-      };
-    }
-    return evaluateFreeTimeUsage(selectedFreeEntry, action, MYSURU_DEST, constraints);
+
+  // Traveler-Controlled Visit Scheduling Engine Preview
+  const visitSchedulingPreview: VisitSchedulingPreview | null = useMemo(() => {
+    if (!isVisitEditorOpen) return null;
+    const isBuffer = editorActivityType === 'buffer';
+    const isCurated = editorActivityType === 'curated';
+    const catalogAct = isCurated ? MYSURU_DEST.activities.find(a => a.id === editorActivityId) : undefined;
+    const displayName = isCurated
+      ? catalogAct?.name || editorActivityId
+      : editorName.trim() || (isBuffer ? 'Personal Rest Buffer' : 'Custom Stop');
+
+    return evaluateVisitScheduling(
+      {
+        activityId: isCurated ? editorActivityId : undefined,
+        customId: editorCustomId,
+        name: displayName,
+        day: editorTargetDay,
+        visitStartTime: editorVisitStartTime,
+        durationMinutes: editorDurationMinutes,
+        transferMinutes: isBuffer ? 0 : editorTransferMinutes,
+        costPerPersonINR: editorCostPerPerson,
+        openTime: catalogAct?.openTime,
+        closeTime: catalogAct?.closeTime,
+        lastEntryTime: catalogAct?.lastEntryTime,
+        isRestBuffer: isBuffer,
+      },
+      MYSURU_DEST,
+      constraints
+    );
   }, [
-    selectedFreeEntry,
-    freeTimeTab,
-    freeBufferName,
-    freeBufferDuration,
-    freeActivityMode,
-    freeSelectedActivityId,
-    freeCustomName,
-    freeCustomDuration,
-    freeCustomTransfer,
-    freeCustomCost,
+    isVisitEditorOpen,
+    editorActivityType,
+    editorActivityId,
+    editorCustomId,
+    editorName,
+    editorTargetDay,
+    editorVisitStartTime,
+    editorDurationMinutes,
+    editorTransferMinutes,
+    editorCostPerPerson,
     constraints,
   ]);
 
-  // Apply Free Time Action
-  const handleConfirmFreeTimeUsage = () => {
-    if (!freeTimePreview || !freeTimePreview.isValid) return;
-    const label =
-      freeTimeTab === 'buffer'
-        ? `Reserved ${freeBufferDuration}m buffer`
-        : freeActivityMode === 'existing'
-        ? `Scheduled activity into Day ${selectedFreeEntry?.day} free time`
-        : `Added custom place "${freeCustomName.trim()}"`;
-    recordHistory(
-      freeTimePreview.proposedConstraints,
-      `${label}. Return margin: ${freeTimePreview.after.returnMarginMinutes >= 0 ? '+' : ''}${freeTimePreview.after.returnMarginMinutes}m.`
-    );
-    setIsFreeTimeModalOpen(false);
-    setSelectedFreeEntry(null);
-    setFreeCustomName('');
+  // Open Visit Scheduling Editor from FREE time block ("Use This Time")
+  const handleOpenVisitEditorForFreeTime = (entry: TimetableEntry) => {
+    const startEpoch = parseIST(entry.startTime);
+    // Suggested visit start: 15 minutes after window opens (accounting for 15m transfer)
+    const suggestedTimeStr = formatIST(startEpoch + 15 * 60000).slice(11);
+    setSelectedFreeWindowInfo({
+      start: entry.startTime.slice(11),
+      end: entry.endTime.slice(11),
+      mins: Math.round((parseIST(entry.endTime) - startEpoch) / 60000),
+    });
+    setEditorMode('schedule_free');
+    setEditorTargetDay(entry.day);
+    setEditorActivityType('custom');
+    setEditorActivityId('mysuru-market');
+    setEditorCustomId(undefined);
+    setEditorName('');
+    setEditorVisitStartTime(suggestedTimeStr);
+    setEditorDurationMinutes(45);
+    setEditorTransferMinutes(15);
+    setEditorCostPerPerson(0);
+    setIsVisitEditorOpen(true);
   };
+
+  // Open Visit Scheduling Editor for already-scheduled activity ("Edit Visit")
+  const handleOpenVisitEditorForActivity = (entry: TimetableEntry) => {
+    setEditorMode('edit_visit');
+    setEditorTargetDay(entry.day);
+    setSelectedFreeWindowInfo(null);
+
+    if (entry.isCustom) {
+      setEditorActivityType(entry.isRestBuffer ? 'buffer' : 'custom');
+      setEditorCustomId(entry.activityId);
+      setEditorActivityId('mysuru-market');
+      setEditorName(entry.label);
+    } else {
+      setEditorActivityType('curated');
+      setEditorActivityId(entry.activityId!);
+      setEditorCustomId(undefined);
+      setEditorName(entry.label);
+    }
+
+    setEditorVisitStartTime(entry.startTime.slice(11, 16));
+    setEditorDurationMinutes(
+      Math.round((parseIST(entry.endTime) - parseIST(entry.startTime)) / 60000)
+    );
+
+    // Find local transfer for this entry
+    const transferEntry = currentResult.timeline.find(
+      t => t.activityId === entry.activityId && t.category === 'TRANSFER'
+    );
+    const transMins = transferEntry
+      ? Math.round((parseIST(transferEntry.endTime) - parseIST(transferEntry.startTime)) / 60000)
+      : constraints.transferAdjustments?.[entry.activityId!] ?? 15;
+    setEditorTransferMinutes(transMins);
+
+    setIsVisitEditorOpen(true);
+  };
+
+  // Confirm and Apply Visit Scheduling Changes
+  const handleConfirmVisitScheduling = () => {
+    if (!visitSchedulingPreview || !visitSchedulingPreview.isValid) return;
+    const actName = visitSchedulingPreview.details.activityName;
+    const timeStr = visitSchedulingPreview.details.visitStartTime.slice(11);
+    const dayNum = visitSchedulingPreview.details.day;
+
+    const actionText =
+      editorMode === 'edit_visit'
+        ? `Updated visit timing for "${actName}" to ${timeStr} on Day ${dayNum}.`
+        : `Scheduled "${actName}" at ${timeStr} on Day ${dayNum} (${visitSchedulingPreview.params.durationMinutes}m visit).`;
+
+    recordHistory(visitSchedulingPreview.proposedConstraints, actionText);
+    setIsVisitEditorOpen(false);
+  };
+
+
 
   // Remove custom planned activity or reserved buffer
   const handleRemoveCustomOrBuffer = (activityId: string) => {
@@ -1006,6 +1054,16 @@ export default function PrototypeV2Screen() {
                                   <div className="flex items-center gap-1.5 shrink-0">
                                     <button
                                       type="button"
+                                      onClick={() => handleOpenVisitEditorForActivity(entry)}
+                                      className="rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-xs font-bold text-sky-800 hover:bg-sky-100 shadow-xs flex items-center gap-1"
+                                      title="Edit visit timing & duration"
+                                    >
+                                      <span>✏️</span>
+                                      <span>Edit Visit</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
                                       onClick={() => {
                                         setSelectedMoveActivityId(entry.activityId!);
                                         setMoveTargetDay(activeDay === 1 ? 2 : 1);
@@ -1131,7 +1189,7 @@ export default function PrototypeV2Screen() {
 
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenFreeTimeModal(entry)}
+                                    onClick={() => handleOpenVisitEditorForFreeTime(entry)}
                                     className="rounded-lg border border-emerald-400 bg-emerald-600 text-white hover:bg-emerald-700 px-2.5 py-1 text-xs font-bold shadow-2xs flex items-center gap-1 shrink-0"
                                     title="Use available free time"
                                   >
@@ -1168,14 +1226,25 @@ export default function PrototypeV2Screen() {
                                       </span>
                                     </div>
                                   </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemoveCustomOrBuffer(entry.activityId!)}
-                                    className="h-6 w-6 rounded-md border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center justify-center"
-                                    title="Remove buffer"
-                                  >
-                                    ✕
-                                  </button>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenVisitEditorForActivity(entry)}
+                                      className="rounded-md border border-indigo-200 bg-white px-2 py-0.5 text-[11px] font-bold text-indigo-800 hover:bg-indigo-50 flex items-center gap-1"
+                                      title="Edit buffer timing"
+                                    >
+                                      <span>✏️</span>
+                                      <span>Edit</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveCustomOrBuffer(entry.activityId!)}
+                                      className="h-6 w-6 rounded-md border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center justify-center"
+                                      title="Remove buffer"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
                                 </div>
                               );
                             }
@@ -2018,225 +2087,326 @@ export default function PrototypeV2Screen() {
           )}
 
           {/* ========================================================================= */}
-          {/* TIMELINE EDITING: USE AVAILABLE FREE TIME MODAL                           */}
+          {/* TIMELINE EDITING: TRAVELER-CONTROLLED VISIT SCHEDULING EDITOR              */}
           {/* ========================================================================= */}
-          {isFreeTimeModalOpen && selectedFreeEntry && (
+          {isVisitEditorOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fadeIn">
-              <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-[#E1ECF2] space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-[#E1ECF2] space-y-4 max-h-[92vh] overflow-y-auto">
                 <div className="flex items-start justify-between border-b border-[#E1ECF2] pb-3">
                   <div>
                     <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
-                      Timeline Editing · Use Available Leisure
+                      {editorMode === 'edit_visit' ? 'Timeline Editing · Edit Visit Timing' : 'Timeline Editing · Schedule Visit into Leisure'}
                     </span>
-                    <h3 className="text-lg font-black text-[#193953]">Use This Free Time</h3>
+                    <h3 className="text-lg font-black text-[#193953]">
+                      {editorMode === 'edit_visit' ? `Edit Visit · ${editorName || 'Activity'}` : 'Schedule Visit / Place'}
+                    </h3>
                     <p className="text-xs text-[#5A7184] mt-0.5">
-                      Day {selectedFreeEntry.day} · {selectedFreeEntry.startTime.slice(11)}–{selectedFreeEntry.endTime.slice(11)} IST ({Math.round((parseIST(selectedFreeEntry.endTime) - parseIST(selectedFreeEntry.startTime)) / 60000)}m available)
+                      {selectedFreeWindowInfo
+                        ? `Selected Free Window: ${selectedFreeWindowInfo.start}–${selectedFreeWindowInfo.end} IST (${selectedFreeWindowInfo.mins}m available)`
+                        : `Day ${editorTargetDay} visit timing & constraints`}
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setIsFreeTimeModalOpen(false)}
+                    onClick={() => setIsVisitEditorOpen(false)}
                     className="text-gray-400 hover:text-gray-600 font-bold text-lg p-1"
                   >
                     ✕
                   </button>
                 </div>
 
-                <div className="flex border-b border-[#E1ECF2]">
-                  <button
-                    type="button"
-                    onClick={() => setFreeTimeTab('buffer')}
-                    className={`flex-1 pb-2 text-xs font-bold border-b-2 text-center transition-all ${
-                      freeTimeTab === 'buffer'
-                        ? 'border-[#176EA8] text-[#176EA8]'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    🧘 Reserve Rest / Buffer
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFreeTimeTab('activity')}
-                    className={`flex-1 pb-2 text-xs font-bold border-b-2 text-center transition-all ${
-                      freeTimeTab === 'activity'
-                        ? 'border-[#176EA8] text-[#176EA8]'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    🏛️ Schedule Activity / Place
-                  </button>
-                </div>
+                {/* Category Selector Tabs (for Schedule into Free Time mode) */}
+                {editorMode === 'schedule_free' && (
+                  <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditorActivityType('custom');
+                        setEditorName('Café / Local Food');
+                      }}
+                      className={`flex-1 py-1.5 text-center font-bold rounded-md transition-all ${
+                        editorActivityType === 'custom' ? 'bg-white shadow-xs text-[#176EA8]' : 'text-gray-600'
+                      }`}
+                    >
+                      ☕ Custom Place
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditorActivityType('curated')}
+                      className={`flex-1 py-1.5 text-center font-bold rounded-md transition-all ${
+                        editorActivityType === 'curated' ? 'bg-white shadow-xs text-[#176EA8]' : 'text-gray-600'
+                      }`}
+                    >
+                      🏛️ Curated Attraction
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditorActivityType('buffer');
+                        setEditorName('Personal Rest Buffer');
+                        setEditorTransferMinutes(0);
+                      }}
+                      className={`flex-1 py-1.5 text-center font-bold rounded-md transition-all ${
+                        editorActivityType === 'buffer' ? 'bg-white shadow-xs text-[#176EA8]' : 'text-gray-600'
+                      }`}
+                    >
+                      🧘 Rest Buffer
+                    </button>
+                  </div>
+                )}
 
-                {freeTimeTab === 'buffer' && (
-                  <div className="space-y-3">
+                {/* Activity Details / Selection */}
+                {editorActivityType === 'custom' && (
+                  <div className="space-y-2">
                     <div>
-                      <label className="block text-xs font-bold text-[#193953] mb-1">Buffer Description:</label>
+                      <label className="block text-xs font-bold text-[#193953] mb-1">Place Name:</label>
                       <input
                         type="text"
-                        value={freeBufferName}
-                        onChange={e => setFreeBufferName(e.target.value)}
-                        placeholder="e.g. Evening Rest & Downtime"
-                        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs"
+                        value={editorName}
+                        onChange={e => setEditorName(e.target.value)}
+                        placeholder="e.g. Green Hotel Café, Chamundi Viewpoint"
+                        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-medium"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-[#193953] mb-1">Duration:</label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {[15, 30, 45, 60].map(mins => (
-                          <button
-                            key={mins}
-                            type="button"
-                            onClick={() => setFreeBufferDuration(mins)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                              freeBufferDuration === mins
-                                ? 'bg-[#176EA8] text-white shadow-xs'
-                                : 'bg-gray-100 text-[#193953] hover:bg-gray-200'
-                            }`}
-                          >
-                            {mins}m
-                          </button>
-                        ))}
-                        <div className="flex items-center gap-1 ml-auto">
-                          <span className="text-xs text-[#5A7184]">Custom:</span>
-                          <input
-                            type="number"
-                            min={10}
-                            max={Math.round((parseIST(selectedFreeEntry.endTime) - parseIST(selectedFreeEntry.startTime)) / 60000)}
-                            value={freeBufferDuration}
-                            onChange={e => setFreeBufferDuration(parseInt(e.target.value) || 15)}
-                            className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-xs font-bold text-center"
-                          />
-                          <span className="text-xs text-[#5A7184]">min</span>
-                        </div>
-                      </div>
+                      <label className="block text-xs font-bold text-[#193953] mb-1">Estimated Cost (₹/person):</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={editorCostPerPerson}
+                        onChange={e => setEditorCostPerPerson(parseInt(e.target.value) || 0)}
+                        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-bold"
+                      />
                     </div>
                   </div>
                 )}
 
-                {freeTimeTab === 'activity' && (
-                  <div className="space-y-3">
-                    <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs">
+                {editorActivityType === 'curated' && editorMode === 'schedule_free' && (
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                    <label className="block text-xs font-bold text-[#193953] mb-1">Choose Attraction:</label>
+                    {moveCandidates.map(c => (
                       <button
+                        key={c.activityId}
                         type="button"
-                        onClick={() => setFreeActivityMode('existing')}
-                        className={`flex-1 py-1 text-center font-bold rounded-md transition-all ${
-                          freeActivityMode === 'existing' ? 'bg-white shadow-xs text-[#176EA8]' : 'text-gray-600'
+                        onClick={() => {
+                          setEditorActivityId(c.activityId);
+                          setEditorName(c.name);
+                          setEditorDurationMinutes(c.durationMinutes);
+                          setEditorTransferMinutes(c.localTransferMinutes);
+                        }}
+                        className={`w-full text-left p-2.5 rounded-xl border transition-all text-xs flex items-center justify-between ${
+                          editorActivityId === c.activityId
+                            ? 'border-[#176EA8] bg-sky-50/50 ring-1 ring-[#176EA8]'
+                            : 'border-gray-200 hover:border-gray-300'
                         }`}
                       >
-                        Curated Places
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFreeActivityMode('custom')}
-                        className={`flex-1 py-1 text-center font-bold rounded-md transition-all ${
-                          freeActivityMode === 'custom' ? 'bg-white shadow-xs text-[#176EA8]' : 'text-gray-600'
-                        }`}
-                      >
-                        Custom Place
-                      </button>
-                    </div>
-
-                    {freeActivityMode === 'existing' && (
-                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                        {moveCandidates.map(c => (
-                          <button
-                            key={c.activityId}
-                            type="button"
-                            onClick={() => setFreeSelectedActivityId(c.activityId)}
-                            className={`w-full text-left p-2.5 rounded-xl border transition-all text-xs flex items-center justify-between ${
-                              freeSelectedActivityId === c.activityId
-                                ? 'border-[#176EA8] bg-sky-50/50 ring-1 ring-[#176EA8]'
-                                : 'border-gray-200 hover:border-gray-300'
-                            }`}
-                          >
-                            <div>
-                              <div className="font-bold text-[#193953]">{c.name}</div>
-                              <div className="text-[11px] text-[#5A7184]">
-                                ⏱️ {c.durationMinutes}m visit · {c.localTransferMinutes}m transfer · 🕒 {c.operatingWindow}
-                              </div>
-                            </div>
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
-                              {c.scheduleStatus === 'scheduled' ? `Day ${c.currentDay}` : 'Unscheduled'}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    {freeActivityMode === 'custom' && (
-                      <div className="space-y-2">
                         <div>
-                          <label className="block text-xs font-bold text-[#193953] mb-1">Place Name:</label>
-                          <input
-                            type="text"
-                            value={freeCustomName}
-                            onChange={e => setFreeCustomName(e.target.value)}
-                            placeholder="e.g. Chamundi Hill viewpoint"
-                            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs"
-                          />
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <label className="block text-xs font-bold text-[#193953] mb-1">Visit (mins):</label>
-                            <input
-                              type="number"
-                              min={15}
-                              max={240}
-                              value={freeCustomDuration}
-                              onChange={e => setFreeCustomDuration(parseInt(e.target.value) || 30)}
-                              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-bold"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-[#193953] mb-1">Transfer (mins):</label>
-                            <input
-                              type="number"
-                              min={5}
-                              max={120}
-                              value={freeCustomTransfer}
-                              onChange={e => setFreeCustomTransfer(parseInt(e.target.value) || 15)}
-                              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-bold"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-[#193953] mb-1">Cost (₹/person):</label>
-                            <input
-                              type="number"
-                              min={0}
-                              value={freeCustomCost}
-                              onChange={e => setFreeCustomCost(parseInt(e.target.value) || 0)}
-                              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-bold"
-                            />
+                          <div className="font-bold text-[#193953]">{c.name}</div>
+                          <div className="text-[11px] text-[#5A7184]">
+                            ⏱️ {c.durationMinutes}m visit · {c.localTransferMinutes}m transfer · 🕒 {c.operatingWindow}
                           </div>
                         </div>
-                      </div>
-                    )}
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
+                          {c.scheduleStatus === 'scheduled' ? `Day ${c.currentDay}` : 'Unscheduled'}
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 )}
 
-                {freeTimePreview && (
+                {editorActivityType === 'buffer' && (
+                  <div>
+                    <label className="block text-xs font-bold text-[#193953] mb-1">Buffer Description:</label>
+                    <input
+                      type="text"
+                      value={editorName}
+                      onChange={e => setEditorName(e.target.value)}
+                      placeholder="e.g. Evening Rest & Downtime"
+                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-medium"
+                    />
+                  </div>
+                )}
+
+                {/* Traveler-Controlled Timing Controls */}
+                <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#193953]">Target Day:</span>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditorTargetDay(1)}
+                        className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                          editorTargetDay === 1 ? 'bg-[#176EA8] text-white shadow-xs' : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        Day 1 (Saturday)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditorTargetDay(2)}
+                        className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                          editorTargetDay === 2 ? 'bg-[#176EA8] text-white shadow-xs' : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
+                        }`}
+                      >
+                        Day 2 (Sunday)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Visit Start Time */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-[#193953]">Visit Start Time (IST):</label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const [h, m] = editorVisitStartTime.split(':').map(Number);
+                            const totalMins = Math.max(0, h * 60 + m - 15);
+                            const nextH = String(Math.floor(totalMins / 60)).padStart(2, '0');
+                            const nextM = String(totalMins % 60).padStart(2, '0');
+                            setEditorVisitStartTime(`${nextH}:${nextM}`);
+                          }}
+                          className="px-1.5 py-0.5 rounded bg-white border border-gray-300 text-[10px] font-bold text-gray-700 hover:bg-gray-100"
+                          title="-15 minutes"
+                        >
+                          -15m
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const [h, m] = editorVisitStartTime.split(':').map(Number);
+                            const totalMins = Math.min(23 * 60 + 45, h * 60 + m + 15);
+                            const nextH = String(Math.floor(totalMins / 60)).padStart(2, '0');
+                            const nextM = String(totalMins % 60).padStart(2, '0');
+                            setEditorVisitStartTime(`${nextH}:${nextM}`);
+                          }}
+                          className="px-1.5 py-0.5 rounded bg-white border border-gray-300 text-[10px] font-bold text-gray-700 hover:bg-gray-100"
+                          title="+15 minutes"
+                        >
+                          +15m
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="time"
+                      value={editorVisitStartTime}
+                      onChange={e => setEditorVisitStartTime(e.target.value)}
+                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-bold bg-white"
+                    />
+                  </div>
+
+                  {/* Visit Duration & Presets */}
+                  <div>
+                    <label className="block text-xs font-bold text-[#193953] mb-1">Visit Duration (minutes):</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={editorActivityType === 'buffer' ? 10 : 15}
+                        max={360}
+                        value={editorDurationMinutes}
+                        onChange={e => setEditorDurationMinutes(parseInt(e.target.value) || 15)}
+                        className="w-24 rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-bold text-center bg-white"
+                      />
+                      <div className="flex flex-wrap gap-1">
+                        {[30, 45, 60, 90, 120].map(m => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setEditorDurationMinutes(m)}
+                            className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all ${
+                              editorDurationMinutes === m
+                                ? 'bg-[#176EA8] text-white shadow-xs'
+                                : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-100'
+                            }`}
+                          >
+                            {m}m
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Transfer Allowance (if not buffer) */}
+                  {editorActivityType !== 'buffer' && (
+                    <div>
+                      <label className="block text-xs font-bold text-[#193953] mb-1">
+                        Transfer Allowance (min 5m planning allowance):
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min={5}
+                          max={120}
+                          value={editorTransferMinutes}
+                          onChange={e => setEditorTransferMinutes(parseInt(e.target.value) || 15)}
+                          className="w-24 rounded-xl border border-gray-300 px-3 py-1.5 text-xs font-bold text-center bg-white"
+                        />
+                        <div className="flex flex-wrap gap-1">
+                          {[10, 15, 20, 30].map(m => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => setEditorTransferMinutes(m)}
+                              className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all ${
+                                editorTransferMinutes === m
+                                  ? 'bg-[#176EA8] text-white shadow-xs'
+                                  : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-100'
+                              }`}
+                            >
+                              {m}m
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Engine-Backed Before / After Preview & Validation */}
+                {visitSchedulingPreview && (
                   <div className="space-y-3">
-                    {!freeTimePreview.isValid ? (
+                    {!visitSchedulingPreview.isValid ? (
                       <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900 space-y-2">
                         <div className="font-bold flex items-center gap-1">
                           <span>🚫</span>
-                          <span>Cannot Fit Into This Free Window:</span>
+                          <span>Scheduling Conflict:</span>
                         </div>
-                        <p>{freeTimePreview.validationError}</p>
-                        {freeTimePreview.validationError?.includes('Insufficient free time') && (
+                        <p className="font-medium">{visitSchedulingPreview.validationError}</p>
+
+                        {/* Alternative Valid Times Suggestions */}
+                        {visitSchedulingPreview.alternativeTimes.length > 0 && (
+                          <div className="pt-2 border-t border-rose-200 space-y-1.5">
+                            <span className="text-[11px] font-bold text-amber-900 block">
+                              💡 Suggested Valid Alternative Times:
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {visitSchedulingPreview.alternativeTimes.map(alt => (
+                                <button
+                                  key={alt.startTime}
+                                  type="button"
+                                  onClick={() => setEditorVisitStartTime(alt.startTime)}
+                                  className="rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-xs font-bold transition-all"
+                                >
+                                  {alt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {visitSchedulingPreview.validationError?.includes('Insufficient free time') && (
                           <div className="pt-2 border-t border-rose-200 flex items-center justify-between gap-2">
                             <span className="text-[11px] text-rose-800">Save to wishlist without scheduling?</span>
                             <button
                               type="button"
                               onClick={() => {
-                                const placeName = freeActivityMode === 'existing'
-                                  ? moveCandidates.find(c => c.activityId === freeSelectedActivityId)?.name || 'Custom Place'
-                                  : freeCustomName.trim() || 'Custom Stop';
-                                const duration = freeActivityMode === 'existing'
-                                  ? moveCandidates.find(c => c.activityId === freeSelectedActivityId)?.durationMinutes || 45
-                                  : freeCustomDuration;
-                                setWishlistPlaces(prev => [...prev, { id: `wishlist-${Date.now()}`, name: placeName, durationMinutes: duration }]);
-                                setIsFreeTimeModalOpen(false);
+                                const placeName = editorName.trim() || 'Custom Place';
+                                setWishlistPlaces(prev => [
+                                  ...prev,
+                                  { id: `wishlist-${Date.now()}`, name: placeName, durationMinutes: editorDurationMinutes },
+                                ]);
+                                setIsVisitEditorOpen(false);
                                 recordHistory(constraints, `Saved "${placeName}" to wishlist (unscheduled · 0m impact).`);
                               }}
                               className="rounded-lg bg-sky-600 hover:bg-sky-700 text-white px-2.5 py-1 text-xs font-bold shrink-0 shadow-xs"
@@ -2247,31 +2417,45 @@ export default function PrototypeV2Screen() {
                         )}
                       </div>
                     ) : (
-                      <div className="rounded-xl border border-emerald-300 bg-emerald-50/50 p-3 space-y-2 text-xs">
+                      <div className="rounded-xl border border-emerald-300 bg-emerald-50/50 p-3.5 space-y-2.5 text-xs">
                         <div className="font-bold text-emerald-900 flex items-center justify-between">
-                          <span>✓ Fits Into Free Leisure Slot</span>
+                          <span>✓ Proposed Visit Timeline & Feasibility</span>
                           <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                            Feasible
+                            Valid Schedule
                           </span>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-emerald-200">
-                          <div>
-                            <span className="text-gray-500 block">Remaining Free Time:</span>
-                            <strong>{freeTimePreview.after.remainingFreeMinutes} minutes</strong>
-                          </div>
-                          <div>
-                            <span className="text-gray-500 block">Return Margin:</span>
-                            <strong className={freeTimePreview.after.returnMarginMinutes >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
-                              +{freeTimePreview.after.returnMarginMinutes}m ({freeTimePreview.deltas.marginDeltaMinutes >= 0 ? '+' : ''}{freeTimePreview.deltas.marginDeltaMinutes}m)
+
+                        {/* Full Proposed Timeline Breakdown */}
+                        <div className="space-y-1.5 pt-1 border-t border-emerald-200 text-[11px]">
+                          {editorActivityType !== 'buffer' && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-600">🚗 Transfer:</span>
+                              <strong>
+                                {visitSchedulingPreview.details.transferStartTime.slice(11)} – {visitSchedulingPreview.details.transferEndTime.slice(11)}{' '}
+                                ({visitSchedulingPreview.params.transferMinutes}m planning allowance)
+                              </strong>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-600">📍 Visit:</span>
+                            <strong className="text-emerald-900">
+                              {visitSchedulingPreview.details.visitStartTime.slice(11)} – {visitSchedulingPreview.details.visitEndTime.slice(11)}{' '}
+                              ({visitSchedulingPreview.params.durationMinutes}m visit)
                             </strong>
                           </div>
-                          <div>
-                            <span className="text-gray-500 block">Home Arrival:</span>
-                            <strong>{freeTimePreview.after.homeArrival.slice(11)} IST</strong>
+
+                          <div className="flex items-center justify-between pt-1 border-t border-emerald-200/60">
+                            <span className="text-gray-600">☀️ Free Time:</span>
+                            <span>
+                              Pre: <strong>{visitSchedulingPreview.details.precedingFreeTime ? `${visitSchedulingPreview.details.precedingFreeTime.durationMinutes}m` : '0m'}</strong> · Post: <strong>{visitSchedulingPreview.details.followingFreeTime ? `${visitSchedulingPreview.details.followingFreeTime.durationMinutes}m` : '0m'}</strong>
+                            </span>
                           </div>
-                          <div>
-                            <span className="text-gray-500 block">Itinerary Impact:</span>
-                            <strong>{freeTimePreview.deltas.freeTimeDeltaMinutes}m allocated</strong>
+
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-600">🏁 Return Margin:</span>
+                            <strong className={visitSchedulingPreview.after.returnMarginMinutes >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                              +{visitSchedulingPreview.after.returnMarginMinutes}m ({visitSchedulingPreview.deltas.marginDeltaMinutes >= 0 ? '+' : ''}{visitSchedulingPreview.deltas.marginDeltaMinutes}m) · Arrival: {visitSchedulingPreview.after.homeArrival.slice(11)} IST
+                            </strong>
                           </div>
                         </div>
                       </div>
@@ -2282,18 +2466,18 @@ export default function PrototypeV2Screen() {
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E1ECF2]">
                   <button
                     type="button"
-                    onClick={() => setIsFreeTimeModalOpen(false)}
+                    onClick={() => setIsVisitEditorOpen(false)}
                     className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
-                    disabled={!freeTimePreview || !freeTimePreview.isValid}
-                    onClick={handleConfirmFreeTimeUsage}
+                    disabled={!visitSchedulingPreview || !visitSchedulingPreview.isValid}
+                    onClick={handleConfirmVisitScheduling}
                     className="rounded-xl bg-emerald-600 disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-emerald-700 px-4 py-2 text-xs font-bold text-white shadow-xs"
                   >
-                    {freeTimeTab === 'buffer' ? 'Confirm & Reserve Buffer' : 'Confirm & Schedule Place'}
+                    {editorMode === 'edit_visit' ? 'Apply Visit Changes' : 'Confirm & Schedule Place'}
                   </button>
                 </div>
               </div>

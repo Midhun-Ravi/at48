@@ -39,8 +39,8 @@ export function dayOf(instant: number): string { return formatIST(instant).slice
 export function nextDay(date: string): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + DAY_MS).toISOString().slice(0, 10);
 }
-function at(date: string, hhmm: string): number { return parseIST(`${date}T${hhmm}`); }
-function add(time: number, mins: number): number { return time + mins * MINUTE_MS; }
+export function at(date: string, hhmm: string): number { return parseIST(`${date}T${hhmm}`); }
+export function add(time: number, mins: number): number { return time + mins * MINUTE_MS; }
 
 /** Count inclusive local calendar dates between departure and return deadline. */
 export function getCalendarDaysCount(depISO: string, retISO: string): number {
@@ -187,15 +187,45 @@ export function evaluateFeasibility(
   });
 
   function getAttemptFailureReason(activity: Activity, cursor: number, date: string, endCap: number): string {
-    const transferMinutes = input.transferAdjustments?.[activity.id] !== undefined
-      ? input.transferAdjustments[activity.id]
-      : activity.localTransferMinutes;
+    const customization = input.activityCustomizations?.[activity.id];
+    const durationMinutes = customization?.durationMinutes ?? activity.durationMinutes;
+    const transferMinutes = customization?.transferMinutes !== undefined
+      ? customization.transferMinutes
+      : (input.transferAdjustments?.[activity.id] !== undefined
+          ? input.transferAdjustments[activity.id]
+          : activity.localTransferMinutes);
+
+    if (customization?.startTime) {
+      const explicitStart = customization.startTime.includes('T')
+        ? parseIST(customization.startTime)
+        : at(date, customization.startTime);
+      const reqTransferStart = add(explicitStart, -transferMinutes);
+      if (reqTransferStart < cursor) {
+        return `Transfer needs to start at ${formatIST(reqTransferStart).slice(11)}, which conflicts with previous activity ending at ${formatIST(cursor).slice(11)}.`;
+      }
+      const opening = at(date, activity.openTime);
+      const closing = at(date, activity.closeTime);
+      const lastEntry = activity.lastEntryTime ? at(date, activity.lastEntryTime) : closing;
+      if (explicitStart < opening) {
+        return `Visit starts at ${formatIST(explicitStart).slice(11)}, which is before opening time ${activity.openTime}.`;
+      }
+      if (explicitStart > lastEntry) {
+        return `Visit start at ${formatIST(explicitStart).slice(11)} is past last entry cutoff ${activity.lastEntryTime || activity.closeTime}.`;
+      }
+      if (add(explicitStart, durationMinutes) > closing) {
+        return `Visit finishes at ${formatIST(add(explicitStart, durationMinutes)).slice(11)}, which is past closing time ${activity.closeTime}.`;
+      }
+      if (add(explicitStart, durationMinutes) > endCap) {
+        return `Visit extends past scheduled day limit (${formatIST(endCap).slice(11)}).`;
+      }
+    }
+
     const transferEnd = add(cursor, transferMinutes);
     const opening = at(date, activity.openTime);
     const closing = at(date, activity.closeTime);
     const lastEntry = activity.lastEntryTime ? at(date, activity.lastEntryTime) : closing;
     const begin = Math.max(transferEnd, opening);
-    const finish = add(begin, activity.durationMinutes);
+    const finish = add(begin, durationMinutes);
     if (cursor >= endCap) {
       return `Planning window for the day is already full (reached ${formatIST(endCap).slice(11)}).`;
     }
@@ -214,22 +244,107 @@ export function evaluateFeasibility(
   function attempt(activity: Activity, cursor: number, date: string,
     endCap: number, day: number): number | undefined {
     if (cursor >= endCap) return undefined;
-    const transferMinutes = input.transferAdjustments?.[activity.id] !== undefined
-      ? input.transferAdjustments[activity.id]
-      : activity.localTransferMinutes;
-    const transferEnd = add(cursor, transferMinutes);
+
+    const customization = input.activityCustomizations?.[activity.id];
+    const durationMinutes = customization?.durationMinutes ?? activity.durationMinutes;
+    const transferMinutes = customization?.transferMinutes !== undefined
+      ? customization.transferMinutes
+      : (input.transferAdjustments?.[activity.id] !== undefined
+          ? input.transferAdjustments[activity.id]
+          : activity.localTransferMinutes);
+
     const opening = at(date, activity.openTime);
     const closing = at(date, activity.closeTime);
     const lastEntry = activity.lastEntryTime ? at(date, activity.lastEntryTime) : closing;
-    let begin = Math.max(transferEnd, opening);
-    let finish = add(begin, activity.durationMinutes);
-    if (begin > lastEntry || finish > closing || finish > endCap) return undefined;
+
+    let transferStart = cursor;
+    let begin: number;
+    let finish: number;
+
+    if (customization?.startTime) {
+      const explicitStart = customization.startTime.includes('T')
+        ? parseIST(customization.startTime)
+        : at(date, customization.startTime);
+      const reqTransferStart = add(explicitStart, -transferMinutes);
+
+      if (reqTransferStart < cursor) {
+        violation(
+          'COLLISION_CONFLICT',
+          'BLOCKER',
+          `Cannot fit "${activity.name}": transfer needs to start at ${formatIST(reqTransferStart).slice(11)}, which conflicts with previous activity ending at ${formatIST(cursor).slice(11)}.`,
+          activity.id
+        );
+        return undefined;
+      }
+
+      if (reqTransferStart > cursor) {
+        // Preserve preceding free time between cursor and transfer start
+        const dateStr = formatIST(cursor).slice(0, 10);
+        const sunsetEpoch = at(dateStr, '18:15');
+        if (cursor < sunsetEpoch && reqTransferStart > sunsetEpoch) {
+          push('FREE', 'Daytime free time', cursor, sunsetEpoch, day);
+          push('FREE', 'Evening free time', sunsetEpoch, reqTransferStart, day);
+        } else if (reqTransferStart <= sunsetEpoch) {
+          push('FREE', 'Daytime free time', cursor, reqTransferStart, day);
+        } else {
+          push('FREE', 'Evening free time', cursor, reqTransferStart, day);
+        }
+      }
+
+      transferStart = reqTransferStart;
+      begin = explicitStart;
+      finish = add(begin, durationMinutes);
+
+      if (begin < opening) {
+        violation(
+          'OPERATING_HOURS_CONFLICT',
+          'BLOCKER',
+          `"${activity.name}" opens at ${activity.openTime}, but requested visit starts at ${formatIST(begin).slice(11)}.`,
+          activity.id
+        );
+        return undefined;
+      }
+      if (begin > lastEntry) {
+        violation(
+          'OPERATING_HOURS_CONFLICT',
+          'BLOCKER',
+          `Arrival at ${formatIST(begin).slice(11)} is past last entry cutoff ${activity.lastEntryTime || activity.closeTime} for ${activity.name}.`,
+          activity.id
+        );
+        return undefined;
+      }
+      if (finish > closing) {
+        violation(
+          'OPERATING_HOURS_CONFLICT',
+          'BLOCKER',
+          `Visit for "${activity.name}" finishes at ${formatIST(finish).slice(11)}, which is past closing time ${activity.closeTime}.`,
+          activity.id
+        );
+        return undefined;
+      }
+      if (finish > endCap) {
+        violation(
+          'OPERATING_HOURS_CONFLICT',
+          'BLOCKER',
+          `"${activity.name}" visit extends past scheduled day limit (${formatIST(endCap).slice(11)}).`,
+          activity.id
+        );
+        return undefined;
+      }
+    } else {
+      const transferEnd = add(cursor, transferMinutes);
+      begin = Math.max(transferEnd, opening);
+      finish = add(begin, durationMinutes);
+      if (begin > lastEntry || finish > closing || finish > endCap) return undefined;
+    }
 
     const prevEntry = [...timeline].reverse().find(t => t.day === day && t.category !== 'FREE');
     const originLabel = prevEntry ? prevEntry.label : (day === 1 ? 'Hotel check-in' : 'Hotel / Overnight stay');
 
-    push('TRANSFER', `Local transfer to ${activity.name}`, cursor, transferEnd, day, activity.id, undefined, undefined, originLabel, activity.name);
-    push('WAIT', `Wait for ${activity.name} to open`, transferEnd, begin, day, activity.id);
+    push('TRANSFER', `Local transfer to ${activity.name}`, transferStart, begin, day, activity.id, undefined, undefined, originLabel, activity.name);
+    if (!customization?.startTime && add(cursor, transferMinutes) < begin) {
+      push('WAIT', `Wait for ${activity.name} to open`, add(cursor, transferMinutes), begin, day, activity.id);
+    }
     push('ACTIVITY', activity.name, begin, finish, day, activity.id, activity.isOptional);
     activityOutcomes.push({ activityId: activity.id, status: `day${day}` as any });
 
@@ -628,8 +743,10 @@ export function evaluateFeasibility(
         const matchingIdx = dayCustoms.findIndex(ca => {
           if (!ca.durationMinutes || ca.durationMinutes <= 0) return false;
           if (ca.slotStart) {
-            const caEpoch = parseIST(ca.slotStart);
-            return caEpoch >= winCursor && caEpoch < winEnd;
+            const visitEpoch = parseIST(ca.slotStart);
+            const trMins = ca.transferMinutes ?? 0;
+            const trStart = add(visitEpoch, -trMins);
+            return (trStart >= winCursor && trStart < winEnd) || (visitEpoch >= winCursor && visitEpoch < winEnd);
           }
           return true;
         });
@@ -641,52 +758,112 @@ export function evaluateFeasibility(
         const outerIdx = customActivities.indexOf(matching);
         if (outerIdx !== -1) customActivities.splice(outerIdx, 1);
 
-        let startEpoch = winCursor;
-        if (matching.slotStart) {
-          const caEpoch = parseIST(matching.slotStart);
-          if (caEpoch >= winCursor && caEpoch < winEnd) {
-            startEpoch = caEpoch;
-          }
-        }
-
-        // If requested start time is after winCursor, preserve preceding free time
-        if (startEpoch > winCursor) {
-          const dateStr = formatIST(winCursor).slice(0, 10);
-          const sunsetEpoch = at(dateStr, '18:15');
-          if (winCursor < sunsetEpoch && startEpoch > sunsetEpoch) {
-            push('FREE', 'Daytime free time', winCursor, sunsetEpoch, day);
-            push('FREE', 'Evening free time', sunsetEpoch, startEpoch, day);
-          } else if (startEpoch <= sunsetEpoch) {
-            push('FREE', 'Daytime free time', winCursor, startEpoch, day);
-          } else {
-            push('FREE', 'Evening free time', winCursor, startEpoch, day);
-          }
-          freeMinutes += (startEpoch - winCursor) / MINUTE_MS;
-          winCursor = startEpoch;
-        }
-
-        // Handle user-specified transfer allowance if present
         const transferMins = matching.transferMinutes ?? 0;
-        let actStart = startEpoch;
-        if (transferMins > 0) {
-          const transEnd = add(actStart, transferMins);
-          const prevEntry = [...timeline].reverse().find(t => t.day === day && t.category !== 'FREE');
-          const originLabel = prevEntry ? prevEntry.label : (day === 1 ? 'Hotel check-in' : 'Hotel / Overnight stay');
-          push('TRANSFER', `Local transfer to ${matching.name}`, actStart, transEnd, day, matching.id, undefined, undefined, originLabel, matching.name);
-          actStart = transEnd;
+        let visitStartEpoch: number;
+        let transferStartEpoch: number;
+
+        if (matching.slotStart) {
+          const reqEpoch = parseIST(matching.slotStart);
+          if (reqEpoch === winCursor) {
+            // Anchored to the start of the free window: transfer starts at window start
+            transferStartEpoch = winCursor;
+            visitStartEpoch = add(transferStartEpoch, transferMins);
+          } else {
+            // Explicit user-chosen visit start time
+            visitStartEpoch = reqEpoch;
+            transferStartEpoch = add(visitStartEpoch, -transferMins);
+          }
+        } else {
+          transferStartEpoch = winCursor;
+          visitStartEpoch = add(transferStartEpoch, transferMins);
         }
 
-        const totalNeededMins = transferMins + matching.durationMinutes;
-        const availableFromStart = Math.round((winEnd - startEpoch) / MINUTE_MS);
+        const visitEndEpoch = add(visitStartEpoch, matching.durationMinutes);
+        const dateStr = formatIST(visitStartEpoch).slice(0, 10);
 
-        if (totalNeededMins > availableFromStart) {
-          violation('OPERATING_HOURS_CONFLICT', 'BLOCKER',
-            `Cannot fit "${matching.name}": requires ${totalNeededMins}m (${matching.durationMinutes}m duration + ${transferMins}m transfer), but only ${availableFromStart}m remains in free window.`,
-            matching.id);
+        // Check 1: Collision with previous activity
+        if (transferStartEpoch < winCursor) {
+          violation(
+            'COLLISION_CONFLICT',
+            'BLOCKER',
+            `Cannot fit "${matching.name}": transfer needs to start at ${formatIST(transferStartEpoch).slice(11)}, which conflicts with previous activity ending at ${formatIST(winCursor).slice(11)}.`,
+            matching.id
+          );
           continue;
         }
 
-        const actEnd = add(actStart, matching.durationMinutes);
+        // Check 2: Exceeding window boundary
+        if (visitEndEpoch > winEnd) {
+          violation(
+            'OPERATING_HOURS_CONFLICT',
+            'BLOCKER',
+            `Cannot fit "${matching.name}": visit finishes at ${formatIST(visitEndEpoch).slice(11)}, which exceeds the available free window (ending at ${formatIST(winEnd).slice(11)}).`,
+            matching.id
+          );
+          continue;
+        }
+
+        // Check 3: Operating hours if provided
+        if (matching.openTime) {
+          const openEpoch = at(dateStr, matching.openTime);
+          if (visitStartEpoch < openEpoch) {
+            violation(
+              'OPERATING_HOURS_CONFLICT',
+              'BLOCKER',
+              `"${matching.name}" opens at ${matching.openTime}, but requested visit starts at ${formatIST(visitStartEpoch).slice(11)}.`,
+              matching.id
+            );
+            continue;
+          }
+        }
+        if (matching.closeTime) {
+          const closeEpoch = at(dateStr, matching.closeTime);
+          if (visitEndEpoch > closeEpoch) {
+            violation(
+              'OPERATING_HOURS_CONFLICT',
+              'BLOCKER',
+              `"${matching.name}" closes at ${matching.closeTime}, but requested visit ends at ${formatIST(visitEndEpoch).slice(11)}.`,
+              matching.id
+            );
+            continue;
+          }
+        }
+        if (matching.lastEntryTime) {
+          const lastEntryEpoch = at(dateStr, matching.lastEntryTime);
+          if (visitStartEpoch > lastEntryEpoch) {
+            violation(
+              'OPERATING_HOURS_CONFLICT',
+              'BLOCKER',
+              `Visit start at ${formatIST(visitStartEpoch).slice(11)} is past last entry cutoff ${matching.lastEntryTime} for "${matching.name}".`,
+              matching.id
+            );
+            continue;
+          }
+        }
+
+        // If requested transfer start time is after winCursor, preserve preceding free time
+        if (transferStartEpoch > winCursor) {
+          const sunsetEpoch = at(dateStr, '18:15');
+          if (winCursor < sunsetEpoch && transferStartEpoch > sunsetEpoch) {
+            push('FREE', 'Daytime free time', winCursor, sunsetEpoch, day);
+            push('FREE', 'Evening free time', sunsetEpoch, transferStartEpoch, day);
+          } else if (transferStartEpoch <= sunsetEpoch) {
+            push('FREE', 'Daytime free time', winCursor, transferStartEpoch, day);
+          } else {
+            push('FREE', 'Evening free time', winCursor, transferStartEpoch, day);
+          }
+          freeMinutes += (transferStartEpoch - winCursor) / MINUTE_MS;
+          winCursor = transferStartEpoch;
+        }
+
+        // Push transfer if transferMins > 0
+        if (transferMins > 0) {
+          const prevEntry = [...timeline].reverse().find(t => t.day === day && t.category !== 'FREE');
+          const originLabel = prevEntry ? prevEntry.label : (day === 1 ? 'Hotel check-in' : 'Hotel / Overnight stay');
+          push('TRANSFER', `Local transfer to ${matching.name}`, transferStartEpoch, visitStartEpoch, day, matching.id, undefined, undefined, originLabel, matching.name);
+        }
+
+        // Push activity or rest buffer
         const isRest = Boolean(
           matching.isRestBuffer ||
           matching.name.toLowerCase().includes('buffer') ||
@@ -694,8 +871,8 @@ export function evaluateFeasibility(
           matching.name.toLowerCase().includes('downtime')
         );
         const cat: TimelineCategory = isRest ? 'REST' : 'ACTIVITY';
-        push(cat, matching.name, actStart, actEnd, day, matching.id, true, true, undefined, undefined, isRest);
-        winCursor = actEnd;
+        push(cat, matching.name, visitStartEpoch, visitEndEpoch, day, matching.id, true, true, undefined, undefined, isRest);
+        winCursor = visitEndEpoch;
       }
 
       if (winEnd > winCursor) {
@@ -731,6 +908,22 @@ export function evaluateFeasibility(
     totalSlackMinutes += makeFreeBlocks(at(dayDates[numDays - 1], '07:00'), Math.min(returnDeparture, at(dayDates[numDays - 1], '21:00')), numDays);
   }
   const destinationSlackMinutes = totalSlackMinutes;
+
+  // Check for any unplaced custom activities
+  for (const ca of customActivities) {
+    const timeLabel = ca.slotStart ? ca.slotStart.slice(11) : 'unspecified';
+    violation(
+      'COLLISION_CONFLICT',
+      'BLOCKER',
+      `Cannot fit "${ca.name}" at requested time ${timeLabel}: conflicts with previously scheduled activities or trip milestones.`,
+      ca.id
+    );
+    activityOutcomes.push({
+      activityId: ca.id,
+      status: 'unavailable',
+      reason: 'Collides with scheduled activities or falls outside available free windows.',
+    });
+  }
 
   timeline.sort((a, b) => parseIST(a.startTime) - parseIST(b.startTime));
 

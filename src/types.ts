@@ -28,6 +28,14 @@ export interface UserConstraints {
   activityOrder?: string[]; // user-specified ordering of activity IDs
   additionalActivities?: Activity[]; // extra Activity objects evaluated deterministically by the engine
   transferAdjustments?: Record<string, number>; // user-specified planning allowance minutes per activity ID
+  activityCustomizations?: Record<string, ActivityVisitCustomization>; // explicit user-selected timing/duration per activity ID
+}
+
+export interface ActivityVisitCustomization {
+  day?: number;
+  startTime?: string; // ISO string e.g. '2026-10-24T19:30' or '19:30'
+  durationMinutes?: number; // custom visit duration in minutes
+  transferMinutes?: number; // custom transfer planning allowance in minutes
 }
 
 export interface CustomPlannedActivity {
@@ -37,7 +45,10 @@ export interface CustomPlannedActivity {
   durationMinutes: number;
   transferMinutes?: number; // user-specified planning allowance to reach this location
   costPerPersonINR?: number;
-  slotStart?: string; // optional ISO anchor to slot into a specific free window
+  slotStart?: string; // optional ISO anchor or HH:mm for explicit visit start time
+  openTime?: string; // optional HH:mm opening hours
+  closeTime?: string; // optional HH:mm closing hours
+  lastEntryTime?: string; // optional HH:mm last entry
   isRestBuffer?: boolean; // true if this represents a personal rest or downtime buffer
 }
 
@@ -138,7 +149,7 @@ export interface TimetableEntry {
 
 export type ViolationType =
   | 'INVALID_INPUT' | 'REQUIRED_ACTIVITY_UNAVAILABLE'
-  | 'MISSED_DEADLINE' | 'REST_CONFLICT'
+  | 'MISSED_DEADLINE' | 'REST_CONFLICT' | 'COLLISION_CONFLICT'
   | 'POTENTIAL_NIGHT_CURFEW' | 'BUDGET_OVERRUN'
   | 'UNVERIFIED_OPENING_HOURS' | 'OPERATING_HOURS_CONFLICT';
 export interface ConstraintViolation {

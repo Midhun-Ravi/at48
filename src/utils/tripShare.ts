@@ -213,7 +213,7 @@ export function parseShareableTrip(
     else if (rawPace === 'packed') pace = 'packed';
     else if (rawPace === 'moderate' || rawPace === 'balanced') pace = 'balanced';
 
-    // 5. Budget per person (supports presets and custom whole-number amounts from ₹500 to ₹100,000)
+    // 5. Budget per person (supports presets and custom whole-number amounts from ₹0 upwards)
     const rawBudget = (searchParams.get('budget') || '').toLowerCase().trim();
     let perPersonBudgetINR = 6000;
     if (rawBudget === '3000' || rawBudget === 'backpacker') perPersonBudgetINR = 3000;
@@ -221,7 +221,7 @@ export function parseShareableTrip(
     else if (rawBudget === '10000' || rawBudget === 'comfort') perPersonBudgetINR = 10000;
     else if (rawBudget) {
       const parsedBudget = parseInt(rawBudget.replace(/^₹/, ''), 10);
-      if (!Number.isNaN(parsedBudget) && parsedBudget >= 500 && parsedBudget <= 100000) {
+      if (!Number.isNaN(parsedBudget) && parsedBudget >= 0 && parsedBudget <= 1000000) {
         perPersonBudgetINR = Math.round(parsedBudget);
       }
     }
@@ -231,7 +231,7 @@ export function parseShareableTrip(
     let partySize = 2;
     if (rawParty) {
       const parsedParty = parseInt(rawParty, 10);
-      if (!Number.isNaN(parsedParty) && parsedParty >= 1 && parsedParty <= 20) {
+      if (!Number.isNaN(parsedParty) && parsedParty >= 1) {
         partySize = parsedParty;
       }
     }

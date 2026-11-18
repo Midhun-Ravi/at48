@@ -24,6 +24,18 @@ export interface UserConstraints {
   planningMode?: 'solo' | 'group'; // default 'group'
   destinationAdjustments?: Record<string, number>; // independent one-way adjustment minutes per destination ID
   customActivities?: CustomPlannedActivity[]; // user-planned activities inside unallocated free-time slots
+  activityDayAssignments?: Record<string, number>; // explicit assigned day per activity (1..N)
+  activityOrder?: string[]; // user-specified ordering of activity IDs
+  additionalActivities?: Activity[]; // extra Activity objects evaluated deterministically by the engine
+  transferAdjustments?: Record<string, number>; // user-specified planning allowance minutes per activity ID
+  activityCustomizations?: Record<string, ActivityVisitCustomization>; // explicit user-selected timing/duration per activity ID
+}
+
+export interface ActivityVisitCustomization {
+  day?: number;
+  startTime?: string; // ISO string e.g. '2026-10-24T19:30' or '19:30'
+  durationMinutes?: number; // custom visit duration in minutes
+  transferMinutes?: number; // custom transfer planning allowance in minutes
 }
 
 export interface CustomPlannedActivity {
@@ -31,8 +43,13 @@ export interface CustomPlannedActivity {
   day: number;
   name: string;
   durationMinutes: number;
+  transferMinutes?: number; // user-specified planning allowance to reach this location
   costPerPersonINR?: number;
-  slotStart?: string; // optional ISO anchor to slot into a specific free window
+  slotStart?: string; // optional ISO anchor or HH:mm for explicit visit start time
+  openTime?: string; // optional HH:mm opening hours
+  closeTime?: string; // optional HH:mm closing hours
+  lastEntryTime?: string; // optional HH:mm last entry
+  isRestBuffer?: boolean; // true if this represents a personal rest or downtime buffer
 }
 
 export interface Activity {
@@ -125,13 +142,16 @@ export interface TimetableEntry {
   activityId?: string;
   isOptional?: boolean;
   isCustom?: boolean; // true if added by user during free-time planning
+  originLabel?: string; // origin stop/milestone label (for transfers)
+  destinationLabel?: string; // target stop/milestone label (for transfers)
+  isRestBuffer?: boolean; // true if this entry represents a reserved personal rest buffer
 }
 
 export type ViolationType =
   | 'INVALID_INPUT' | 'REQUIRED_ACTIVITY_UNAVAILABLE'
-  | 'MISSED_DEADLINE' | 'REST_CONFLICT'
+  | 'MISSED_DEADLINE' | 'REST_CONFLICT' | 'COLLISION_CONFLICT'
   | 'POTENTIAL_NIGHT_CURFEW' | 'BUDGET_OVERRUN'
-  | 'UNVERIFIED_OPENING_HOURS';
+  | 'UNVERIFIED_OPENING_HOURS' | 'OPERATING_HOURS_CONFLICT';
 export interface ConstraintViolation {
   type: ViolationType;
   severity: 'BLOCKER' | 'ADVISORY' | 'WARNING';
@@ -160,4 +180,75 @@ export interface FeasibilityResult {
   violations: ConstraintViolation[];
   activityOutcomes: ActivityOutcome[];
   timeline: TimetableEntry[];
+}
+
+export type ActivityScheduleStatus = 'scheduled' | 'unavailable' | 'unscheduled';
+
+export interface MoveActivityCandidate {
+  activityId: string;
+  name: string;
+  scheduleStatus: ActivityScheduleStatus;
+  currentDay?: number;
+  assignedDay?: number;
+  durationMinutes: number;
+  localTransferMinutes: number;
+  operatingWindow: string; // e.g. "10:00–17:30 (last entry 17:00)"
+  isOptional: boolean;
+  costINR: number;
+  conflictReason?: string;
+}
+
+export type MoveResolutionStatus =
+  | 'MOVE_FITS'
+  | 'CONFLICT_RESOLVED'
+  | 'MORE_CHANGES_NEEDED'
+  | 'CANNOT_FIT'
+  | 'VALID_AND_RESOLVED'
+  | 'VALID_UNRESOLVED'
+  | 'INVALID';
+
+export type MoveResolutionLabel =
+  | 'Move Fits'
+  | 'Conflict Resolved'
+  | 'More Changes Needed'
+  | 'Cannot Fit';
+
+export interface MoveActivityPreview {
+  activityId: string;
+  activityName: string;
+  fromDay?: number;
+  toDay: number;
+  toPosition?: number;
+  isValid: boolean;
+  validationError?: string;
+  resolutionStatus: MoveResolutionStatus;
+  resolutionLabel: MoveResolutionLabel;
+  resolutionMessage: string;
+  proposedConstraints: UserConstraints;
+  before: {
+    homeArrival: string;
+    returnMarginMinutes: number;
+    activityStartTime?: string;
+    activityEndTime?: string;
+    isFeasible: boolean;
+    violationsCount: number;
+    violations: ConstraintViolation[];
+  };
+  after: {
+    homeArrival: string;
+    returnMarginMinutes: number;
+    activityStartTime?: string;
+    activityEndTime?: string;
+    isFeasible: boolean;
+    violationsCount: number;
+    violations: ConstraintViolation[];
+  };
+  deltas: {
+    marginDeltaMinutes: number;
+    homeArrivalDeltaMinutes: number;
+    originalViolationResolved: boolean;
+    newConflicts: string[];
+    displacedActivities: string[];
+    additionalTravelAllowanceMinutes: number;
+  };
 }

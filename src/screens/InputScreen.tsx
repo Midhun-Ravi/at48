@@ -5,10 +5,13 @@ import type { UserConstraints } from '../types';
 import { parseIST, getCalendarDaysCount } from '../engine/scheduler';
 import { cleanInputDisplayName, sanitizeDisplayName } from '../utils/tripShare';
 import ProgressBar from '../components/ProgressBar';
-import DayChipPicker from '../components/DayChipPicker';
+import MonthCalendarPicker from '../components/MonthCalendarPicker';
 import GroupSizePicker from '../components/GroupSizePicker';
 import BudgetPicker from '../components/BudgetPicker';
 import OriginPicker from '../components/OriginPicker';
+import TactileButton from '../components/ui/TactileButton';
+
+import ScenicBackground from '../components/scenic/ScenicBackground';
 
 type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserConstraints>> };
 
@@ -36,7 +39,7 @@ export default function InputScreen({ inputs, setInputs }: Props) {
       const retEpoch = parseIST(inputs.returnDeadlineDateTime);
 
       if (retEpoch <= depEpoch) {
-        throw new Error('Return time must be after departure time.');
+        throw new Error('Return time must be after departure time in Indian Standard Time (IST).');
       }
 
       const numDays = getCalendarDaysCount(inputs.departureDateTime, inputs.returnDeadlineDateTime);
@@ -50,8 +53,12 @@ export default function InputScreen({ inputs, setInputs }: Props) {
         throw new Error('Organizer name must be 40 characters or fewer.');
       }
 
-      if (inputs.perPersonBudgetINR < 500 || inputs.perPersonBudgetINR > 100000) {
-        throw new Error('Please enter a per-person budget between ₹500 and ₹1,00,000.');
+      if (!Number.isInteger(inputs.partySize) || inputs.partySize < 1) {
+        throw new Error('Please enter a party size of at least 1 traveler.');
+      }
+
+      if (inputs.perPersonBudgetINR < 0 || !Number.isFinite(inputs.perPersonBudgetINR)) {
+        throw new Error('Please enter a valid non-negative per-person budget.');
       }
 
       // Normalize organizer name on submit
@@ -68,66 +75,68 @@ export default function InputScreen({ inputs, setInputs }: Props) {
   const isGroup = (inputs.planningMode ?? 'group') === 'group';
 
   return (
-    <section className="mx-auto max-w-xl space-y-6">
+    <section className="relative mx-auto max-w-xl space-y-5 sm:space-y-6 w-full min-w-0">
       {/* 4-part segmented progress meter */}
       <ProgressBar currentStep={1} />
 
-      <div>
-        <h1 className="text-3xl font-extrabold text-[#193953]">
-          When are we hitting the road?
-        </h1>
-        <p className="mt-2 text-sm text-[#5A7184]">
-          Set your real limits. We'll compare four weekend escapes by usable time, not just distance.
-        </p>
+      <div className="relative text-center sm:text-left space-y-1 overflow-hidden rounded-2xl bg-gradient-to-b from-[#F8E1D2]/50 to-transparent p-4 sm:p-5 border border-[#EADBCE]">
+        <ScenicBackground variant="compact" />
+        <div className="relative z-10">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FAF2EB] px-3 py-1 text-[11px] font-bold text-[#C65B32] border border-[#EADBCE] mb-2 shadow-2xs">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#C65B32]" />
+            Trip Limits & Departure
+          </span>
+          <h1 className="text-xl sm:text-3xl font-black text-[#344F48] tracking-tight leading-snug">
+            When are we hitting the road?
+          </h1>
+          <p className="text-xs sm:text-sm text-[#6B7C77] mt-1">
+            Set your real limits. We'll compare weekend escapes by usable daylight and return buffer, not just optimistic distance.
+          </p>
+        </div>
       </div>
 
-      <div className="space-y-5 rounded-2xl border border-[#E1ECF2] bg-white p-5 shadow-sm">
+      <div className="space-y-4 sm:space-y-5 rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-3.5 sm:p-6 shadow-sm">
         {/* Planning Mode: Group vs Solo */}
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-[#5A7184]">
+          <label className="block text-xs font-black uppercase tracking-wider text-[#6B7C77]">
             Planning Mode
           </label>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <button
-              type="button"
+            <TactileButton
+              variant={isGroup ? 'primary' : 'secondary'}
+              size="md"
               onClick={() => modify({ planningMode: 'group', partySize: inputs.partySize === 1 ? 2 : inputs.partySize })}
-              className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-all cursor-pointer ${
-                isGroup
-                  ? 'border-[#176EA8] bg-[#DDF0F6] text-[#176EA8] font-bold shadow-xs'
-                  : 'border-[#E1ECF2] bg-[#F4F9FC] text-[#5A7184] hover:border-slate-300'
-              }`}
+              className="w-full justify-center"
             >
               👥 Group
-            </button>
-            <button
-              type="button"
+            </TactileButton>
+
+            <TactileButton
+              variant={!isGroup ? 'primary' : 'secondary'}
+              size="md"
               onClick={() => modify({ planningMode: 'solo', partySize: 1 })}
-              className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-all cursor-pointer ${
-                !isGroup
-                  ? 'border-[#176EA8] bg-[#DDF0F6] text-[#176EA8] font-bold shadow-xs'
-                  : 'border-[#E1ECF2] bg-[#F4F9FC] text-[#5A7184] hover:border-slate-300'
-              }`}
+              className="w-full justify-center"
             >
               🎒 Solo
-            </button>
+            </TactileButton>
           </div>
         </div>
 
         {/* Organizer Display Name */}
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-[#5A7184]">
+          <label className="block text-xs font-black uppercase tracking-wider text-[#6B7C77]">
             Organizer Name {isGroup ? '' : '(Optional)'}
           </label>
           <input
             type="text"
             maxLength={40}
             placeholder={isGroup ? 'e.g. Sujil Kumar' : 'Your name'}
-            className="mt-1.5 block w-full rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3 text-sm text-[#193953] placeholder:text-[#5A7184]/60 focus:border-[#176EA8] focus:bg-white focus:outline-none transition-colors"
+            className="mt-1.5 block w-full rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3 text-sm text-[#344F48] placeholder:text-[#6B7C77]/60 focus:border-[#C65B32] focus:bg-white focus:outline-none transition-colors shadow-2xs"
             value={inputs.organizerName ?? ''}
             onChange={e => modify({ organizerName: cleanInputDisplayName(e.target.value) })}
             onBlur={e => modify({ organizerName: sanitizeDisplayName(e.target.value) })}
           />
-          <span className="mt-1 block text-[11px] text-[#5A7184]">
+          <span className="mt-1 block text-[11px] text-[#6B7C77]">
             {isGroup
               ? 'Used in shareable invitation links and WhatsApp RSVPs.'
               : 'Appears on your itinerary summary.'}
@@ -137,12 +146,12 @@ export default function InputScreen({ inputs, setInputs }: Props) {
         {/* Origin Starting Area Picker */}
         <OriginPicker />
 
-        {/* Departure and Return Day Chips */}
+        {/* Month Calendar Picker */}
         <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-[#5A7184] mb-2">
+          <label className="block text-xs font-black uppercase tracking-wider text-[#6B7C77] mb-2">
             Trip Dates & Times (1 to 4 Calendar Days)
           </label>
-          <DayChipPicker
+          <MonthCalendarPicker
             departureDateTime={inputs.departureDateTime}
             returnDeadlineDateTime={inputs.returnDeadlineDateTime}
             onChange={handleDateChange}
@@ -170,13 +179,15 @@ export default function InputScreen({ inputs, setInputs }: Props) {
         />
       </div>
 
-      <button
-        type="button"
+      <TactileButton
+        variant="primary"
+        size="lg"
+        fullWidth
         onClick={proceed}
-        className="w-full rounded-xl bg-[#176EA8] px-4 py-4 font-bold text-white shadow-md shadow-[#176EA8]/20 hover:bg-[#135a8a] active:scale-[0.99] transition-all cursor-pointer text-base"
+        className="text-base"
       >
         Run Reality Check →
-      </button>
+      </TactileButton>
     </section>
   );
 }

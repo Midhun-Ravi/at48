@@ -197,7 +197,7 @@ export default function TripMap({
             <button
               onClick={() => setViewMode('map')}
               className={`rounded-md px-3 py-1 font-semibold transition-all cursor-pointer ${
-                viewMode === 'map' ? 'bg-[#176EA8] text-white shadow-xs' : 'text-[#5A7184] hover:text-[#193953]'
+                viewMode === 'map' ? 'bg-[#C65B32] text-white shadow-xs' : 'text-[#6B7C77] hover:text-[#344F48]'
               }`}
             >
               Map View
@@ -205,7 +205,7 @@ export default function TripMap({
             <button
               onClick={() => setViewMode('list')}
               className={`rounded-md px-3 py-1 font-semibold transition-all cursor-pointer ${
-                viewMode === 'list' ? 'bg-[#176EA8] text-white shadow-xs' : 'text-[#5A7184] hover:text-[#193953]'
+                viewMode === 'list' ? 'bg-[#C65B32] text-white shadow-xs' : 'text-[#6B7C77] hover:text-[#344F48]'
               }`}
             >
               Stop List
@@ -216,19 +216,19 @@ export default function TripMap({
 
       {/* Road Geometry or Fallback Notification Badge */}
       {routeState.status === 'success' && routeState.distanceKm && (
-        <div className="rounded-xl bg-[#DDF0F6] border border-[#176EA8]/20 p-2.5 text-xs text-[#193953] flex items-center justify-between">
+        <div className="rounded-xl bg-[#FAF2EB] border border-[#EADBCE] p-2.5 text-xs text-[#344F48] flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span>🛣️</span>
             <span>
               <strong>Road Route via OSRM:</strong> ~{routeState.distanceKm} km · ~{formatDuration(routeState.durationMinutes ?? 0)} driving time
             </span>
           </div>
-          <span className="text-[11px] text-[#5A7184]">OpenStreetMap Road Graph</span>
+          <span className="text-[11px] text-[#6B7C77]">OpenStreetMap Road Graph</span>
         </div>
       )}
 
       {routeState.status === 'fallback' && (
-        <div className="rounded-xl bg-[#F4F9FC] border border-[#E1ECF2] p-2.5 text-xs text-[#5A7184] flex items-center justify-between">
+        <div className="rounded-xl bg-[#FAF2EB] border border-[#EADBCE] p-2.5 text-xs text-[#6B7C77] flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span>📍</span>
             <span>
@@ -240,12 +240,12 @@ export default function TripMap({
 
       {/* Map View */}
       {viewMode === 'map' && !tileError && (
-        <div className="relative w-full overflow-hidden rounded-xl border border-[#E1ECF2] bg-[#F4F9FC]">
+        <div className="relative w-full overflow-hidden rounded-xl border border-[#EADBCE] bg-[#FAF2EB]">
           <div className="h-72 sm:h-96 w-full">
             <MapContainer
               bounds={bounds}
               scrollWheelZoom={false}
-              className="h-full w-full z-0 text-[#193953]"
+              className="h-full w-full z-0 text-[#344F48]"
               style={{ minHeight: '280px' }}
             >
               <TileLayer
@@ -264,7 +264,7 @@ export default function TripMap({
                 <Polyline
                   positions={routeState.geometry}
                   pathOptions={{
-                    color: '#176EA8',
+                    color: '#C65B32',
                     weight: 4.5,
                     opacity: 0.85,
                     lineJoin: 'round',

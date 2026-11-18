@@ -1,33 +1,37 @@
 import { useState, useMemo } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Dispatch, SetStateAction } from 'react';
-import type { CustomPlannedActivity, UserConstraints } from '../types';
+import type { CustomPlannedActivity, UserConstraints, TimetableEntry } from '../types';
 import { getDestination } from '../data/destinations';
 import { getDestinationGuide } from '../data/destinationGuides';
-import { getCompatiblePitstops } from '../data/pitstops.js';
+import { getCompatiblePitstops } from '../data/pitstops';
 import { evaluateFeasibility, parseIST } from '../engine/scheduler';
+import { evaluateActivityMove, getMoveCandidates, getInsertionSlotsForDay } from '../engine/moveActivity';
+import {
+  getTransferDetails,
+  evaluateTransferAdjustment,
+  evaluateVisitScheduling,
+  type VisitSchedulingPreview,
+} from '../engine/timelineEditing';
 import TripMap from '../components/TripMap';
 import ProgressBar from '../components/ProgressBar';
-import { getPlaceImage } from '../data/images';
 import {
   formatDuration,
-  formatReadableDate,
   formatReadableDateTime,
-  formatTimelineTime,
 } from '../utils/formatters';
 import {
   buildShareableParams,
   parseShareableTrip,
 } from '../utils/tripShare';
+import TactileButton from '../components/ui/TactileButton';
+import ScenicBackground from '../components/scenic/ScenicBackground';
+import DestinationGuideModal from '../components/DestinationGuideModal';
 
 type Props = { inputs: UserConstraints; setInputs: Dispatch<SetStateAction<UserConstraints>> };
 
-interface PlanningSlotState {
-  day: number;
-  startTime: string;
-  endTime: string;
-  maxDuration: number;
-  editActivity?: CustomPlannedActivity;
+interface WhatChangedNotice {
+  message: string;
+  timestamp: number;
 }
 
 export default function ScheduleScreen({ inputs, setInputs }: Props) {
@@ -37,16 +41,48 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
   // Active day tab (1 to N)
   const [activeDay, setActiveDay] = useState<number>(1);
+  const [activeTab, setActiveTab] = useState<'schedule' | 'places'>('schedule');
+  const [showMobileMap, setShowMobileMap] = useState<boolean>(false);
+  const [activeGuideId, setActiveGuideId] = useState<string | null>(null);
 
   // Pitstop dietary filter: 'all' | 'veg' | 'non-veg'
   const [dietaryFilter, setDietaryFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
 
-  // State for "Plan This Time" Modal
-  const [planningSlot, setPlanningSlot] = useState<PlanningSlotState | null>(null);
-  const [planFormName, setPlanFormName] = useState('');
-  const [planFormDuration, setPlanFormDuration] = useState(60);
-  const [planFormCost, setPlanFormCost] = useState(0);
-  const [planCategory, setPlanCategory] = useState<'food' | 'sightseeing' | 'shopping' | 'walks' | 'relaxation' | 'custom'>('food');
+  // History stack for Transactional Undo
+  const [historyStack, setHistoryStack] = useState<UserConstraints[]>([]);
+  const [whatChangedNotice, setWhatChangedNotice] = useState<WhatChangedNotice | null>(null);
+
+  // Move Activity Modal State
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState<boolean>(false);
+  const [selectedMoveActivityId, setSelectedMoveActivityId] = useState<string>('');
+  const [moveTargetDay, setMoveTargetDay] = useState<number>(2);
+  const [moveTargetPosition, setMoveTargetPosition] = useState<number>(0);
+
+  // Local Transfer Adjustment Modal State
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState<boolean>(false);
+  const [selectedTransferEntry, setSelectedTransferEntry] = useState<TimetableEntry | null>(null);
+  const [transferMinutesInput, setTransferMinutesInput] = useState<number>(30);
+
+  // Traveler-Controlled Visit Scheduling Editor State ("Use This Time")
+  const [isVisitEditorOpen, setIsVisitEditorOpen] = useState<boolean>(false);
+  const [editorMode, setEditorMode] = useState<'schedule_free' | 'edit_visit'>('schedule_free');
+  const [editorTargetDay, setEditorTargetDay] = useState<number>(1);
+  const [editorActivityType, setEditorActivityType] = useState<'curated' | 'custom' | 'buffer'>('custom');
+  const [editorActivityId, setEditorActivityId] = useState<string>('');
+  const [editorCustomId, setEditorCustomId] = useState<string | undefined>(undefined);
+  const [editorName, setEditorName] = useState<string>('');
+  const [editorVisitStartTime, setEditorVisitStartTime] = useState<string>('15:00');
+  const [editorDurationMinutes, setEditorDurationMinutes] = useState<number>(45);
+  const [editorTransferMinutes, setEditorTransferMinutes] = useState<number>(15);
+  const [editorCostPerPerson, setEditorCostPerPerson] = useState<number>(0);
+  const [selectedFreeWindowInfo, setSelectedFreeWindowInfo] = useState<{ start: string; end: string; mins: number } | null>(null);
+
+  // Add Custom Place Form State
+  const [customPlaceName, setCustomPlaceName] = useState('');
+  const [customPlaceCategory, setCustomPlaceCategory] = useState<'sightseeing' | 'food' | 'nature' | 'relaxation'>('sightseeing');
+  const [customPlaceDuration, setCustomPlaceDuration] = useState<number>(45);
+  const customPlaceCost = 0;
+  const [customPlaceTransfer, setCustomPlaceTransfer] = useState<number>(15);
 
   // Parse shareable URL query parameters if present
   const parsedTrip = useMemo(() => {
@@ -67,7 +103,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         <div className="pt-2">
           <Link
             to="/"
-            className="inline-block rounded-xl bg-[#176EA8] px-5 py-3 text-sm font-bold text-white hover:bg-[#135a8a] transition-colors"
+            className="inline-block rounded-xl bg-[#C65B32] px-5 py-3 text-sm font-bold text-white hover:bg-[#B04E27] transition-colors"
           >
             ← Create a new trip
           </Link>
@@ -84,17 +120,18 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
   if (!dest) {
     return (
-      <div className="mx-auto max-w-xl space-y-4 py-8 text-center text-[#193953]">
-        <p className="text-lg font-bold text-[#193953]">Unknown destination.</p>
-        <Link to="/compare" className="text-[#176EA8] underline font-semibold">
+      <div className="mx-auto max-w-xl space-y-4 py-8 text-center text-[#344F48]">
+        <p className="text-lg font-bold text-[#344F48]">Unknown destination.</p>
+        <Link to="/compare" className="text-[#C65B32] underline font-semibold">
           ← Back to comparison
         </Link>
       </div>
     );
   }
 
-  // Re-evaluate feasibility dynamically using the scheduler engine
+  // Re-evaluate feasibility dynamically using deterministic scheduling engine
   const r = evaluateFeasibility(dest, currentInputs);
+
   // Available days dynamically extracted from timeline entries
   const availableDays = useMemo(() => {
     const days = Array.from(new Set(r.timeline.map(t => t.day))).sort((a, b) => a - b);
@@ -117,112 +154,307 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
     });
   }, [compatibleStops, dietaryFilter]);
 
-  // Keep parent state updated when adjustments occur
-  const updateInputs = (updater: (prev: UserConstraints) => UserConstraints) => {
-    setCurrentInputs(prev => {
-      const next = updater(prev);
-      setInputs(next);
-      return next;
+  // Transactional state modifier: pushes current snapshot to history stack
+  const recordHistory = (newConstraints: UserConstraints, message: string) => {
+    setHistoryStack(prev => [...prev, currentInputs]);
+    setCurrentInputs(newConstraints);
+    setInputs(newConstraints);
+    setWhatChangedNotice({
+      message,
+      timestamp: Date.now(),
     });
   };
 
+  // Undo handler
+  const handleUndo = () => {
+    if (historyStack.length === 0) return;
+    const previous = historyStack[historyStack.length - 1];
+    setHistoryStack(prev => prev.slice(0, -1));
+    setCurrentInputs(previous);
+    setInputs(previous);
+    setWhatChangedNotice({
+      message: 'Action undone. Schedule restored to previous state.',
+      timestamp: Date.now(),
+    });
+  };
+
+  const updateInputs = (updater: (prev: UserConstraints) => UserConstraints, changeMessage?: string) => {
+    const next = updater(currentInputs);
+    recordHistory(next, changeMessage || 'Schedule updated.');
+  };
+
+  // Pitstop toggle
   const togglePitstop = (pitstopId: string) => {
-    updateInputs(prev => {
-      const current = prev.selectedPitstopIds ?? [];
-      const next = current.includes(pitstopId)
-        ? current.filter(id => id !== pitstopId)
-        : [...current, pitstopId];
-      return { ...prev, selectedPitstopIds: next };
-    });
+    const current = currentInputs.selectedPitstopIds ?? [];
+    const isAdding = !current.includes(pitstopId);
+    const next = isAdding
+      ? [...current, pitstopId]
+      : current.filter(s => s !== pitstopId);
+
+    const stopName = compatibleStops.find(s => s.id === pitstopId)?.name || 'Highway Pitstop';
+    updateInputs(
+      prev => ({ ...prev, selectedPitstopIds: next }),
+      isAdding ? `Added pitstop "${stopName}".` : `Removed pitstop "${stopName}".`
+    );
   };
 
+  // Activity enable/disable toggle
   const toggleActivity = (activityId: string) => {
-    updateInputs(prev => {
-      const current = prev.disabledActivityIds ?? [];
-      const next = current.includes(activityId)
-        ? current.filter(id => id !== activityId)
-        : [...current, activityId];
-      return { ...prev, disabledActivityIds: next };
-    });
+    const current = currentInputs.disabledActivityIds ?? [];
+    const isDisabling = !current.includes(activityId);
+    const next = isDisabling
+      ? [...current, activityId]
+      : current.filter(id => id !== activityId);
+
+    const actName = dest.activities.find(a => a.id === activityId)?.name || 'Stop';
+    updateInputs(
+      prev => ({ ...prev, disabledActivityIds: next }),
+      isDisabling ? `Removed stop "${actName}".` : `Restored stop "${actName}".`
+    );
   };
 
-  // Free-Time Custom Activity Handlers (Gate 4 & Gate 6)
-  const openPlanSlotModal = (slot: { day: number; startTime: string; endTime: string }, editActivity?: CustomPlannedActivity) => {
-    const maxDur = Math.round((parseIST(slot.endTime) - parseIST(slot.startTime)) / 60_000);
-    setPlanningSlot({
-      day: slot.day,
-      startTime: slot.startTime,
-      endTime: slot.endTime,
-      maxDuration: maxDur,
-      editActivity,
+  // Extra travel allowance (delay simulation)
+  const setDrivingAdjustment = (minutes: number) => {
+    const next = Math.max(-60, Math.min(120, minutes));
+    updateInputs(
+      prev => ({ ...prev, drivingAdjustmentMinutes: next }),
+      `Updated travel allowance to ${next > 0 ? `+${next}m` : `${next}m`}.`
+    );
+  };
+
+  // 1. MOVE ACTIVITY ENGINE INTEGRATION
+  const moveCandidates = useMemo(() => {
+    return getMoveCandidates(dest, currentInputs, r);
+  }, [dest, currentInputs, r]);
+
+  const insertionSlots = useMemo(() => {
+    return getInsertionSlotsForDay(dest, currentInputs, moveTargetDay);
+  }, [dest, currentInputs, moveTargetDay]);
+
+  const movePreview = useMemo(() => {
+    if (!selectedMoveActivityId) return null;
+    return evaluateActivityMove(
+      dest,
+      currentInputs,
+      selectedMoveActivityId,
+      moveTargetDay,
+      moveTargetPosition
+    );
+  }, [dest, currentInputs, selectedMoveActivityId, moveTargetDay, moveTargetPosition]);
+
+  const handleOpenMoveModal = (actId?: string) => {
+    const candidateId = actId || moveCandidates[0]?.activityId || dest.activities[0]?.id || '';
+    setSelectedMoveActivityId(candidateId);
+    setMoveTargetDay(currentActiveDay === 1 ? 2 : 1);
+    setMoveTargetPosition(0);
+    setIsMoveModalOpen(true);
+  };
+
+  const handleConfirmMove = () => {
+    if (!movePreview || !movePreview.isValid) return;
+    const deltaMsg = movePreview.deltas.marginDeltaMinutes !== 0
+      ? ` (Return margin: ${movePreview.after.returnMarginMinutes >= 0 ? '+' : ''}${movePreview.after.returnMarginMinutes}m)`
+      : ` (Return margin unchanged at +${movePreview.after.returnMarginMinutes}m)`;
+
+    recordHistory(
+      movePreview.proposedConstraints,
+      `Moved "${movePreview.activityName}" to Day ${moveTargetDay} (${movePreview.after.activityStartTime}–${movePreview.after.activityEndTime} IST).${deltaMsg}`
+    );
+    setIsMoveModalOpen(false);
+  };
+
+  // 2. LOCAL TRANSFER ADJUSTMENT ENGINE INTEGRATION
+  const transferDetails = useMemo(() => {
+    if (!selectedTransferEntry) return null;
+    return getTransferDetails(selectedTransferEntry, r.timeline, dest, currentInputs);
+  }, [selectedTransferEntry, r.timeline, dest, currentInputs]);
+
+  const transferPreview = useMemo(() => {
+    if (!selectedTransferEntry || !selectedTransferEntry.activityId) return null;
+    return evaluateTransferAdjustment(
+      selectedTransferEntry.activityId,
+      transferMinutesInput,
+      dest,
+      currentInputs
+    );
+  }, [selectedTransferEntry, transferMinutesInput, dest, currentInputs]);
+
+  const handleOpenTransferModal = (entry: TimetableEntry) => {
+    setSelectedTransferEntry(entry);
+    const details = getTransferDetails(entry, r.timeline, dest, currentInputs);
+    setTransferMinutesInput(details?.currentDurationMinutes ?? 30);
+    setIsTransferModalOpen(true);
+  };
+
+  const handleConfirmTransferAdjustment = () => {
+    if (!transferPreview || !transferPreview.isValid) return;
+    const destName = transferDetails?.destinationLabel || 'stop';
+    recordHistory(
+      transferPreview.proposedConstraints,
+      `Adjusted transfer to "${destName}" to ${transferPreview.proposedDurationMinutes}m. Return margin: ${transferPreview.after.returnMarginMinutes >= 0 ? '+' : ''}${transferPreview.after.returnMarginMinutes}m.`
+    );
+    setIsTransferModalOpen(false);
+    setSelectedTransferEntry(null);
+  };
+
+  // 3. VISIT SCHEDULING ENGINE INTEGRATION ("Use This Time")
+  const visitSchedulingPreview: VisitSchedulingPreview | null = useMemo(() => {
+    if (!isVisitEditorOpen) return null;
+    const isBuffer = editorActivityType === 'buffer';
+    const isCurated = editorActivityType === 'curated';
+    const catalogAct = isCurated ? dest.activities.find(a => a.id === editorActivityId) : undefined;
+    const displayName = isCurated
+      ? catalogAct?.name || editorActivityId
+      : editorName.trim() || (isBuffer ? 'Personal Rest Buffer' : 'Custom Stop');
+
+    return evaluateVisitScheduling(
+      {
+        activityId: isCurated ? editorActivityId : undefined,
+        customId: editorCustomId,
+        name: displayName,
+        day: editorTargetDay,
+        visitStartTime: editorVisitStartTime,
+        durationMinutes: editorDurationMinutes,
+        transferMinutes: isBuffer ? 0 : editorTransferMinutes,
+        costPerPersonINR: editorCostPerPerson,
+        openTime: catalogAct?.openTime,
+        closeTime: catalogAct?.closeTime,
+        lastEntryTime: catalogAct?.lastEntryTime,
+        isRestBuffer: isBuffer,
+      },
+      dest,
+      currentInputs
+    );
+  }, [
+    isVisitEditorOpen,
+    editorActivityType,
+    editorActivityId,
+    editorCustomId,
+    editorName,
+    editorTargetDay,
+    editorVisitStartTime,
+    editorDurationMinutes,
+    editorTransferMinutes,
+    editorCostPerPerson,
+    dest,
+    currentInputs,
+  ]);
+
+  const handleOpenVisitEditorForFreeTime = (entry: TimetableEntry) => {
+    const startEpoch = parseIST(entry.startTime);
+    // Exact slot start preservation
+    const exactSlotStart = entry.startTime.slice(11, 16);
+    setSelectedFreeWindowInfo({
+      start: exactSlotStart,
+      end: entry.endTime.slice(11, 16),
+      mins: Math.round((parseIST(entry.endTime) - startEpoch) / 60000),
     });
-    if (editActivity) {
-      setPlanFormName(editActivity.name);
-      setPlanFormDuration(editActivity.durationMinutes);
-      setPlanFormCost(editActivity.costPerPersonINR || 0);
-      setPlanCategory('custom');
+    setEditorMode('schedule_free');
+    setEditorTargetDay(entry.day);
+    setEditorActivityType('custom');
+    setEditorActivityId(dest.activities[0]?.id || '');
+    setEditorCustomId(undefined);
+    setEditorName('');
+    setEditorVisitStartTime(exactSlotStart);
+    setEditorDurationMinutes(Math.min(45, Math.round((parseIST(entry.endTime) - startEpoch) / 60000)));
+    setEditorTransferMinutes(15);
+    setEditorCostPerPerson(0);
+    setIsVisitEditorOpen(true);
+  };
+
+  const handleOpenVisitEditorForActivity = (entry: TimetableEntry) => {
+    setEditorMode('edit_visit');
+    setEditorTargetDay(entry.day);
+    setSelectedFreeWindowInfo(null);
+
+    if (entry.isCustom) {
+      setEditorActivityType(entry.isRestBuffer ? 'buffer' : 'custom');
+      setEditorCustomId(entry.activityId);
+      setEditorActivityId('');
+      setEditorName(entry.label);
     } else {
-      setPlanFormName('');
-      setPlanFormDuration(Math.min(60, maxDur));
-      setPlanFormCost(0);
-      setPlanCategory('food');
+      setEditorActivityType('curated');
+      setEditorActivityId(entry.activityId!);
+      setEditorCustomId(undefined);
+      setEditorName(entry.label);
     }
+
+    setEditorVisitStartTime(entry.startTime.slice(11, 16));
+    setEditorDurationMinutes(
+      Math.round((parseIST(entry.endTime) - parseIST(entry.startTime)) / 60000)
+    );
+
+    const transferEntry = r.timeline.find(
+      t => t.activityId === entry.activityId && t.category === 'TRANSFER'
+    );
+    const transMins = transferEntry
+      ? Math.round((parseIST(transferEntry.endTime) - parseIST(transferEntry.startTime)) / 60000)
+      : currentInputs.transferAdjustments?.[entry.activityId!] ?? 15;
+    setEditorTransferMinutes(transMins);
+
+    setIsVisitEditorOpen(true);
   };
 
-  const handleSaveCustomActivity = () => {
-    if (!planningSlot) return;
-    const name = planFormName.trim();
+  const handleConfirmVisitScheduling = () => {
+    if (!visitSchedulingPreview || !visitSchedulingPreview.isValid) return;
+    const actName = visitSchedulingPreview.details.activityName;
+    const timeStr = visitSchedulingPreview.details.visitStartTime.slice(11);
+    const dayNum = visitSchedulingPreview.details.day;
+
+    const actionText =
+      editorMode === 'edit_visit'
+        ? `Updated visit timing for "${actName}" to ${timeStr} on Day ${dayNum}.`
+        : `Scheduled "${actName}" at ${timeStr} on Day ${dayNum} (${visitSchedulingPreview.params.durationMinutes}m visit).`;
+
+    recordHistory(visitSchedulingPreview.proposedConstraints, actionText);
+    setIsVisitEditorOpen(false);
+  };
+
+  // 4. ADD CUSTOM SPOT DIRECTLY
+  const handleAddCustomSpot = (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = customPlaceName.trim();
     if (!name) return;
 
-    const dur = Math.min(planningSlot.maxDuration, Math.max(15, planFormDuration));
-    const cost = Math.max(0, planFormCost);
+    const newId = `custom_${Date.now()}`;
+    const newActivity: CustomPlannedActivity = {
+      id: newId,
+      name,
+      day: currentActiveDay,
+      durationMinutes: customPlaceDuration,
+      costPerPersonINR: customPlaceCost,
+    };
 
-    updateInputs(prev => {
-      const list = [...(prev.customActivities ?? [])];
-      if (planningSlot.editActivity) {
-        // Edit existing
-        const idx = list.findIndex(a => a.id === planningSlot.editActivity?.id);
-        if (idx !== -1) {
-          list[idx] = {
-            ...list[idx],
-            name,
-            durationMinutes: dur,
-            costPerPersonINR: cost,
-          };
-        }
-      } else {
-        // Add new
-        list.push({
-          id: `custom_${Date.now()}`,
-          day: planningSlot.day,
-          name,
-          durationMinutes: dur,
-          costPerPersonINR: cost,
-          slotStart: planningSlot.startTime,
-        });
-      }
-      return { ...prev, customActivities: list };
-    });
+    updateInputs(
+      prev => ({
+        ...prev,
+        customActivities: [...(prev.customActivities ?? []), newActivity],
+        transferAdjustments: {
+          ...(prev.transferAdjustments ?? {}),
+          [newId]: customPlaceTransfer,
+        },
+      }),
+      `Added custom stop "${name}" to Day ${currentActiveDay}.`
+    );
 
-    setPlanningSlot(null);
+    setCustomPlaceName('');
+    setActiveTab('schedule');
   };
 
-  const handleDeleteCustomActivity = (activityId: string) => {
-    updateInputs(prev => ({
-      ...prev,
-      customActivities: (prev.customActivities ?? []).filter(a => a.id !== activityId),
-    }));
-    setPlanningSlot(null);
+  const handleRemoveCustomActivity = (customId: string) => {
+    updateInputs(
+      prev => ({
+        ...prev,
+        customActivities: (prev.customActivities ?? []).filter(a => a.id !== customId),
+      }),
+      'Removed custom stop.'
+    );
   };
 
-  const isGuestView = Boolean(parsedTrip?.valid && parsedTrip.data.isGuestView);
-  const organizerName = parsedTrip?.valid
-    ? parsedTrip.data.organizerName
-    : currentInputs.organizerName || '';
-
-  const maps = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-    dest.name + ', Karnataka, India'
-  )}`;
+  const isComfortable = r.rating === 'Comfortable';
+  const isTight = r.rating === 'Tight';
+  const activeBlockers = r.violations.filter(v => v.severity === 'BLOCKER');
+  const hasBlocker = activeBlockers.length > 0;
 
   const goToReviewScreen = () => {
     const params = buildShareableParams(dest.id, currentInputs);
@@ -230,84 +462,111 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   };
 
   return (
-    <section className="space-y-6">
+    <section className="relative space-y-6 w-full min-w-0">
       {/* 4-part segmented progress meter */}
       <ProgressBar currentStep={3} />
 
-      {/* Guest Invitation Notice: Directs to Page 4 for RSVP while preserving trip data */}
-      {isGuestView && (
-        <div className="rounded-2xl border border-[#BAE3F1] bg-[#DDF0F6] p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-[#193953] shadow-xs">
-          <div className="flex items-center gap-2.5">
-            <span className="text-2xl">🚗</span>
-            <div>
-              <p className="font-bold text-[#176EA8]">
-                {organizerName ? `Trip Invitation from ${organizerName}` : 'Shared Road Trip Invitation'}
-              </p>
-              <p className="text-[#5A7184] text-[11px] mt-0.5">
-                Explore the planned schedule and route below, or proceed directly to review and send your RSVP.
-              </p>
+      {/* Screen Hero Banner with Warm Scenic Layers */}
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-b from-[#F8E1D2]/50 via-[#FAF2EB] to-[#FFF7F0] p-4 sm:p-6 border border-[#EADBCE]">
+        <ScenicBackground variant="compact" />
+        <div className="relative z-10 flex flex-wrap items-end justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[11px] font-bold text-[#C65B32] border border-[#EADBCE] shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#C65B32]" />
+                Step 3 · Interactive Workspace
+              </span>
+              <span className="text-xs font-semibold text-[#6B7C77]">
+                📍 {dest.name} ({dest.routeName})
+              </span>
             </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-[#344F48] tracking-tight leading-snug">
+              What should we explore along the way?
+            </h1>
+            <p className="text-xs sm:text-sm text-[#6B7C77] max-w-2xl leading-relaxed">
+              Connected itinerary and map workspace. Reorder activities, adjust transfer allowances, or reserve personal free time while maintaining deterministic return feasibility.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Link
+              to="/compare"
+              className="text-xs font-bold text-[#6B7C77] hover:text-[#C65B32] px-3 py-1.5 rounded-xl border border-[#EADBCE] bg-white transition-colors"
+            >
+              ← Other Destinations
+            </Link>
+            <TactileButton
+              variant="primary"
+              size="sm"
+              onClick={goToReviewScreen}
+              className="!px-3 !py-1.5 text-xs"
+            >
+              Review & Share →
+            </TactileButton>
+          </div>
+        </div>
+      </div>
+
+      {/* Persistent "What Changed?" Transactional Notification with Undo */}
+      {whatChangedNotice && (
+        <div className="rounded-2xl border border-[#EADBCE] bg-white p-3.5 sm:p-4 shadow-sm flex items-center justify-between gap-3 animate-in fade-in duration-200">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="h-2 w-2 rounded-full bg-[#5F7B6B] shrink-0" />
+            <p className="text-xs sm:text-sm font-semibold text-[#344F48] truncate">
+              {whatChangedNotice.message}
+            </p>
           </div>
           <button
             type="button"
-            onClick={goToReviewScreen}
-            className="w-full sm:w-auto flex-shrink-0 rounded-xl bg-[#176EA8] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#135a8a] active:scale-[0.99] transition-all cursor-pointer shadow-xs"
+            onClick={handleUndo}
+            disabled={historyStack.length === 0}
+            className="flex items-center gap-1.5 rounded-xl bg-[#FAF2EB] border border-[#EADBCE] hover:bg-[#F8E1D2] px-3 py-1.5 text-xs font-black text-[#C65B32] transition-colors shrink-0 shadow-2xs"
           >
-            Review & RSVP on Page 4 →
+            <span>↩</span>
+            <span>Undo</span>
           </button>
         </div>
       )}
 
-      {/* Step Heading */}
-      <div>
-        <h1 className="text-3xl font-extrabold text-[#193953]">
-          What should we explore along the way?
-        </h1>
-        <p className="mt-1 text-sm text-[#5A7184]">
-          Customize your stops, delays, and schedule for {dest.name} in Asia/Kolkata wall-clock time.
-        </p>
-      </div>
-
-      {/* Before You Go Warning Section */}
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800 space-y-2">
-        <div className="flex items-center gap-2 font-bold text-amber-900 text-sm">
-          <span>⚠️</span>
-          <span>Before You Go: Road & Operating Advisories</span>
-        </div>
-        {dest.routeRestriction ? (
-          <p>
-            <strong>Night Curfew in Effect:</strong> {dest.routeRestriction.name} gates close between {dest.routeRestriction.startTime} and {dest.routeRestriction.endTime}. Transit through the reserve must clear before 21:00.
-          </p>
-        ) : (
-          <p>
-            <strong>Standard Highway Corridor:</strong> No national park night driving bans along this highway. Departure timing models standard expressway speeds with realistic buffer margins.
-          </p>
-        )}
-      </div>
-
-      {/* Primary Feasibility Card (Gate 3 & Gate 5: Hero Return Feasibility) */}
-      <div className="rounded-2xl border border-[#E1ECF2] bg-white p-5 sm:p-6 text-[#193953] shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#E1ECF2] pb-3">
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-[#DDF0F6] border border-[#176EA8]/30 px-3 py-0.5 text-xs font-bold uppercase tracking-wider text-[#176EA8]">
+      {/* Primary Feasibility Summary & Action Bar */}
+      <div className="rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-4 sm:p-6 text-[#344F48] shadow-sm space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#EADBCE] pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-3 py-0.5 text-xs font-bold uppercase tracking-wider text-[#C65B32]">
               Feasibility Reality Check
             </span>
             <span
-              className={`rounded-full px-2.5 py-0.5 text-xs font-extrabold border ${
-                r.rating === 'Comfortable'
+              className={`rounded-full px-2.5 py-0.5 text-xs font-black border ${
+                isComfortable
                   ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                  : r.rating === 'Tight'
+                  : isTight
                   ? 'bg-amber-50 text-amber-800 border-amber-300'
                   : 'bg-red-50 text-red-800 border-red-300'
               }`}
             >
-              {r.rating === 'Comfortable' ? '✓ Comfortable' : r.rating === 'Tight' ? '⚠️ Tight' : '❌ Not Recommended'}
+              {isComfortable ? '✓ Comfortable' : isTight ? '⚠️ Tight Schedule' : '❌ Not Recommended'}
             </span>
+            {hasBlocker && (
+              <span className="rounded-full bg-rose-50 text-rose-800 border border-rose-300 px-2 py-0.5 text-[10px] font-bold">
+                {activeBlockers.length} Blocker Violation
+              </span>
+            )}
           </div>
-          <span className="text-xs text-[#5A7184]">Reference origin: Bengaluru (MG Road)</span>
+
+          {/* "Make This Trip Fit" Button */}
+          <TactileButton
+            variant="primary"
+            size="sm"
+            onClick={() => handleOpenMoveModal()}
+            className="!px-3 !py-1 text-xs"
+          >
+            🔄 Move Activity / Make Fit
+          </TactileButton>
         </div>
 
-        <p className="text-sm font-semibold text-[#193953]">{r.ratingExplanation}</p>
+        <p className="text-xs sm:text-sm font-semibold text-[#344F48] leading-relaxed">
+          {r.ratingExplanation}
+        </p>
 
         {/* HERO METRIC: Return Deadline Margin */}
         <div
@@ -320,11 +579,11 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#5A7184]">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#6B7C77]">
               Will I return before my deadline?
             </span>
             <strong
-              className={`text-lg font-black ${
+              className={`text-sm sm:text-base font-black ${
                 r.returnDeadlineMarginMinutes >= 60
                   ? 'text-emerald-700'
                   : r.returnDeadlineMarginMinutes >= 0
@@ -362,898 +621,1095 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 border-t border-[#E1ECF2] pt-3 text-xs">
+        {/* 3-Part Metric Breakdown */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-[#EADBCE] pt-3 text-xs">
           <div>
-            <p className="text-[#5A7184] font-medium">Usable Destination Free Time</p>
-            <strong className="text-xl font-black text-[#193953]">{formatDuration(r.destinationSlackMinutes)}</strong>
+            <p className="text-[#6B7C77] font-medium">Usable Destination Free Time</p>
+            <strong className="text-base sm:text-lg font-black text-[#344F48]">{formatDuration(r.destinationSlackMinutes)}</strong>
+            <span className="text-[10px] text-[#6B7C77] block">Unallocated daytime & evening slots</span>
           </div>
           <div>
-            <p className="text-[#5A7184] font-medium">Estimated Per-Person Budget</p>
-            <strong className="text-xl font-black text-[#193953]">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}</strong>
-            <span className="text-[11px] text-[#5A7184] block">(₹{r.estimatedTripTotalINR.toLocaleString('en-IN')} total for party of {currentInputs.partySize})</span>
+            <p className="text-[#6B7C77] font-medium">Estimated Budget Per Person</p>
+            <strong className="text-base sm:text-lg font-black text-[#C65B32]">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}</strong>
+            <span className="text-[10px] text-[#6B7C77] block">Fuel, tolls, stay & tickets ({currentInputs.partySize} travelers)</span>
+          </div>
+          <div>
+            <p className="text-[#6B7C77] font-medium">Highway Traffic Buffer</p>
+            <strong className="text-base sm:text-lg font-black text-[#344F48]">
+              +{formatDuration(Math.round(dest.baselineOneWayDriveMinutes * 0.20))} each way
+            </strong>
+            <span className="text-[10px] text-[#6B7C77] block">Standard 20% contingency included</span>
           </div>
         </div>
       </div>
 
-      {/* Interactive Trip Map (Gate 5) */}
-      <TripMap
-        destination={dest}
-        inputs={currentInputs}
-        result={r}
-        onTogglePitstop={togglePitstop}
-      />
-
-      {/* Adjustments & Scenarios: What if the drive takes longer? (Gate 4 & Gate 5) */}
-      <div className="space-y-4 rounded-2xl border border-[#E1ECF2] bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-1">
-          <div>
-            <h2 className="text-base font-bold text-[#193953]">What if the drive takes longer?</h2>
-            <p className="text-xs text-[#5A7184]">
-              Add extra travel time to see how it affects your itinerary and return deadline.
-            </p>
-          </div>
-          <span className="rounded-full bg-[#DDF0F6] border border-[#BAE3F1] px-2.5 py-0.5 text-[10px] font-semibold text-[#176EA8]">
-            Planning scenario · Not live GPS
-          </span>
+      {/* Road & Operating Advisories Banner */}
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 space-y-1.5">
+        <div className="flex items-center gap-2 font-bold text-sm text-amber-950">
+          <span>⚠️</span>
+          <span>Road & Operating Advisories</span>
         </div>
+        {dest.routeRestriction ? (
+          <p className="leading-relaxed">
+            <strong>Night Curfew in Effect:</strong> {dest.routeRestriction.name} gates close between {dest.routeRestriction.startTime} and {dest.routeRestriction.endTime}. Transit through the reserve must clear before 21:00.
+          </p>
+        ) : (
+          <p className="leading-relaxed">
+            <strong>Standard Highway Corridor:</strong> Departure timing models standard expressway speeds with realistic buffer margins. Always verify live highway conditions and attraction rules before departure.
+          </p>
+        )}
+      </div>
 
-        {/* Driving Adjustment & Delay Controls */}
-        <div className="rounded-xl border border-[#BAE3F1] bg-[#DDF0F6]/40 p-4 space-y-3.5 text-xs">
-          {/* 1. Travel Time Allowance */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <span className="font-bold text-[#193953] block text-xs">One-Way Driving Allowance:</span>
-              <span className="text-[11px] text-[#5A7184]">
-                Baseline: {formatDuration(dest.baselineOneWayDriveMinutes)} + 20% highway buffer ({formatDuration(r.outboundDriveMinutes)} total one-way)
-              </span>
-            </div>
+      {/* Mobile Map Toggle Button */}
+      <div className="lg:hidden flex justify-end">
+        <button
+          type="button"
+          onClick={() => setShowMobileMap(!showMobileMap)}
+          className="flex items-center gap-1.5 rounded-xl border border-[#EADBCE] bg-white px-3 py-1.5 text-xs font-bold text-[#344F48] shadow-2xs hover:bg-[#FAF2EB]"
+        >
+          <span>{showMobileMap ? '✕ Hide Map' : '🗺️ View Corridor Map'}</span>
+        </button>
+      </div>
 
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() =>
-                  updateInputs(s => ({
-                    ...s,
-                    drivingAdjustmentMinutes: Math.max(-60, Math.min(120, (s.drivingAdjustmentMinutes ?? 0) - 15)),
-                  }))
-                }
-                disabled={(currentInputs.drivingAdjustmentMinutes ?? 0) <= -60}
-                className="h-7 w-7 rounded-lg bg-white border border-[#E1ECF2] text-xs font-bold text-[#193953] hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                title="Reduce by 15m"
-              >
-                −15
-              </button>
-              <span className="min-w-12 text-center text-xs font-extrabold text-[#176EA8]">
-                {(currentInputs.drivingAdjustmentMinutes ?? 0) > 0
-                  ? `+${currentInputs.drivingAdjustmentMinutes}m`
-                  : (currentInputs.drivingAdjustmentMinutes ?? 0) < 0
-                  ? `${currentInputs.drivingAdjustmentMinutes}m`
-                  : '0m'}
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  updateInputs(s => ({
-                    ...s,
-                    drivingAdjustmentMinutes: Math.max(-60, Math.min(120, (s.drivingAdjustmentMinutes ?? 0) + 15)),
-                  }))
-                }
-                disabled={(currentInputs.drivingAdjustmentMinutes ?? 0) >= 120}
-                className="h-7 w-7 rounded-lg bg-white border border-[#E1ECF2] text-xs font-bold text-[#193953] hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
-                title="Add 15m delay"
-              >
-                +15
-              </button>
+      {/* Mobile Map View (Collapsible) */}
+      {showMobileMap && (
+        <div className="lg:hidden rounded-2xl border border-[#EADBCE] overflow-hidden shadow-sm">
+          <TripMap
+            destination={dest}
+            inputs={currentInputs}
+            result={r}
+            onTogglePitstop={togglePitstop}
+          />
+        </div>
+      )}
 
-              {/* Presets */}
-              <div className="flex items-center gap-1 ml-2">
-                {([0, 30, 45, 60] as const).map(preset => (
+      {/* Connected 2-Column Desktop Workspace (Left: Timeline & Tools, Right: Sticky Map) */}
+      <div className="grid grid-cols-12 gap-6 items-start">
+        {/* Left Column (7 of 12 cols): Timeline, Tabs & Editing Tools */}
+        <div className="col-span-12 lg:col-span-7 space-y-5">
+          {/* Day Selector Tabs & Action Strip */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#EADBCE] pb-2">
+            <div className="flex items-center gap-1 overflow-x-auto">
+              {availableDays.map(dayNum => {
+                const dayStopsCount = r.timeline.filter(
+                  t => t.day === dayNum && t.category === 'ACTIVITY' && !t.isRestBuffer
+                ).length;
+
+                return (
                   <button
-                    key={preset}
+                    key={dayNum}
                     type="button"
-                    onClick={() =>
-                      updateInputs(s => ({
-                        ...s,
-                        drivingAdjustmentMinutes: preset,
-                      }))
-                    }
-                    className={`rounded-lg px-2 py-1 text-[10px] font-bold cursor-pointer transition-colors ${
-                      (currentInputs.drivingAdjustmentMinutes ?? 0) === preset
-                        ? 'bg-[#176EA8] text-white shadow-xs'
-                        : 'bg-white border border-[#BAE3F1] text-[#193953] hover:bg-slate-100'
+                    onClick={() => {
+                      setActiveDay(dayNum);
+                      setActiveTab('schedule');
+                    }}
+                    className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+                      activeDay === dayNum && activeTab === 'schedule'
+                        ? 'bg-[#C65B32] text-white shadow-xs'
+                        : 'bg-[#FAF2EB] text-[#6B7C77] hover:text-[#344F48] border border-[#EADBCE]'
                     }`}
                   >
-                    {preset === 0 ? 'Baseline' : `+${preset}m`}
+                    Day {dayNum} ({dayStopsCount} stops)
+                  </button>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('places')}
+                className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                  activeTab === 'places'
+                    ? 'bg-[#344F48] text-white shadow-xs'
+                    : 'bg-[#FAF2EB] text-[#6B7C77] hover:text-[#344F48] border border-[#EADBCE]'
+                }`}
+              >
+                <span>+</span>
+                <span>Add Place / Spot</span>
+              </button>
+            </div>
+
+            <div className="text-xs text-[#6B7C77] hidden sm:block">
+              Day {currentActiveDay} of {availableDays.length}
+            </div>
+          </div>
+
+          {/* TAB 1: Chronological Timetable View */}
+          {activeTab === 'schedule' && (
+            <div className="space-y-3">
+              {(() => {
+                const dayEntries = r.timeline.filter(t => t.day === currentActiveDay);
+                const dayScheduledStops = dayEntries.filter(
+                  t => t.category === 'ACTIVITY' && !t.isRestBuffer
+                );
+
+                if (dayEntries.length === 0) {
+                  return (
+                    <div className="rounded-2xl border border-[#EADBCE] bg-white p-8 text-center text-xs text-[#6B7C77]">
+                      No events scheduled for Day {currentActiveDay}.
+                    </div>
+                  );
+                }
+
+                return dayEntries.map(entry => {
+                  // 1. TOURIST STOP / ACTIVITY
+                  if (entry.category === 'ACTIVITY' && !entry.isRestBuffer) {
+                    const stopIdx = dayScheduledStops.findIndex(s => s.id === entry.id);
+                    const stopNumber = stopIdx >= 0 ? stopIdx + 1 : 1;
+                    const actCost = dest.activities.find(a => a.id === entry.activityId)?.costPerPersonINR;
+
+                    return (
+                      <div
+                        key={entry.id}
+                        className="group rounded-2xl border border-[#EADBCE] bg-white p-4 transition-all shadow-xs hover:border-[#C65B32]/40 hover:shadow-md space-y-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#C65B32] text-white font-black text-xs shrink-0 shadow-2xs">
+                              #{stopNumber}
+                            </div>
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h4 className="text-sm font-black text-[#344F48]">{entry.label}</h4>
+                                <span className="rounded-md bg-[#FAF2EB] border border-[#EADBCE] px-2 py-0.5 text-[10px] font-bold text-[#C65B32] uppercase tracking-wider">
+                                  Stop #{stopNumber}
+                                </span>
+                                {entry.isOptional && (
+                                  <span className="text-[10px] text-[#6B7C77] font-semibold">
+                                    (Optional)
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-[#6B7C77] mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <span>⏰ <strong>{entry.startTime.slice(11)}–{entry.endTime.slice(11)}</strong> IST</span>
+                                {actCost !== undefined && actCost > 0 && (
+                                  <span>🎟️ ₹{actCost}/person</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Stop Action Buttons */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenVisitEditorForActivity(entry)}
+                              className="rounded-lg border border-[#EADBCE] bg-[#FAF2EB] hover:bg-[#F8E1D2] px-2.5 py-1 text-xs font-bold text-[#344F48] transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                              title="Edit visit timing & duration"
+                            >
+                              <span>✏️</span>
+                              <span>Edit</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenMoveModal(entry.activityId)}
+                              className="rounded-lg border border-[#EADBCE] bg-white hover:bg-[#FAF2EB] px-2.5 py-1 text-xs font-bold text-[#C65B32] transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                              title="Move stop to another day"
+                            >
+                              <span>🔄</span>
+                              <span>Move</span>
+                            </button>
+
+                            {(entry.isOptional || entry.isCustom) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (entry.isCustom) {
+                                    handleRemoveCustomActivity(entry.activityId!);
+                                  } else {
+                                    toggleActivity(entry.activityId!);
+                                  }
+                                }}
+                                className="h-7 w-7 rounded-lg border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50 transition-colors flex items-center justify-center cursor-pointer"
+                                title="Remove stop"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // 2. LOCAL TRANSFER
+                  if (entry.category === 'TRANSFER') {
+                    const transferMins = Math.round(
+                      (parseIST(entry.endTime) - parseIST(entry.startTime)) / 60000
+                    );
+                    const isAdjusted =
+                      entry.activityId &&
+                      currentInputs.transferAdjustments?.[entry.activityId] !== undefined;
+
+                    return (
+                      <div
+                        key={entry.id}
+                        className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB]/60 p-3 text-xs transition-all shadow-2xs hover:border-[#C65B32]/30 flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-base">🚗</span>
+                          <div>
+                            <div className="font-bold text-[#344F48] text-xs">
+                              {entry.label}
+                            </div>
+                            <div className="text-[11px] text-[#6B7C77] mt-0.5 flex flex-wrap items-center gap-x-2">
+                              <span>⏱️ <strong>{transferMins}m</strong> ({entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST)</span>
+                              <span>·</span>
+                              <span className={isAdjusted ? 'text-[#C65B32] font-semibold' : 'text-[#6B7C77]'}>
+                                {isAdjusted ? 'User planning allowance' : 'Corridor baseline estimate'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenTransferModal(entry)}
+                          className="rounded-lg border border-[#EADBCE] bg-white px-2.5 py-1 text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] transition-colors shrink-0 shadow-2xs cursor-pointer"
+                          title="Review / Adjust local transfer allowance"
+                        >
+                          Review / Adjust
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  // 3. FREE TIME SLOT
+                  if (entry.category === 'FREE') {
+                    const freeMins = Math.round(
+                      (parseIST(entry.endTime) - parseIST(entry.startTime)) / 60000
+                    );
+                    const isEvening = entry.startTime.slice(11) >= '18:15';
+
+                    return (
+                      <div
+                        key={entry.id}
+                        className="rounded-xl border-2 border-dashed border-[#5F7B6B]/40 bg-[#E4ECE5]/40 p-3.5 text-xs transition-all shadow-2xs hover:border-[#5F7B6B] flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-base">{isEvening ? '🌙' : '☀️'}</span>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-xs font-black text-[#344F48]">{entry.label}</h4>
+                              <span className="rounded-md bg-[#E4ECE5] px-1.5 py-0.5 text-[10px] font-bold text-[#5F7B6B] uppercase tracking-wider">
+                                {isEvening ? 'Evening Leisure' : 'Daytime Free Time'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-[#6B7C77] mt-0.5">
+                              ⏰ <strong>{entry.startTime.slice(11)}–{entry.endTime.slice(11)}</strong> IST ({freeMins}m available)
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenVisitEditorForFreeTime(entry)}
+                          className="rounded-lg bg-[#5F7B6B] hover:bg-[#485E52] text-white px-3 py-1.5 text-xs font-bold transition-all shadow-2xs shrink-0 flex items-center gap-1 cursor-pointer"
+                          title="Use available free time to schedule a visit"
+                        >
+                          <span>⚡</span>
+                          <span>Use This Time</span>
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  // 4. REST SLOTS
+                  if (entry.category === 'REST') {
+                    if (entry.isRestBuffer) {
+                      const bufferMins = Math.round(
+                        (parseIST(entry.endTime) - parseIST(entry.startTime)) / 60000
+                      );
+                      return (
+                        <div
+                          key={entry.id}
+                          className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3 text-xs flex items-center justify-between"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-base">🧘</span>
+                            <div>
+                              <strong className="text-indigo-950 font-bold">{entry.label}</strong>
+                              <span className="block text-[11px] text-indigo-700">
+                                {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST ({bufferMins}m reserved)
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCustomActivity(entry.activityId!)}
+                            className="h-6 w-6 rounded-md border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center justify-center cursor-pointer"
+                            title="Remove buffer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={entry.id}
+                        className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3 text-xs flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-base">🛌</span>
+                          <div>
+                            <strong className="text-[#344F48] font-bold">{entry.label}</strong>
+                            <span className="block text-[11px] text-[#6B7C77]">
+                              {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST (Night Anchor)
+                            </span>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-white text-[#344F48] border border-[#EADBCE]">
+                          Overnight Stay
+                        </span>
+                      </div>
+                    );
+                  }
+
+                  // 5. MILESTONE DRIVES, PITSTOPS & MEALS
+                  return (
+                    <div
+                      key={entry.id}
+                      className="rounded-xl border border-[#EADBCE] bg-white p-3 text-xs flex items-center justify-between text-[#344F48]"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-base">
+                          {entry.category === 'DRIVE' ? '🛣️' : entry.category === 'PITSTOP' ? '☕' : '🍽️'}
+                        </span>
+                        <div>
+                          <strong className="text-[#344F48] font-bold">{entry.label}</strong>
+                          <span className="block text-[11px] text-[#6B7C77]">
+                            {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#FAF2EB] text-[#6B7C77]">
+                        {entry.category}
+                      </span>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          )}
+
+          {/* TAB 2: Add Place or Custom Spot View */}
+          {activeTab === 'places' && (
+            <div className="space-y-4 rounded-2xl border border-[#EADBCE] bg-white p-4 sm:p-5 shadow-sm">
+              <div className="flex items-center justify-between border-b border-[#EADBCE] pb-2">
+                <div>
+                  <h3 className="text-sm font-black text-[#344F48]">Add Place to Day {currentActiveDay}</h3>
+                  <p className="text-xs text-[#6B7C77]">
+                    Add a custom spot or personal stop with duration and planning transfer allowance.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('schedule')}
+                  className="text-xs font-bold text-[#6B7C77] hover:text-[#C65B32]"
+                >
+                  ✕ Close
+                </button>
+              </div>
+
+              <form onSubmit={handleAddCustomSpot} className="space-y-3.5 text-xs">
+                <div>
+                  <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">Place / Activity Name</label>
+                  <input
+                    type="text"
+                    value={customPlaceName}
+                    onChange={e => setCustomPlaceName(e.target.value)}
+                    placeholder="e.g. Local Silk Weaving Center / Cafe Stop"
+                    required
+                    className="w-full rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2.5 text-xs text-[#344F48] focus:border-[#C65B32] focus:bg-white focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">Category</label>
+                    <select
+                      value={customPlaceCategory}
+                      onChange={e => setCustomPlaceCategory(e.target.value as any)}
+                      className="w-full rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2 text-xs text-[#344F48]"
+                    >
+                      <option value="sightseeing">Attraction / Culture</option>
+                      <option value="food">Food & Beverage</option>
+                      <option value="nature">Nature / Viewpoint</option>
+                      <option value="relaxation">Rest & Relaxation</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">Visit Duration</label>
+                    <select
+                      value={customPlaceDuration}
+                      onChange={e => setCustomPlaceDuration(Number(e.target.value))}
+                      className="w-full rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2 text-xs text-[#344F48]"
+                    >
+                      <option value={30}>30 minutes</option>
+                      <option value={45}>45 minutes</option>
+                      <option value={60}>60 minutes</option>
+                      <option value={90}>90 minutes</option>
+                      <option value={120}>2 hours</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">Transfer Allowance</label>
+                    <select
+                      value={customPlaceTransfer}
+                      onChange={e => setCustomPlaceTransfer(Number(e.target.value))}
+                      className="w-full rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2 text-xs text-[#344F48]"
+                    >
+                      <option value={10}>+10 min transfer</option>
+                      <option value={15}>+15 min transfer</option>
+                      <option value={30}>+30 min transfer</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-[#EADBCE]">
+                  <TactileButton
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setActiveTab('schedule')}
+                  >
+                    Cancel
+                  </TactileButton>
+                  <TactileButton
+                    variant="primary"
+                    size="sm"
+                    type="submit"
+                  >
+                    + Add to Day {currentActiveDay}
+                  </TactileButton>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Highway Pitstops Selector with Dietary Filters */}
+          <div className="space-y-3 rounded-2xl border border-[#EADBCE] bg-white p-4 sm:p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-black text-[#344F48]">
+                  Verified Highway Pitstops ({filteredStops.length} Along Corridor)
+                </h3>
+                <p className="text-xs text-[#6B7C77]">
+                  Curated highway rest stops with verified coordinates, clean restrooms, and dining options.
+                </p>
+              </div>
+
+              {/* Dietary Filter Pills */}
+              <div className="flex items-center gap-1 bg-[#FAF2EB] p-1 rounded-xl border border-[#EADBCE]">
+                {(['all', 'veg', 'non-veg'] as const).map(f => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setDietaryFilter(f)}
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all cursor-pointer ${
+                      dietaryFilter === f
+                        ? 'bg-[#C65B32] text-white shadow-2xs'
+                        : 'text-[#6B7C77] hover:text-[#344F48]'
+                    }`}
+                  >
+                    {f === 'all' ? 'All Food' : f === 'veg' ? 'Pure Veg' : 'Non-Veg'}
                   </button>
                 ))}
               </div>
             </div>
-          </div>
 
-          {/* 2. Departure Delay Scenario */}
-          <div className="rounded-lg border border-[#E1ECF2] bg-white p-3">
-            <label className="flex items-center gap-3 font-semibold text-[#193953] cursor-pointer">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded accent-[#176EA8] cursor-pointer"
-                checked={currentInputs.simulateDelayMinutes === 60}
-                onChange={e =>
-                  updateInputs(s => ({
-                    ...s,
-                    simulateDelayMinutes: e.target.checked ? 60 : 0,
-                  }))
-                }
-              />
-              <div>
-                <span className="block text-xs text-[#193953] font-bold">Simulate +1 hour late outbound departure</span>
-                <span className="text-[11px] text-[#5A7184] font-normal">
-                  Models being held up leaving Bengaluru (e.g. morning city bottlenecks or late start).
-                </span>
-              </div>
-            </label>
-          </div>
-
-          {/* Live Impact Callout */}
-          {((currentInputs.drivingAdjustmentMinutes ?? 0) !== 0 || currentInputs.simulateDelayMinutes === 60) && (
-            <div className="rounded-lg bg-white border border-[#BAE3F1] p-2.5 text-[11px] space-y-1">
-              <div className="flex items-center justify-between font-bold text-[#176EA8]">
-                <span>Active Scenario Impact:</span>
-                <span className={r.returnDeadlineMarginMinutes >= 60 ? 'text-emerald-700' : r.returnDeadlineMarginMinutes >= 0 ? 'text-amber-700' : 'text-red-700'}>
-                  Return Margin: {formatDuration(r.returnDeadlineMarginMinutes, true)}
-                </span>
-              </div>
-              <p className="text-[#5A7184]">
-                Timeline below has automatically shifted. Expected home arrival is now <strong>{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>.
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Attractions List: Required vs Optional */}
-        <div className="space-y-3 pt-1">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-[#5A7184]">
-            Destination Attractions & Sightseeing
-          </h3>
-
-          <div className="space-y-2.5">
-            {dest.activities.map(a => {
-              const aImg = getPlaceImage(a.id);
-              const isOptional = a.isOptional;
-              const isDisabled = (currentInputs.disabledActivityIds ?? []).includes(a.id);
-              const outcome = r.activityOutcomes.find(o => o.activityId === a.id);
-
-              return (
-                <div
-                  key={a.id}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border p-3.5 transition-all ${
-                    isDisabled
-                      ? 'border-[#E1ECF2] bg-[#F4F9FC] opacity-60'
-                      : 'border-[#E1ECF2] bg-white shadow-xs'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    {aImg ? (
-                      <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] shadow-inner">
-                        <img
-                          src={aImg.src}
-                          alt={aImg.alt}
-                          loading="lazy"
-                          className="h-full w-full object-cover"
-                          onError={e => {
-                            (e.target as HTMLElement).style.display = 'none';
-                          }}
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-[#DDF0F6] text-xl">
-                        📍
-                      </div>
-                    )}
-
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <strong className="text-sm font-bold text-[#193953]">{a.name}</strong>
-                        {isOptional ? (
-                          <span className="rounded bg-[#F4F9FC] border border-[#E1ECF2] px-2 py-0.5 text-[10px] font-semibold text-[#5A7184]">
-                            Optional
-                          </span>
-                        ) : (
-                          <span className="rounded bg-[#DDF0F6] text-[#176EA8] border border-[#176EA8]/30 px-2 py-0.5 text-[10px] font-bold">
-                            Signature
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-[#5A7184] mt-0.5">
-                        Operating: {a.openTime}–{a.closeTime} · Allocated: {a.durationMinutes}m · ₹{a.costPerPersonINR}/person
-                      </p>
-                      {outcome && (
-                        <p className="text-[11px] font-medium mt-0.5 text-[#176EA8]">
-                          {outcome.status === 'omitted'
-                            ? 'Omitted by traveler choice'
-                            : outcome.status === 'unavailable'
-                            ? 'Operating hours closed during visit'
-                            : `Scheduled for Day ${outcome.status === 'day1' ? '1' : outcome.status === 'day2' ? '2' : outcome.status === 'day3' ? '3' : '4'}`}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {isOptional ? (
-                    <button
-                      type="button"
-                      onClick={() => toggleActivity(a.id)}
-                      className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                        isDisabled
-                          ? 'border border-[#E1ECF2] bg-white text-[#193953] hover:bg-[#F4F9FC]'
-                          : 'border border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
-                      }`}
-                    >
-                      {isDisabled ? '+ Include in Trip' : '✕ Skip This Stop'}
-                    </button>
-                  ) : (
-                    <span className="text-[11px] font-semibold text-[#5A7184] px-2 py-1">
-                      Always included
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Highway Pitstops & Dining Section (Gate 6) */}
-      {compatibleStops.length > 0 && (
-        <div className="space-y-4 rounded-2xl border border-[#E1ECF2] bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E1ECF2] pb-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-[#193953]">
-                  Verified Highway Food Stops ({compatibleStops.length} Options)
-                </h2>
-                <span className="rounded-full bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 text-[10px] font-bold">
-                  Curated Dining
-                </span>
-              </div>
-              <p className="text-xs text-[#5A7184]">
-                Authentic highway eateries with verified reviews and road detour accounting.
-              </p>
-            </div>
-            {/* Dietary filter chips */}
-            <div className="flex items-center gap-1.5 bg-[#F4F9FC] p-1 rounded-xl border border-[#E1ECF2]">
-              {(['all', 'veg', 'non-veg'] as const).map(f => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setDietaryFilter(f)}
-                  className={`rounded-lg px-2.5 py-1 text-[11px] font-bold capitalize transition-colors cursor-pointer ${
-                    dietaryFilter === f
-                      ? 'bg-[#176EA8] text-white shadow-xs'
-                      : 'text-[#5A7184] hover:text-[#193953]'
-                  }`}
-                >
-                  {f === 'all' ? 'All Stops' : f === 'veg' ? '🌿 Veg Only' : '🍗 Non-Veg'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {filteredStops.length === 0 ? (
-              <p className="text-xs text-[#5A7184] p-3 bg-[#F4F9FC] rounded-xl border border-[#E1ECF2]">
-                No highway pitstops match the selected dietary filter on this route.
-              </p>
-            ) : (
-              filteredStops.map(stop => {
+            <div className="grid gap-2.5">
+              {filteredStops.map(stop => {
                 const isSelected = selectedPitstopIds.includes(stop.id);
-                const totalStopMinutes = stop.dwellMinutes + stop.detourMinutes;
-                const stopImg = getPlaceImage(stop.id);
 
                 return (
                   <div
                     key={stop.id}
-                    className={`rounded-xl border p-4 transition-all ${
+                    className={`rounded-xl border p-3 text-xs transition-all flex items-center justify-between gap-3 ${
                       isSelected
-                        ? 'border-amber-300 bg-amber-50/50 shadow-xs'
-                        : 'border-[#E1ECF2] bg-white hover:border-slate-300'
+                        ? 'border-[#C65B32] bg-[#FAF2EB] shadow-2xs'
+                        : 'border-[#EADBCE] bg-white hover:border-[#C65B32]/30'
                     }`}
                   >
-                    <div className="flex gap-4 items-start">
-                      {stopImg ? (
-                        <div className="relative h-20 w-20 sm:h-24 sm:w-24 flex-shrink-0 overflow-hidden rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] shadow-inner">
-                          <img
-                            src={stopImg.src}
-                            alt={stopImg.alt}
-                            loading="lazy"
-                            className="h-full w-full object-cover"
-                            onError={e => {
-                              (e.target as HTMLElement).style.display = 'none';
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex h-20 w-20 sm:h-24 sm:w-24 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100 text-3xl">
-                          ☕
-                        </div>
-                      )}
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <strong className="text-sm font-bold text-[#193953]">{stop.name}</strong>
-                          <span className="rounded bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 text-[11px] font-bold">
-                            {stop.categoryLabel}
-                          </span>
-                          {stop.dietary && (
-                            <span className="rounded bg-[#F4F9FC] border border-[#E1ECF2] px-1.5 py-0.5 text-[10px] font-semibold text-[#5A7184]">
-                              {stop.dietary === 'veg' ? '🌿 Pure Veg' : stop.dietary === 'non-veg' ? '🍗 Non-Veg' : 'Multi-Cuisine'}
-                            </span>
-                          )}
-                          {stop.rating && (
-                            <span className="text-xs font-bold text-amber-700 flex items-center gap-0.5">
-                              ★ {stop.rating} {stop.reviewCount && <span className="font-normal text-[#5A7184]">({stop.reviewCount.toLocaleString()}+ reviews)</span>}
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1 text-xs text-[#5A7184]">{stop.description}</p>
-                        <p className="mt-1 text-xs text-[#5A7184]">
-                          📍 {stop.location.address}{' '}
-                          <a
-                            href={stop.location.osmUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-semibold text-[#176EA8] hover:underline ml-1"
-                          >
-                            [OpenStreetMap ↗]
-                          </a>
-                        </p>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <strong className="font-bold text-[#344F48]">{stop.name}</strong>
+                        <span className="rounded bg-white border border-[#EADBCE] px-1.5 py-0.2 text-[10px] font-semibold text-[#6B7C77]">
+                          {stop.categoryLabel}
+                        </span>
                       </div>
+                      <p className="text-[11px] text-[#6B7C77]">
+                        📍 {stop.location.address} · {stop.dwellMinutes}m dwell · {stop.dietary || 'Food & Rest'}
+                      </p>
                     </div>
 
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-[#E1ECF2] pt-3 text-xs">
-                      <div className="text-[#5A7184]">
-                        <span>Est. Dwell: <strong>{stop.dwellMinutes}m</strong></span>
-                        <span className="mx-1.5">·</span>
-                        <span>Slip-road Detour: <strong>{stop.detourMinutes}m</strong></span>
-                        <span className="mx-1.5">·</span>
-                        <span className="font-semibold text-[#193953]">Total: +{totalStopMinutes}m</span>
-                        {stop.replacesArrivalMeal && (
-                          <p className="mt-0.5 text-[11px] text-[#176EA8] font-medium">
-                            ✓ Midday meal taken at pitstop replaces redundant 45m check-in dining allowance.
-                          </p>
-                        )}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => togglePitstop(stop.id)}
-                        className={`rounded-xl px-4 py-2 text-xs font-bold transition-all cursor-pointer ${
-                          isSelected
-                            ? 'border border-amber-600 bg-amber-600 text-white shadow-xs hover:bg-amber-700'
-                            : 'border border-[#E1ECF2] bg-[#F4F9FC] text-[#193953] shadow-xs hover:bg-white'
-                        }`}
-                      >
-                        {isSelected ? '✓ Stop Included (Click to Remove)' : `+ Add Pitstop (+${totalStopMinutes}m)`}
-                      </button>
-                    </div>
+                    <TactileButton
+                      variant={isSelected ? 'primary' : 'secondary'}
+                      size="sm"
+                      onClick={() => togglePitstop(stop.id)}
+                      className="!px-3 !py-1 text-xs shrink-0"
+                    >
+                      {isSelected ? '✓ Added' : '+ Add Stop'}
+                    </TactileButton>
                   </div>
                 );
-              })
-            )}
+              })}
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* Violations / Advisories */}
-      {r.violations.length > 0 && (
-        <div className="space-y-2">
-          {r.violations.map((v, i) => (
-            <p
-              key={i}
-              className={`rounded-xl border p-3.5 text-sm ${
-                v.severity === 'BLOCKER'
-                  ? 'border-red-200 bg-red-50 text-red-800'
-                  : 'border-amber-200 bg-amber-50 text-amber-800'
-              }`}
-            >
-              <strong>{v.severity}:</strong> {v.message}
-            </p>
-          ))}
-        </div>
-      )}
+          {/* "What if the drive takes longer?" Scenario Adjustment */}
+          <div className="space-y-4 rounded-2xl border border-[#EADBCE] bg-white p-4 sm:p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-1">
+              <div>
+                <h2 className="text-sm sm:text-base font-black text-[#344F48]">What if the drive takes longer?</h2>
+                <p className="text-xs text-[#6B7C77]">
+                  Add extra travel time to see how it affects your itinerary and return deadline.
+                </p>
+              </div>
+              <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-2.5 py-0.5 text-[10px] font-bold text-[#C65B32]">
+                Planning scenario · Not live GPS
+              </span>
+            </div>
 
-      {/* Dynamic Day 1 .. Day N Tabs (Gate 3: Clean Navigation Without Block Counts) */}
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between border-b border-[#E1ECF2] pb-2 gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            {availableDays.map(d => {
-              const dayStart = r.timeline.find(t => t.day === d)?.startTime;
-              return (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-[#344F48]">Extra travel allowance:</span>
+              <div className="flex items-center gap-1">
                 <button
-                  key={d}
                   type="button"
-                  onClick={() => setActiveDay(d)}
-                  className={`rounded-xl px-4 py-2 text-sm font-bold transition-colors cursor-pointer ${
-                    currentActiveDay === d
-                      ? 'bg-[#176EA8] text-white shadow-xs'
-                      : 'bg-white border border-[#E1ECF2] text-[#5A7184] hover:text-[#193953]'
-                  }`}
+                  onClick={() => setDrivingAdjustment((currentInputs.drivingAdjustmentMinutes ?? 0) - 15)}
+                  disabled={(currentInputs.drivingAdjustmentMinutes ?? 0) <= -60}
+                  className="h-7 w-7 rounded-lg bg-white border border-[#EADBCE] text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] disabled:opacity-30 cursor-pointer"
                 >
-                  Day {d} {dayStart && `· ${formatReadableDate(dayStart)}`}
+                  −15
                 </button>
-              );
-            })}
+                <span className="min-w-12 text-center text-xs font-black text-[#C65B32]">
+                  {(currentInputs.drivingAdjustmentMinutes ?? 0) > 0
+                    ? `+${currentInputs.drivingAdjustmentMinutes}m`
+                    : (currentInputs.drivingAdjustmentMinutes ?? 0) < 0
+                    ? `${currentInputs.drivingAdjustmentMinutes}m`
+                    : '0m'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDrivingAdjustment((currentInputs.drivingAdjustmentMinutes ?? 0) + 15)}
+                  disabled={(currentInputs.drivingAdjustmentMinutes ?? 0) >= 120}
+                  className="h-7 w-7 rounded-lg bg-white border border-[#EADBCE] text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] disabled:opacity-30 cursor-pointer"
+                >
+                  +15
+                </button>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="flex items-center gap-1.5 ml-auto">
+                {([0, 30, 45, 60] as const).map(p => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setDrivingAdjustment(p)}
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-bold cursor-pointer transition-colors ${
+                      (currentInputs.drivingAdjustmentMinutes ?? 0) === p
+                        ? 'bg-[#C65B32] text-white shadow-xs'
+                        : 'bg-white border border-[#EADBCE] text-[#344F48] hover:bg-[#FAF2EB]'
+                    }`}
+                  >
+                    {p === 0 ? 'Baseline' : `+${p}m`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <p className="text-[11px] text-[#6B7C77] leading-relaxed">
+              Standard 20% highway traffic buffer (+{Math.round(dest.baselineOneWayDriveMinutes * 0.20)}m) is always active. Use these controls to stress-test your return margin against extra toll gate slowdowns or roadwork delays.
+            </p>
+          </div>
+
+          {/* Primary Footer Navigation CTA */}
+          <div className="pt-2">
+            <TactileButton
+              variant="primary"
+              size="lg"
+              fullWidth
+              onClick={goToReviewScreen}
+              className="text-base"
+            >
+              Review Trip & Cost Sharing →
+            </TactileButton>
           </div>
         </div>
 
-        {/* Selected Day Timeline List (Gate 4: Editable Free-Time UI) */}
-        <div className="space-y-2.5">
-          {r.timeline
-            .filter(t => t.day === currentActiveDay)
-            .map(entry => {
-              const duration = Math.round((parseIST(entry.endTime) - parseIST(entry.startTime)) / 60_000);
-              const isFree = entry.category === 'FREE';
-              const isDrive = entry.category === 'DRIVE';
-              const isActivity = entry.category === 'ACTIVITY';
-              const isPitstop = entry.category === 'PITSTOP';
-              const isCustom = entry.isCustom;
-              const customAct = isCustom ? (currentInputs.customActivities ?? []).find(ca => ca.id === entry.activityId) : undefined;
-              const actImg = entry.activityId && !isCustom
-                ? getPlaceImage(entry.activityId)
-                : isPitstop
-                ? getPlaceImage('maddur-tiffanys')
-                : undefined;
+        {/* Right Column (5 of 12 cols): Sticky Connected Leaflet Map */}
+        <div className="hidden lg:block col-span-5 sticky top-24 space-y-3">
+          <div className="rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white overflow-hidden shadow-sm">
+            <TripMap
+              destination={dest}
+              inputs={currentInputs}
+              result={r}
+              onTogglePitstop={togglePitstop}
+            />
+          </div>
 
-              return (
-                <div
-                  key={entry.id}
-                  className={`rounded-xl border p-3.5 text-sm transition-colors ${
-                    isFree
-                      ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
-                      : isPitstop
-                      ? 'border-amber-200 bg-amber-50/80 text-amber-900'
-                      : isDrive
-                      ? 'border-blue-200 bg-blue-50/80 text-blue-900'
-                      : isCustom
-                      ? 'border-[#176EA8]/40 bg-[#DDF0F6]/80 text-[#193953]'
-                      : isActivity
-                      ? 'border-purple-200 bg-purple-50/80 text-purple-900'
-                      : 'border-[#E1ECF2] bg-white text-[#193953]'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    {actImg && (
-                      <img
-                        src={actImg.src}
-                        alt={actImg.alt}
-                        loading="lazy"
-                        className="h-10 w-10 rounded-lg object-cover flex-shrink-0 border border-[#E1ECF2]"
-                        onError={e => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
-                      />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <strong className="text-[#193953]">{entry.label}</strong>
-                        <span
-                          className={`rounded px-2.5 py-0.5 text-xs font-semibold ${
-                            isPitstop
-                              ? 'bg-amber-100 text-amber-800 font-bold'
-                              : isFree
-                              ? 'bg-emerald-100 text-emerald-800 font-bold'
-                              : isDrive
-                              ? 'bg-blue-100 text-blue-800'
-                              : isCustom
-                              ? 'bg-[#176EA8] text-white font-bold'
-                              : isActivity
-                              ? 'bg-purple-100 text-purple-800'
-                              : 'bg-[#F4F9FC] border border-[#E1ECF2] text-[#5A7184]'
-                          }`}
-                        >
-                          {isPitstop
-                            ? '☕ Highway Pitstop'
-                            : isCustom
-                            ? '✨ User Planned Activity'
-                            : isFree
-                            ? '🌿 Usable Free Time'
-                            : isDrive
-                            ? '🚗 Highway Drive'
-                            : isActivity
-                            ? '📍 Attraction Visit'
-                            : entry.category === 'REST'
-                            ? '🌙 Overnight Rest'
-                            : entry.category === 'CHECK_IN'
-                            ? '🏨 Hotel Check-in'
-                            : entry.category === 'MEAL'
-                            ? '🍽️ Dining Break'
-                            : entry.category}
-                        </span>
-                      </div>
-                      <div className="mt-1 flex items-center justify-between text-xs text-[#5A7184]">
-                        <span>
-                          {formatTimelineTime(entry.startTime)} → {formatTimelineTime(entry.endTime)}
-                        </span>
-                        <span className="font-semibold text-[#193953]">{formatDuration(duration)}</span>
-                      </div>
-
-                      {/* Action buttons for Free Time and Custom Activities */}
-                      {isFree && duration >= 15 && (
-                        <div className="mt-2.5 pt-2 border-t border-emerald-200/60 flex items-center justify-between">
-                          <span className="text-[11px] text-emerald-800">
-                            Have specific plans for this {formatDuration(duration)} slot?
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => openPlanSlotModal({ day: currentActiveDay, startTime: entry.startTime, endTime: entry.endTime })}
-                            className="rounded-lg bg-[#176EA8] px-3 py-1 text-xs font-bold text-white shadow-xs hover:bg-[#135a8a] transition-colors cursor-pointer"
-                          >
-                            + Plan This Time
-                          </button>
-                        </div>
-                      )}
-
-                      {isCustom && customAct && (
-                        <div className="mt-2.5 pt-2 border-t border-[#176EA8]/20 flex items-center justify-between text-xs">
-                          <span className="text-[#176EA8] font-medium">
-                            {customAct.costPerPersonINR ? `₹${customAct.costPerPersonINR}/person` : 'No added ticket fee'}
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openPlanSlotModal({ day: currentActiveDay, startTime: entry.startTime, endTime: entry.endTime }, customAct)}
-                              className="text-[#176EA8] font-bold hover:underline cursor-pointer"
-                            >
-                              Edit
-                            </button>
-                            <span className="text-[#5A7184]">·</span>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteCustomActivity(customAct.id)}
-                              className="text-red-700 font-bold hover:underline cursor-pointer"
-                            >
-                              ✕ Remove
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3 text-[11px] text-[#6B7C77] space-y-1">
+            <strong className="text-[#344F48] block">Interactive Map & Waypoint Routing</strong>
+            <p>
+              Shows verified OpenStreetMap corridor routing from MG Road, Bengaluru with stops and pitstops plotted at exact geographic coordinates.
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* Gate 4: "Plan This Time" Modal */}
-      {planningSlot && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-[#E1ECF2] bg-white p-6 text-[#193953] shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-start justify-between border-b border-[#E1ECF2] pb-3">
+      {/* ===================== MODALS ===================== */}
+
+      {/* 1. MOVE ACTIVITY MODAL ("Make This Trip Fit") */}
+      {isMoveModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-2xl rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b border-[#EADBCE] pb-3">
               <div>
-                <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">
-                  Day {planningSlot.day} Free-Time Slot
+                <span className="text-[10px] font-bold text-[#C65B32] uppercase tracking-wider">
+                  Make This Trip Fit · Schedule Adjustment
                 </span>
-                <h3 className="text-xl font-black text-[#193953] mt-0.5">
-                  {planningSlot.editActivity ? 'Edit Planned Activity' : 'Plan This Time'}
-                </h3>
-                <p className="text-xs text-[#5A7184]">
-                  {formatTimelineTime(planningSlot.startTime)} → {formatTimelineTime(planningSlot.endTime)} ({formatDuration(planningSlot.maxDuration)} usable free time)
+                <h3 className="text-lg sm:text-xl font-black text-[#344F48]">Move an Activity Between Days</h3>
+                <p className="text-xs text-[#6B7C77] mt-0.5">
+                  Simulate proposed activity insertion against opening hours, transfers, and your return deadline.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setPlanningSlot(null)}
-                className="rounded-full bg-[#F4F9FC] p-1.5 text-[#5A7184] hover:text-[#193953] transition-colors"
+                onClick={() => setIsMoveModalOpen(false)}
+                className="h-8 w-8 rounded-full bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm flex items-center justify-center"
               >
                 ✕
               </button>
             </div>
 
-            {/* Categorized Options Selector (Gate 6) */}
-            <div className="space-y-3">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-[#5A7184]">
-                Choose Activity Category
-              </label>
-
-              {/* Category Filter Chips */}
-              <div className="flex flex-wrap gap-1.5 pb-1">
-                {[
-                  { id: 'food', label: '🍽️ Food & Cafés' },
-                  { id: 'sightseeing', label: '🏛️ Sightseeing' },
-                  { id: 'shopping', label: '🛍️ Shopping' },
-                  { id: 'walks', label: '🌲 Scenic Walks' },
-                  { id: 'relaxation', label: '🌿 Relaxation' },
-                  { id: 'custom', label: '✏️ Custom Input' },
-                ].map(cat => {
-                  const isSel = planCategory === cat.id;
-                  return (
+            <div className="space-y-4 text-xs">
+              {/* Activity Selection */}
+              <div>
+                <label className="block text-[11px] font-bold text-[#6B7C77] mb-1.5 uppercase tracking-wider">
+                  1. Choose Activity to Move
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {moveCandidates.map(cand => (
                     <button
-                      key={cat.id}
+                      key={cand.activityId}
                       type="button"
-                      onClick={() => setPlanCategory(cat.id as typeof planCategory)}
-                      className={`rounded-xl px-2.5 py-1.5 text-xs font-bold transition-all cursor-pointer ${
-                        isSel
-                          ? 'bg-[#176EA8] text-white shadow-2xs'
-                          : 'bg-[#F4F9FC] border border-[#E1ECF2] text-[#5A7184] hover:border-[#176EA8]/40 hover:text-[#193953]'
+                      onClick={() => setSelectedMoveActivityId(cand.activityId)}
+                      className={`rounded-xl border p-3 text-left transition-all cursor-pointer ${
+                        selectedMoveActivityId === cand.activityId
+                          ? 'border-[#C65B32] bg-[#FAF2EB] ring-1 ring-[#C65B32]'
+                          : 'border-[#EADBCE] bg-white hover:bg-[#FAF2EB]/60'
                       }`}
                     >
-                      {cat.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Category Presets (Realistic, No Fabricated Prices) */}
-              {planCategory !== 'custom' && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  {(
-                    (planCategory === 'food'
-                      ? [
-                          {
-                            name: 'Traditional Regional Lunch / Thali',
-                            mins: 60,
-                            desc: 'Wholesome vegetarian thali or authentic regional lunch spread.',
-                          },
-                          {
-                            name: 'Local Breakfast & Heritage Tiffin (Dosa & Coffee)',
-                            mins: 45,
-                            desc: 'Iconic heritage tiffin room stop for crispy dosas and filter coffee.',
-                          },
-                          {
-                            name: 'Plantation / Specialty Coffee Café Stop',
-                            mins: 45,
-                            desc: 'Scenic café break featuring freshly brewed local coffee & light snacks.',
-                          },
-                          {
-                            name: 'Casual Local Cuisine Dinner',
-                            mins: 60,
-                            desc: 'Relaxed dinner exploring regional dishes in a comfortable local setting.',
-                          },
-                        ]
-                      : planCategory === 'sightseeing'
-                      ? [
-                          {
-                            name: 'Historic Heritage Walk & Architecture',
-                            mins: 60,
-                            desc: 'Explore historic quarters, colonial bungalows, or heritage streetscapes.',
-                          },
-                          {
-                            name: 'Panoramic Hilltop Viewpoint',
-                            mins: 45,
-                            desc: 'Short trip to an elevated scenic overlook for landscape photography.',
-                          },
-                          {
-                            name: 'Sacred Temple / Cultural Landmark Visit',
-                            mins: 45,
-                            desc: 'Peaceful exploration of local architecture, courtyards and traditions.',
-                          },
-                        ]
-                      : planCategory === 'shopping'
-                      ? [
-                          {
-                            name: 'Spice, Tea & Coffee Plantation Bazaar',
-                            mins: 45,
-                            desc: 'Sample and purchase fresh estate spices, cardamom, tea leaves & coffee.',
-                          },
-                          {
-                            name: 'Local Artisan Handicrafts & Silks',
-                            mins: 60,
-                            desc: 'Authentic regional textiles, sandalwood carvings, pottery and souvenirs.',
-                          },
-                        ]
-                      : planCategory === 'walks'
-                      ? [
-                          {
-                            name: 'Golden Hour Sunset Promenade',
-                            mins: 45,
-                            desc: 'Scenic walk along ridge trails or lakeside paths during sunset.',
-                          },
-                          {
-                            name: 'Botanical Garden & Nature Trail',
-                            mins: 60,
-                            desc: 'Shaded walking path through flora, tea gardens, and lush greenery.',
-                          },
-                        ]
-                      : [
-                          {
-                            name: 'Resort Pool & Balcony Downtime',
-                            mins: 90,
-                            desc: 'Unwind at stay with fresh tea, reading, or quiet poolside relaxation.',
-                          },
-                          {
-                            name: 'Traditional Ayurvedic Wellness Session',
-                            mins: 60,
-                            desc: 'Natural herbal rejuvenation treatment or steam bath.',
-                          },
-                        ]
-                    )
-                  ).map((sugg, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => {
-                        setPlanFormName(sugg.name);
-                        setPlanFormDuration(Math.min(planningSlot.maxDuration, sugg.mins));
-                        setPlanFormCost(0);
-                      }}
-                      className="rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3 text-left hover:border-[#176EA8]/50 hover:bg-[#DDF0F6] transition-all cursor-pointer group"
-                    >
-                      <div className="flex items-start justify-between gap-1">
-                        <strong className="block text-xs font-bold text-[#193953] group-hover:text-[#176EA8]">
-                          {sugg.name}
-                        </strong>
-                        <span className="text-[10px] font-semibold text-[#176EA8] bg-white border border-[#BAE3F1] rounded-md px-1.5 py-0.5 whitespace-nowrap">
-                          {sugg.mins}m
-                        </span>
-                      </div>
-                      <p className="mt-1 text-[11px] text-[#5A7184] leading-snug">
-                        {sugg.desc}
-                      </p>
+                      <strong className="font-bold text-[#344F48] block">{cand.name}</strong>
+                      <span className="text-[11px] text-[#6B7C77] block mt-0.5">
+                        Currently: Day {cand.currentDay} ({cand.durationMinutes}m duration)
+                      </span>
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Target Day Selection */}
+              <div>
+                <label className="block text-[11px] font-bold text-[#6B7C77] mb-1.5 uppercase tracking-wider">
+                  2. Target Day
+                </label>
+                <div className="flex gap-2">
+                  {availableDays.map(dNum => (
+                    <button
+                      key={dNum}
+                      type="button"
+                      onClick={() => {
+                        setMoveTargetDay(dNum);
+                        setMoveTargetPosition(0);
+                      }}
+                      className={`flex-1 rounded-xl py-2 px-3 text-xs font-bold cursor-pointer transition-all ${
+                        moveTargetDay === dNum
+                          ? 'bg-[#C65B32] text-white shadow-xs'
+                          : 'bg-[#FAF2EB] text-[#6B7C77] border border-[#EADBCE] hover:text-[#344F48]'
+                      }`}
+                    >
+                      Day {dNum}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Insertion Position */}
+              <div>
+                <label className="block text-[11px] font-bold text-[#6B7C77] mb-1.5 uppercase tracking-wider">
+                  3. Insertion Position in Day {moveTargetDay}
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {insertionSlots.map(slot => (
+                    <button
+                      key={slot.position}
+                      type="button"
+                      onClick={() => setMoveTargetPosition(slot.position)}
+                      className={`rounded-xl border p-2.5 text-center text-xs font-bold transition-all cursor-pointer ${
+                        moveTargetPosition === slot.position
+                          ? 'border-[#C65B32] bg-[#FAF2EB] text-[#C65B32] ring-1 ring-[#C65B32]'
+                          : 'border-[#EADBCE] bg-white text-[#6B7C77] hover:bg-[#FAF2EB]'
+                      }`}
+                    >
+                      {slot.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Live Before / After Preview */}
+              {movePreview && (
+                <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[#344F48]">Engine Feasibility Verdict:</span>
+                    <span
+                      className={`rounded-md px-2 py-0.5 text-[11px] font-black ${
+                        movePreview.isValid
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      {movePreview.resolutionLabel}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px]">
+                    <div className="bg-white p-2.5 rounded-lg border border-[#EADBCE]">
+                      <span className="text-[#6B7C77] block text-[10px]">Previous Home Arrival:</span>
+                      <strong>{movePreview.before.homeArrival}</strong>
+                      <span className="text-[#6B7C77] block mt-0.5">
+                        Margin: {movePreview.before.returnMarginMinutes >= 0 ? '+' : ''}{movePreview.before.returnMarginMinutes}m
+                      </span>
+                    </div>
+
+                    <div className="bg-white p-2.5 rounded-lg border border-[#EADBCE]">
+                      <span className="text-[#6B7C77] block text-[10px]">Proposed Home Arrival:</span>
+                      <strong>{movePreview.after.homeArrival}</strong>
+                      <span className="text-[#C65B32] block mt-0.5 font-bold">
+                        Margin: {movePreview.after.returnMarginMinutes >= 0 ? '+' : ''}{movePreview.after.returnMarginMinutes}m
+                      </span>
+                    </div>
+                  </div>
+
+                  {(movePreview.validationError || movePreview.deltas.newConflicts.length > 0) && (
+                    <div className="rounded-lg bg-red-50 border border-red-200 p-2 text-[11px] text-red-800 space-y-0.5">
+                      {movePreview.validationError && <div>• {movePreview.validationError}</div>}
+                      {movePreview.deltas.newConflicts.map((c, idx) => (
+                        <div key={idx}>• {c}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
-            {/* Destination Curated Ideas (from Timing-Aware Guide) */}
-            {(() => {
-              const guide = getDestinationGuide(dest.id, availableDays.length, currentInputs.pace);
-              if (!guide || guide.freeTimeIdeas.length === 0) return null;
-              return (
-                <div className="space-y-2 pt-2 border-t border-[#E1ECF2]">
-                  <span className="block text-xs font-semibold uppercase tracking-wider text-[#176EA8]">
-                    🌟 Curated Ideas for {dest.name}
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                    {guide.freeTimeIdeas.map((idea, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => {
-                          setPlanFormName(idea.title);
-                          setPlanFormDuration(Math.min(planningSlot.maxDuration, idea.durationMins));
-                          setPlanFormCost(0);
-                        }}
-                        className="rounded-xl border border-[#BAE3F1] bg-[#DDF0F6]/40 p-2.5 text-left hover:border-[#176EA8] hover:bg-[#DDF0F6] transition-all cursor-pointer"
-                      >
-                        <div className="flex items-center justify-between gap-1">
-                          <strong className="text-xs text-[#193953] truncate">{idea.title}</strong>
-                          <span className="text-[10px] text-[#176EA8] font-bold">{idea.durationMins}m</span>
-                        </div>
-                        <p className="mt-0.5 text-[10px] text-[#5A7184] line-clamp-2 leading-tight">
-                          {idea.description}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Activity Details / Fine-Tuning Form */}
-            <div className="space-y-3 pt-2 border-t border-[#E1ECF2]">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-[#193953]">
-                  Activity Title
-                </label>
-                <input
-                  type="text"
-                  maxLength={60}
-                  placeholder="e.g. Traditional Thali Lunch, Ayurvedic Massage, Evening Walk"
-                  value={planFormName}
-                  onChange={e => setPlanFormName(e.target.value)}
-                  className="mt-1 block w-full rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3 text-sm text-[#193953] focus:border-[#176EA8] focus:bg-white focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#193953]">
-                    Duration (Minutes)
-                  </label>
-                  <input
-                    type="number"
-                    min={15}
-                    max={planningSlot.maxDuration}
-                    step={15}
-                    value={planFormDuration}
-                    onChange={e => setPlanFormDuration(parseInt(e.target.value, 10) || 15)}
-                    className="mt-1 block w-full rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3 text-sm text-[#193953] focus:border-[#176EA8] focus:bg-white focus:outline-none"
-                  />
-                  <span className="text-[10px] text-[#5A7184]">Max: {planningSlot.maxDuration}m slot available</span>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#193953]">
-                    Cost / Person (₹)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={50}
-                    value={planFormCost}
-                    onChange={e => setPlanFormCost(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                    className="mt-1 block w-full rounded-xl border border-[#E1ECF2] bg-[#F4F9FC] p-3 text-sm text-[#193953] focus:border-[#176EA8] focus:bg-white focus:outline-none"
-                  />
-                  <span className="text-[10px] text-[#5A7184]">Optional ticket/meal budget</span>
-                </div>
-              </div>
-
-              {/* Live Remaining Free Time Calculation */}
-              <div className="rounded-xl bg-[#DDF0F6] border border-[#176EA8]/20 p-2.5 text-xs text-[#193953] flex items-center justify-between">
-                <span>Remaining usable free time in this slot:</span>
-                <strong className="text-sm text-[#176EA8]">
-                  {formatDuration(Math.max(0, planningSlot.maxDuration - planFormDuration))}
-                </strong>
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#E1ECF2]">
-              <button
-                type="button"
-                onClick={() => setPlanningSlot(null)}
-                className="rounded-xl border border-[#E1ECF2] bg-white px-4 py-2.5 text-xs font-bold text-[#5A7184] hover:bg-slate-50 transition-colors cursor-pointer"
+            <div className="flex justify-end gap-2 pt-2 border-t border-[#EADBCE]">
+              <TactileButton
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsMoveModalOpen(false)}
               >
                 Cancel
-              </button>
-              {planningSlot.editActivity && (
-                <button
-                  type="button"
-                  onClick={() => handleDeleteCustomActivity(planningSlot.editActivity!.id)}
-                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-bold text-red-700 hover:bg-red-100 transition-colors cursor-pointer"
-                >
-                  Delete
-                </button>
-              )}
-              <button
-                type="button"
-                disabled={!planFormName.trim()}
-                onClick={handleSaveCustomActivity}
-                className="rounded-xl bg-[#176EA8] px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-[#135a8a] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              </TactileButton>
+              <TactileButton
+                variant="primary"
+                size="sm"
+                disabled={!movePreview || !movePreview.isValid}
+                onClick={handleConfirmMove}
               >
-                Save to Schedule
-              </button>
+                Confirm & Apply Move →
+              </TactileButton>
             </div>
           </div>
         </div>
       )}
 
-      {/* Primary CTA: "Your adventure is taking shape! / See My Trip" */}
-      <div className="rounded-2xl border border-[#176EA8]/30 bg-[#DDF0F6]/60 p-6 shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">Step 3 Complete</span>
-            <h2 className="text-xl font-black text-[#193953] mt-0.5">Your adventure is taking shape!</h2>
-            <p className="text-xs text-[#5A7184] mt-1">
-              Review the complete digital itinerary, save locally on your device, and invite your crew with a 1-click WhatsApp RSVP.
-            </p>
+      {/* 2. VISIT SCHEDULING MODAL ("Use This Time") */}
+      {isVisitEditorOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b border-[#EADBCE] pb-3">
+              <div>
+                <span className="text-[10px] font-bold text-[#5F7B6B] uppercase tracking-wider">
+                  {editorMode === 'edit_visit' ? 'Edit Scheduled Stop' : 'Use Free Time Window'}
+                </span>
+                <h3 className="text-lg sm:text-xl font-black text-[#344F48]">
+                  {editorMode === 'edit_visit' ? 'Adjust Stop Timing' : 'Schedule Activity or Buffer'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsVisitEditorOpen(false)}
+                className="h-8 w-8 rounded-full bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              {/* Free Window Info */}
+              {selectedFreeWindowInfo && (
+                <div className="rounded-xl bg-[#FAF2EB] p-3 border border-[#EADBCE] text-[11px] text-[#344F48] flex justify-between items-center">
+                  <span>Selected Free Window:</span>
+                  <strong>{selectedFreeWindowInfo.start}–{selectedFreeWindowInfo.end} IST ({selectedFreeWindowInfo.mins}m available)</strong>
+                </div>
+              )}
+
+              {/* Activity Type Selector */}
+              <div>
+                <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">Type</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditorActivityType('custom')}
+                    className={`rounded-xl py-2 px-2 text-center font-bold text-xs cursor-pointer ${
+                      editorActivityType === 'custom'
+                        ? 'bg-[#C65B32] text-white shadow-2xs'
+                        : 'bg-[#FAF2EB] text-[#6B7C77] border border-[#EADBCE]'
+                    }`}
+                  >
+                    Custom Spot
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditorActivityType('curated')}
+                    className={`rounded-xl py-2 px-2 text-center font-bold text-xs cursor-pointer ${
+                      editorActivityType === 'curated'
+                        ? 'bg-[#C65B32] text-white shadow-2xs'
+                        : 'bg-[#FAF2EB] text-[#6B7C77] border border-[#EADBCE]'
+                    }`}
+                  >
+                    Curated Spot
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditorActivityType('buffer')}
+                    className={`rounded-xl py-2 px-2 text-center font-bold text-xs cursor-pointer ${
+                      editorActivityType === 'buffer'
+                        ? 'bg-[#C65B32] text-white shadow-2xs'
+                        : 'bg-[#FAF2EB] text-[#6B7C77] border border-[#EADBCE]'
+                    }`}
+                  >
+                    Rest Buffer
+                  </button>
+                </div>
+              </div>
+
+              {/* Name or Selection */}
+              {editorActivityType === 'curated' ? (
+                <div>
+                  <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">Select Curated Stop</label>
+                  <select
+                    value={editorActivityId}
+                    onChange={e => setEditorActivityId(e.target.value)}
+                    className="w-full rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2 text-xs text-[#344F48]"
+                  >
+                    {dest.activities.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} ({a.openTime}–{a.closeTime})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : editorActivityType === 'custom' ? (
+                <div>
+                  <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">Place Name</label>
+                  <input
+                    type="text"
+                    value={editorName}
+                    onChange={e => setEditorName(e.target.value)}
+                    placeholder="e.g. Silk Saree Emporium / Tea Tasting"
+                    className="w-full rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2 text-xs text-[#344F48] focus:border-[#C65B32] focus:bg-white focus:outline-none"
+                  />
+                </div>
+              ) : null}
+
+              {/* Start Time & Duration */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">Visit Start Time (IST)</label>
+                  <input
+                    type="time"
+                    value={editorVisitStartTime}
+                    onChange={e => setEditorVisitStartTime(e.target.value)}
+                    className="w-full rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2 text-xs text-[#344F48] font-bold focus:border-[#C65B32] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">Visit Duration (Minutes)</label>
+                  <select
+                    value={editorDurationMinutes}
+                    onChange={e => setEditorDurationMinutes(Number(e.target.value))}
+                    className="w-full rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2 text-xs text-[#344F48] font-bold"
+                  >
+                    <option value={30}>30 minutes</option>
+                    <option value={45}>45 minutes</option>
+                    <option value={60}>60 minutes</option>
+                    <option value={90}>90 minutes</option>
+                    <option value={120}>2 hours</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Transfer Planning Allowance */}
+              {editorActivityType !== 'buffer' && (
+                <div>
+                  <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">Transfer Planning Allowance</label>
+                  <select
+                    value={editorTransferMinutes}
+                    onChange={e => setEditorTransferMinutes(Number(e.target.value))}
+                    className="w-full rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2 text-xs text-[#344F48]"
+                  >
+                    <option value={10}>10 minutes</option>
+                    <option value={15}>15 minutes (Standard)</option>
+                    <option value={20}>20 minutes</option>
+                    <option value={30}>30 minutes</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Feasibility Simulation Preview */}
+              {visitSchedulingPreview && (
+                <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3 space-y-1.5 text-[11px]">
+                  <div className="flex justify-between items-center">
+                    <span className="font-bold text-[#344F48]">Engine Feasibility:</span>
+                    <span
+                      className={`rounded px-1.5 py-0.2 font-black ${
+                        visitSchedulingPreview.isValid
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      {visitSchedulingPreview.isValid ? 'Fits Schedule' : 'Schedule Conflict'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-[#6B7C77]">
+                    <span>Proposed Return Margin:</span>
+                    <strong className="text-[#344F48]">
+                      {visitSchedulingPreview.after.returnMarginMinutes >= 0 ? '+' : ''}{visitSchedulingPreview.after.returnMarginMinutes}m
+                    </strong>
+                  </div>
+                  {visitSchedulingPreview.validationError && (
+                    <div className="text-red-700 font-medium">
+                      • {visitSchedulingPreview.validationError}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-[#EADBCE]">
+              <TactileButton
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsVisitEditorOpen(false)}
+              >
+                Cancel
+              </TactileButton>
+              <TactileButton
+                variant="primary"
+                size="sm"
+                disabled={!visitSchedulingPreview || !visitSchedulingPreview.isValid}
+                onClick={handleConfirmVisitScheduling}
+              >
+                Confirm & Apply →
+              </TactileButton>
+            </div>
           </div>
-          <span className="rounded-full bg-[#176EA8] text-white px-3 py-1 text-xs font-bold">
-            Final Step Ahead
-          </span>
         </div>
+      )}
 
-        <button
-          onClick={goToReviewScreen}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#176EA8] px-6 py-4 text-base font-bold text-white shadow-sm hover:bg-[#135a8a] active:scale-[0.99] transition-all cursor-pointer"
-        >
-          {isGuestView ? 'Review Trip & RSVP →' : 'Review My Trip →'}
-        </button>
-      </div>
+      {/* 3. LOCAL TRANSFER ADJUSTMENT MODAL */}
+      {isTransferModalOpen && selectedTransferEntry && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4">
+            <div className="flex items-start justify-between border-b border-[#EADBCE] pb-3">
+              <div>
+                <span className="text-[10px] font-bold text-[#C65B32] uppercase tracking-wider">
+                  Transfer Planning Allowance
+                </span>
+                <h3 className="text-lg font-black text-[#344F48]">Review & Adjust Transfer</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTransferModalOpen(false)}
+                className="h-8 w-8 rounded-full bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
 
-      <a
-        href={maps}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block text-center text-sm font-semibold text-[#176EA8] hover:underline"
-      >
-        Open route in Google Maps ↗
-      </a>
+            <div className="space-y-3 text-xs">
+              <div className="rounded-xl bg-[#FAF2EB] p-3 border border-[#EADBCE]">
+                <strong className="block text-[#344F48]">{selectedTransferEntry.label}</strong>
+                <span className="text-[11px] text-[#6B7C77]">
+                  Baseline time: {transferDetails?.currentDurationMinutes ?? 30}m ({selectedTransferEntry.startTime.slice(11)}–{selectedTransferEntry.endTime.slice(11)} IST)
+                </span>
+              </div>
 
-      <p className="text-center text-xs text-[#5A7184]">
-        Cost assumes {currentInputs.partySize} travelers sharing a car and room. Meals and personal expenses excluded. Route durations and most costs are unverified planning estimates.
-      </p>
+              <div>
+                <label className="block text-[11px] font-bold text-[#6B7C77] mb-1">
+                  Custom Planning Allowance (Minutes)
+                </label>
+                <div className="flex items-center gap-2">
+                  {[15, 20, 30, 45, 60].map(mins => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => setTransferMinutesInput(mins)}
+                      className={`flex-1 rounded-xl py-2 text-xs font-bold transition-all cursor-pointer ${
+                        transferMinutesInput === mins
+                          ? 'bg-[#C65B32] text-white shadow-2xs'
+                          : 'bg-[#FAF2EB] text-[#6B7C77] border border-[#EADBCE]'
+                      }`}
+                    >
+                      {mins}m
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {transferPreview && (
+                <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3 text-[11px] flex justify-between items-center">
+                  <span>Simulated Return Margin:</span>
+                  <strong className="text-[#344F48]">
+                    {transferPreview.after.returnMarginMinutes >= 0 ? '+' : ''}{transferPreview.after.returnMarginMinutes}m
+                  </strong>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-[#EADBCE]">
+              <TactileButton
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsTransferModalOpen(false)}
+              >
+                Cancel
+              </TactileButton>
+              <TactileButton
+                variant="primary"
+                size="sm"
+                disabled={!transferPreview || !transferPreview.isValid}
+                onClick={handleConfirmTransferAdjustment}
+              >
+                Apply Allowance →
+              </TactileButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Destination Guide Modal */}
+      <DestinationGuideModal
+        guide={activeGuideId ? getDestinationGuide(activeGuideId, availableDays.length, currentInputs.pace) : null}
+        onClose={() => setActiveGuideId(null)}
+      />
     </section>
   );
 }

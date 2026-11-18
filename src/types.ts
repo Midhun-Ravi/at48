@@ -27,6 +27,7 @@ export interface UserConstraints {
   activityDayAssignments?: Record<string, number>; // explicit assigned day per activity (1..N)
   activityOrder?: string[]; // user-specified ordering of activity IDs
   additionalActivities?: Activity[]; // extra Activity objects evaluated deterministically by the engine
+  transferAdjustments?: Record<string, number>; // user-specified planning allowance minutes per activity ID
 }
 
 export interface CustomPlannedActivity {
@@ -36,6 +37,7 @@ export interface CustomPlannedActivity {
   durationMinutes: number;
   costPerPersonINR?: number;
   slotStart?: string; // optional ISO anchor to slot into a specific free window
+  isRestBuffer?: boolean; // true if this represents a personal rest or downtime buffer
 }
 
 export interface Activity {
@@ -128,6 +130,9 @@ export interface TimetableEntry {
   activityId?: string;
   isOptional?: boolean;
   isCustom?: boolean; // true if added by user during free-time planning
+  originLabel?: string; // origin stop/milestone label (for transfers)
+  destinationLabel?: string; // target stop/milestone label (for transfers)
+  isRestBuffer?: boolean; // true if this entry represents a reserved personal rest buffer
 }
 
 export type ViolationType =

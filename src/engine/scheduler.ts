@@ -95,10 +95,12 @@ export function evaluateFeasibility(
   const timeline: TimetableEntry[] = [];
   let sequence = 0;
   const push = (category: TimelineCategory, label: string, from: number, to: number,
-    day: number, activityId?: string, isOptional?: boolean, isCustom?: boolean): void => {
+    day: number, activityId?: string, isOptional?: boolean, isCustom?: boolean,
+    originLabel?: string, destinationLabel?: string, isRestBuffer?: boolean): void => {
     if (to <= from) return;
     timeline.push({ id: `t${++sequence}`, category, label,
-      startTime: formatIST(from), endTime: formatIST(to), day, activityId, isOptional, isCustom });
+      startTime: formatIST(from), endTime: formatIST(to), day, activityId, isOptional, isCustom,
+      originLabel, destinationLabel, isRestBuffer });
   };
   const violation = (type: ConstraintViolation['type'], severity: ConstraintViolation['severity'],
     message: string, activityId?: string): void => {
@@ -185,7 +187,10 @@ export function evaluateFeasibility(
   });
 
   function getAttemptFailureReason(activity: Activity, cursor: number, date: string, endCap: number): string {
-    const transferEnd = add(cursor, activity.localTransferMinutes);
+    const transferMinutes = input.transferAdjustments?.[activity.id] !== undefined
+      ? input.transferAdjustments[activity.id]
+      : activity.localTransferMinutes;
+    const transferEnd = add(cursor, transferMinutes);
     const opening = at(date, activity.openTime);
     const closing = at(date, activity.closeTime);
     const lastEntry = activity.lastEntryTime ? at(date, activity.lastEntryTime) : closing;
@@ -209,15 +214,22 @@ export function evaluateFeasibility(
   function attempt(activity: Activity, cursor: number, date: string,
     endCap: number, day: number): number | undefined {
     if (cursor >= endCap) return undefined;
-    const transferEnd = add(cursor, activity.localTransferMinutes);
+    const transferMinutes = input.transferAdjustments?.[activity.id] !== undefined
+      ? input.transferAdjustments[activity.id]
+      : activity.localTransferMinutes;
+    const transferEnd = add(cursor, transferMinutes);
     const opening = at(date, activity.openTime);
     const closing = at(date, activity.closeTime);
     const lastEntry = activity.lastEntryTime ? at(date, activity.lastEntryTime) : closing;
     let begin = Math.max(transferEnd, opening);
     let finish = add(begin, activity.durationMinutes);
     if (begin > lastEntry || finish > closing || finish > endCap) return undefined;
-    push('TRANSFER', `Local transfer to ${activity.name}`, cursor, transferEnd, day);
-    push('WAIT', `Wait for ${activity.name} to open`, transferEnd, begin, day);
+
+    const prevEntry = [...timeline].reverse().find(t => t.day === day && t.category !== 'FREE');
+    const originLabel = prevEntry ? prevEntry.label : (day === 1 ? 'Hotel check-in' : 'Hotel / Overnight stay');
+
+    push('TRANSFER', `Local transfer to ${activity.name}`, cursor, transferEnd, day, activity.id, undefined, undefined, originLabel, activity.name);
+    push('WAIT', `Wait for ${activity.name} to open`, transferEnd, begin, day, activity.id);
     push('ACTIVITY', activity.name, begin, finish, day, activity.id, activity.isOptional);
     activityOutcomes.push({ activityId: activity.id, status: `day${day}` as any });
 
@@ -459,7 +471,10 @@ export function evaluateFeasibility(
     const finalRemaining: Activity[] = [];
     for (const activity of finalDayActivities) {
       const endCap = activity.isOptional ? preferredReturnDeparture : latestReturnDeparture;
-      const earliestStart = Math.max(add(finalCursor, activity.localTransferMinutes), at(finalDate, activity.openTime));
+      const transferMinutes = input.transferAdjustments?.[activity.id] !== undefined
+        ? input.transferAdjustments[activity.id]
+        : activity.localTransferMinutes;
+      const earliestStart = Math.max(add(finalCursor, transferMinutes), at(finalDate, activity.openTime));
       if (!finalLunchDone && earliestStart >= finalLunchStart &&
           add(Math.max(finalCursor, finalLunchStart), finalLunchDuration) < endCap) {
         finalCursor = takeLunch(finalCursor);
@@ -630,12 +645,29 @@ export function evaluateFeasibility(
         const actMins = Math.min(matching.durationMinutes, availableSlotMins);
         const actEnd = add(winCursor, actMins);
 
-        push('ACTIVITY', matching.name, winCursor, actEnd, day, matching.id, true, true);
+        const isRest = Boolean(
+          matching.isRestBuffer ||
+          matching.name.toLowerCase().includes('buffer') ||
+          matching.name.toLowerCase().includes('rest') ||
+          matching.name.toLowerCase().includes('downtime')
+        );
+        const cat: TimelineCategory = isRest ? 'REST' : 'ACTIVITY';
+        push(cat, matching.name, winCursor, actEnd, day, matching.id, true, true, undefined, undefined, isRest);
         winCursor = actEnd;
       }
 
       if (winEnd > winCursor) {
-        push('FREE', 'Unallocated usable time', winCursor, winEnd, day);
+        const dateStr = formatIST(winCursor).slice(0, 10);
+        const sunsetEpoch = at(dateStr, '18:15');
+
+        if (winCursor < sunsetEpoch && winEnd > sunsetEpoch) {
+          push('FREE', 'Daytime free time', winCursor, sunsetEpoch, day);
+          push('FREE', 'Evening free time', sunsetEpoch, winEnd, day);
+        } else if (winEnd <= sunsetEpoch) {
+          push('FREE', 'Daytime free time', winCursor, winEnd, day);
+        } else {
+          push('FREE', 'Evening free time', winCursor, winEnd, day);
+        }
         freeMinutes += (winEnd - winCursor) / MINUTE_MS;
       }
     }

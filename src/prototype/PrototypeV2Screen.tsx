@@ -7,9 +7,15 @@ import {
   type DiscoverPlace,
 } from './prototypeData';
 import { DESTINATIONS } from '../data/destinations';
-import { evaluateFeasibility } from '../engine/scheduler';
+import { evaluateFeasibility, parseIST } from '../engine/scheduler';
 import { evaluateActivityMove, getMoveCandidates, getInsertionSlotsForDay } from '../engine/moveActivity';
-import type { Activity, UserConstraints } from '../types';
+import {
+  getTransferDetails,
+  evaluateTransferAdjustment,
+  evaluateFreeTimeUsage,
+  type FreeTimeAction,
+} from '../engine/timelineEditing';
+import type { Activity, TimetableEntry, UserConstraints } from '../types';
 import PrototypeMap from './PrototypeMap';
 
 interface WhatChangedNotice {
@@ -80,6 +86,23 @@ export default function PrototypeV2Screen() {
   const [customDetourMode, setCustomDetourMode] = useState<'wishlist' | 'schedule'>('schedule');
   const [customUserAllowance, setCustomUserAllowance] = useState<number>(15);
   const [wishlistPlaces, setWishlistPlaces] = useState<Array<{ id: string; name: string; durationMinutes: number }>>([]);
+
+  // Local Transfer Adjustment Modal State
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState<boolean>(false);
+  const [selectedTransferEntry, setSelectedTransferEntry] = useState<TimetableEntry | null>(null);
+  const [transferMinutesInput, setTransferMinutesInput] = useState<number>(30);
+
+  // Free Time Modal State
+  const [isFreeTimeModalOpen, setIsFreeTimeModalOpen] = useState<boolean>(false);
+  const [selectedFreeEntry, setSelectedFreeEntry] = useState<TimetableEntry | null>(null);
+  const [freeTimeTab, setFreeTimeTab] = useState<'buffer' | 'activity'>('buffer');
+  const [freeBufferName, setFreeBufferName] = useState<string>('Personal Rest Buffer');
+  const [freeBufferDuration, setFreeBufferDuration] = useState<number>(30);
+  const [freeActivityMode, setFreeActivityMode] = useState<'existing' | 'custom'>('existing');
+  const [freeSelectedActivityId, setFreeSelectedActivityId] = useState<string>('mysuru-market');
+  const [freeCustomName, setFreeCustomName] = useState<string>('');
+  const [freeCustomDuration, setFreeCustomDuration] = useState<number>(45);
+  const [freeCustomCost, setFreeCustomCost] = useState<number>(0);
 
   // Execute scheduling engine against active constraints
   const currentResult = useMemo(() => {
@@ -156,6 +179,127 @@ export default function PrototypeV2Screen() {
     );
 
     setIsMoveModalOpen(false);
+  };
+
+  // Transfer Details for selected transfer
+  const transferDetails = useMemo(() => {
+    if (!selectedTransferEntry) return null;
+    return getTransferDetails(selectedTransferEntry, currentResult.timeline, MYSURU_DEST, constraints);
+  }, [selectedTransferEntry, currentResult.timeline, constraints]);
+
+  // Transfer Adjustment Preview
+  const transferPreview = useMemo(() => {
+    if (!selectedTransferEntry || !selectedTransferEntry.activityId) return null;
+    return evaluateTransferAdjustment(
+      selectedTransferEntry.activityId,
+      transferMinutesInput,
+      MYSURU_DEST,
+      constraints
+    );
+  }, [selectedTransferEntry, transferMinutesInput, constraints]);
+
+  // Open Transfer Modal
+  const handleOpenTransferModal = (entry: TimetableEntry) => {
+    setSelectedTransferEntry(entry);
+    const details = getTransferDetails(entry, currentResult.timeline, MYSURU_DEST, constraints);
+    setTransferMinutesInput(details?.currentDurationMinutes ?? 30);
+    setIsTransferModalOpen(true);
+  };
+
+  // Apply Transfer Adjustment
+  const handleConfirmTransferAdjustment = () => {
+    if (!transferPreview || !transferPreview.isValid) return;
+    const destName = transferDetails?.destinationLabel || 'stop';
+    recordHistory(
+      transferPreview.proposedConstraints,
+      `Adjusted transfer to "${destName}" to ${transferPreview.proposedDurationMinutes}m. Return margin: ${transferPreview.after.returnMarginMinutes >= 0 ? '+' : ''}${transferPreview.after.returnMarginMinutes}m.`
+    );
+    setIsTransferModalOpen(false);
+    setSelectedTransferEntry(null);
+  };
+
+  // Open Free Time Modal
+  const handleOpenFreeTimeModal = (entry: TimetableEntry) => {
+    setSelectedFreeEntry(entry);
+    setFreeTimeTab('buffer');
+    setFreeBufferName('Personal Rest Buffer');
+    setFreeBufferDuration(30);
+    setFreeActivityMode('existing');
+    const candidate = moveCandidates.find(c => c.scheduleStatus !== 'scheduled') || moveCandidates[0];
+    if (candidate) {
+      setFreeSelectedActivityId(candidate.activityId);
+    }
+    setFreeCustomName('');
+    setFreeCustomDuration(45);
+    setFreeCustomCost(0);
+    setIsFreeTimeModalOpen(true);
+  };
+
+  // Free Time Preview
+  const freeTimePreview = useMemo(() => {
+    if (!selectedFreeEntry) return null;
+    let action: FreeTimeAction;
+    if (freeTimeTab === 'buffer') {
+      action = {
+        type: 'RESERVE_BUFFER',
+        name: freeBufferName,
+        durationMinutes: freeBufferDuration,
+      };
+    } else if (freeActivityMode === 'existing') {
+      action = {
+        type: 'SCHEDULE_ACTIVITY',
+        activityId: freeSelectedActivityId,
+      };
+    } else {
+      action = {
+        type: 'ADD_CUSTOM_PLACE',
+        name: freeCustomName.trim() || 'Custom Stop',
+        durationMinutes: freeCustomDuration,
+        costPerPersonINR: freeCustomCost,
+      };
+    }
+    return evaluateFreeTimeUsage(selectedFreeEntry, action, MYSURU_DEST, constraints);
+  }, [
+    selectedFreeEntry,
+    freeTimeTab,
+    freeBufferName,
+    freeBufferDuration,
+    freeActivityMode,
+    freeSelectedActivityId,
+    freeCustomName,
+    freeCustomDuration,
+    freeCustomCost,
+    constraints,
+  ]);
+
+  // Apply Free Time Action
+  const handleConfirmFreeTimeUsage = () => {
+    if (!freeTimePreview || !freeTimePreview.isValid) return;
+    const label =
+      freeTimeTab === 'buffer'
+        ? `Reserved ${freeBufferDuration}m buffer`
+        : freeActivityMode === 'existing'
+        ? `Scheduled activity into Day ${selectedFreeEntry?.day} free time`
+        : `Added custom place "${freeCustomName.trim()}"`;
+    recordHistory(
+      freeTimePreview.proposedConstraints,
+      `${label}. Return margin: ${freeTimePreview.after.returnMarginMinutes >= 0 ? '+' : ''}${freeTimePreview.after.returnMarginMinutes}m.`
+    );
+    setIsFreeTimeModalOpen(false);
+    setSelectedFreeEntry(null);
+    setFreeCustomName('');
+  };
+
+  // Remove custom planned activity or reserved buffer
+  const handleRemoveCustomOrBuffer = (activityId: string) => {
+    const nextCustoms = (constraints.customActivities ?? []).filter(ca => ca.id !== activityId);
+    const nextAdditional = (constraints.additionalActivities ?? []).filter(a => a.id !== activityId);
+    const nextConstraints: UserConstraints = {
+      ...constraints,
+      customActivities: nextCustoms,
+      additionalActivities: nextAdditional,
+    };
+    recordHistory(nextConstraints, 'Removed item from itinerary.');
   };
 
   // Scheduled activities mapped from current timetable for PrototypeMap
@@ -764,7 +908,7 @@ export default function PrototypeV2Screen() {
                           : 'border-transparent text-[#5A7184] hover:text-[#193953]'
                       }`}
                     >
-                      Day 1: Sat ({currentResult.timeline.filter(t => t.day === 1 && t.category === 'ACTIVITY').length} stops)
+                      Day 1: Sat ({currentResult.timeline.filter(t => t.day === 1 && t.category === 'ACTIVITY' && !t.isRestBuffer).length} stops)
                     </button>
                     <button
                       type="button"
@@ -778,7 +922,7 @@ export default function PrototypeV2Screen() {
                           : 'border-transparent text-[#5A7184] hover:text-[#193953]'
                       }`}
                     >
-                      Day 2: Sun ({currentResult.timeline.filter(t => t.day === 2 && t.category === 'ACTIVITY').length} stops)
+                      Day 2: Sun ({currentResult.timeline.filter(t => t.day === 2 && t.category === 'ACTIVITY' && !t.isRestBuffer).length} stops)
                     </button>
                     <button
                       type="button"
@@ -807,133 +951,310 @@ export default function PrototypeV2Screen() {
                 {/* SCHEDULE VIEW: Rendered dynamically from currentResult.timeline */}
                 {builderTab === 'schedule' && (
                   <div className="space-y-3">
-                    {currentResult.timeline
-                      .filter(t => t.day === activeDay)
-                      .map((entry, idx) => {
-                        const isActivity = entry.category === 'ACTIVITY';
-                        const isHovered = activeHoverId === entry.activityId;
+                    {(() => {
+                      const dayScheduledStops = currentResult.timeline.filter(
+                        t => t.day === activeDay && t.category === 'ACTIVITY' && !t.isRestBuffer
+                      );
 
-                        if (isActivity) {
+                      return currentResult.timeline
+                        .filter(t => t.day === activeDay)
+                        .map((entry) => {
+                          const isStop = entry.category === 'ACTIVITY' && !entry.isRestBuffer;
+                          const isHovered = activeHoverId === entry.activityId;
+
+                          // 1. ACTUAL TOURIST STOP (ACTIVITY) - NUMBERED ONLY HERE
+                          if (isStop) {
+                            const stopIdx = dayScheduledStops.findIndex(s => s.id === entry.id);
+                            const stopNumber = stopIdx >= 0 ? stopIdx + 1 : 1;
+
+                            return (
+                              <div
+                                key={entry.id}
+                                onMouseEnter={() => setActiveHoverId(entry.activityId ?? null)}
+                                onMouseLeave={() => setActiveHoverId(null)}
+                                className={`rounded-2xl border p-4 transition-all duration-200 bg-white shadow-xs ${
+                                  isHovered
+                                    ? 'border-[#176EA8] ring-2 ring-[#176EA8]/20 shadow-md'
+                                    : 'border-[#E1ECF2] hover:border-[#176EA8]/40'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex items-start gap-3">
+                                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#176EA8] text-white font-bold text-xs shrink-0">
+                                      #{stopNumber}
+                                    </div>
+
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <h4 className="text-sm font-black text-[#193953]">{entry.label}</h4>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-sky-50 text-[#176EA8]">
+                                          Day {entry.day} · Stop #{stopNumber}
+                                        </span>
+                                      </div>
+
+                                      <div className="text-xs text-[#5A7184] mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                        <span>⏰ <strong>{entry.startTime.slice(11)}–{entry.endTime.slice(11)}</strong> IST</span>
+                                        <span>📍 {ACTIVITY_COORDS[entry.activityId!] ? 'Mysuru' : 'Expressway Corridor'}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedMoveActivityId(entry.activityId!);
+                                        setMoveTargetDay(activeDay === 1 ? 2 : 1);
+                                        setIsMoveModalOpen(true);
+                                      }}
+                                      className="rounded-lg border border-[#E1ECF2] bg-white px-2 py-1 text-xs font-bold text-[#176EA8] hover:bg-sky-50 shadow-xs flex items-center gap-1"
+                                      title="Move to another day"
+                                    >
+                                      <span>🔄</span>
+                                      <span>Move Day</span>
+                                    </button>
+
+                                    {(entry.isOptional || entry.isCustom) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (entry.isCustom) {
+                                            handleRemoveCustomOrBuffer(entry.activityId!);
+                                          } else {
+                                            handleToggleActivity(entry.activityId!);
+                                          }
+                                        }}
+                                        className="h-7 w-7 rounded-lg border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50"
+                                        title="Remove Stop"
+                                      >
+                                        ✕
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // 2. LOCAL TRANSFER MILESTONE
+                          if (entry.category === 'TRANSFER') {
+                            const transferMins = Math.round(
+                              (parseIST(entry.endTime) - parseIST(entry.startTime)) / 60000
+                            );
+                            const isAdjusted =
+                              entry.activityId &&
+                              constraints.transferAdjustments?.[entry.activityId] !== undefined;
+                            const originText = entry.originLabel || 'Previous stop';
+                            const destText =
+                              entry.destinationLabel || entry.label.replace(/^Local transfer to\s+/, '');
+
+                            return (
+                              <div
+                                key={entry.id}
+                                className="rounded-2xl border border-cyan-200 bg-cyan-50/40 p-3.5 text-xs transition-all shadow-2xs hover:border-cyan-300"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-2.5">
+                                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-100 text-cyan-800 font-bold text-xs shrink-0">
+                                      🚗
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <h4 className="text-xs font-bold text-[#193953]">
+                                          {originText} <span className="text-cyan-500 font-normal">→</span> {destText}
+                                        </h4>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-cyan-100 text-cyan-800">
+                                          Transfer
+                                        </span>
+                                      </div>
+                                      <div className="text-[11px] text-[#5A7184] mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                        <span>⏱️ <strong>{transferMins}m</strong> ({entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST)</span>
+                                        <span className="text-gray-400">·</span>
+                                        <span className={isAdjusted ? 'text-amber-800 font-semibold' : 'text-gray-500'}>
+                                          {isAdjusted ? `User allowance (${transferMins}m, unverified)` : 'Default allowance (unverified)'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenTransferModal(entry)}
+                                    className="rounded-lg border border-cyan-300 bg-white px-2.5 py-1 text-xs font-bold text-cyan-800 hover:bg-cyan-50 shadow-2xs flex items-center gap-1 shrink-0"
+                                    title="Review / Adjust local transfer allowance"
+                                  >
+                                    <span>⚙️</span>
+                                    <span>Review / Adjust</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // 3. FREE TIME MILESTONE
+                          if (entry.category === 'FREE') {
+                            const freeMins = Math.round(
+                              (parseIST(entry.endTime) - parseIST(entry.startTime)) / 60000
+                            );
+                            const isEvening = entry.startTime.slice(11) >= '18:15';
+
+                            return (
+                              <div
+                                key={entry.id}
+                                className="rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/40 p-3.5 text-xs transition-all shadow-2xs hover:border-emerald-400"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-2.5">
+                                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-800 font-bold text-sm shrink-0">
+                                      {isEvening ? '🌙' : '☀️'}
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <h4 className="text-xs font-bold text-emerald-950">{entry.label}</h4>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                                          {isEvening ? 'Evening Leisure' : 'Daylight Time'}
+                                        </span>
+                                      </div>
+                                      <div className="text-[11px] text-[#5A7184] mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                        <span>⏰ <strong>{entry.startTime.slice(11)}–{entry.endTime.slice(11)}</strong> IST</span>
+                                        <span className="text-gray-400">·</span>
+                                        <span className="font-semibold text-emerald-800">
+                                          {Math.floor(freeMins / 60) > 0 ? `${Math.floor(freeMins / 60)}h ` : ''}{freeMins % 60}m available
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenFreeTimeModal(entry)}
+                                    className="rounded-lg border border-emerald-400 bg-emerald-600 text-white hover:bg-emerald-700 px-2.5 py-1 text-xs font-bold shadow-2xs flex items-center gap-1 shrink-0"
+                                    title="Use available free time"
+                                  >
+                                    <span>⚡</span>
+                                    <span>Use This Time</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // 4. REST MILESTONES (Personal Rest Buffer vs Overnight Rest)
+                          if (entry.category === 'REST') {
+                            if (entry.isRestBuffer) {
+                              const bufferMins = Math.round(
+                                (parseIST(entry.endTime) - parseIST(entry.startTime)) / 60000
+                              );
+                              return (
+                                <div
+                                  key={entry.id}
+                                  className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-3 text-xs flex items-center justify-between"
+                                >
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="text-base">🧘</span>
+                                    <div>
+                                      <div className="flex items-center gap-1.5">
+                                        <strong className="text-indigo-950 font-bold">{entry.label}</strong>
+                                        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">
+                                          Personal Rest Buffer
+                                        </span>
+                                      </div>
+                                      <span className="block text-[11px] text-indigo-700">
+                                        {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST ({bufferMins}m reserved)
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveCustomOrBuffer(entry.activityId!)}
+                                    className="h-6 w-6 rounded-md border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center justify-center"
+                                    title="Remove buffer"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div
+                                key={entry.id}
+                                className="rounded-xl border border-indigo-100 bg-indigo-50/30 p-3 text-xs flex items-center justify-between"
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <span className="text-base">🛌</span>
+                                  <div>
+                                    <strong className="text-indigo-950 font-bold">{entry.label}</strong>
+                                    <span className="block text-[11px] text-[#5A7184]">
+                                      {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST (10 PM Rest Anchor)
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">
+                                  REST
+                                </span>
+                              </div>
+                            );
+                          }
+
+                          // 5. OTHER MILESTONES (Drive, Pitstop, Meal, Checkin, Wait)
                           return (
                             <div
                               key={entry.id}
-                              onMouseEnter={() => setActiveHoverId(entry.activityId ?? null)}
-                              onMouseLeave={() => setActiveHoverId(null)}
-                              className={`rounded-2xl border p-4 transition-all duration-200 bg-white shadow-xs ${
-                                isHovered
-                                  ? 'border-[#176EA8] ring-2 ring-[#176EA8]/20 shadow-md'
-                                  : 'border-[#E1ECF2] hover:border-[#176EA8]/40'
+                              className={`rounded-xl border p-3 text-xs flex items-center justify-between ${
+                                entry.category === 'DRIVE'
+                                  ? 'border-dashed border-[#BAE3F1] bg-[#F4F9FC] text-[#5A7184]'
+                                  : entry.category === 'PITSTOP'
+                                  ? 'border-amber-300 bg-amber-50 text-amber-900'
+                                  : entry.category === 'MEAL'
+                                  ? 'border-amber-200 bg-amber-50/50 text-amber-900'
+                                  : entry.category === 'CHECK_IN'
+                                  ? 'border-teal-200 bg-teal-50/30 text-teal-900'
+                                  : entry.category === 'WAIT'
+                                  ? 'border-yellow-200 bg-yellow-50/60 text-amber-900'
+                                  : 'border-[#E1ECF2] bg-gray-50 text-gray-600'
                               }`}
                             >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex items-start gap-3">
-                                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#176EA8] text-white font-bold text-xs">
-                                    #{idx + 1}
-                                  </div>
-
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <h4 className="text-sm font-black text-[#193953]">{entry.label}</h4>
-                                      <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-sky-50 text-[#176EA8]">
-                                        Day {entry.day} Stop
-                                      </span>
-                                    </div>
-
-                                    <div className="text-xs text-[#5A7184] mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                                      <span>⏰ <strong>{entry.startTime.slice(11)}–{entry.endTime.slice(11)}</strong> IST</span>
-                                      <span>📍 {ACTIVITY_COORDS[entry.activityId!] ? 'Mysuru' : 'Expressway Corridor'}</span>
-                                    </div>
-                                  </div>
+                              <div className="flex items-center gap-2.5">
+                                <span className="text-base">
+                                  {entry.category === 'DRIVE'
+                                    ? '🛣️'
+                                    : entry.category === 'PITSTOP'
+                                    ? '☕'
+                                    : entry.category === 'MEAL'
+                                    ? '🍽️'
+                                    : entry.category === 'CHECK_IN'
+                                    ? '🏨'
+                                    : entry.category === 'WAIT'
+                                    ? '⏳'
+                                    : '⏱️'}
+                                </span>
+                                <div>
+                                  <strong className="text-[#193953] font-bold">{entry.label}</strong>
+                                  <span className="block text-[11px]">
+                                    {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST
+                                  </span>
                                 </div>
-
-                                <div className="flex items-center gap-1.5">
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/5 text-[#5A7184]">
+                                  {entry.category === 'DRIVE' ? 'HIGHWAY LEG' : entry.category}
+                                </span>
+                                {entry.category === 'PITSTOP' && (
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setSelectedMoveActivityId(entry.activityId!);
-                                      setMoveTargetDay(activeDay === 1 ? 2 : 1);
-                                      setIsMoveModalOpen(true);
-                                    }}
-                                    className="rounded-lg border border-[#E1ECF2] bg-white px-2 py-1 text-xs font-bold text-[#176EA8] hover:bg-sky-50 shadow-xs flex items-center gap-1"
-                                    title="Move to another day"
+                                    onClick={() => handleToggleActivity('maddur-tiffanys')}
+                                    className="h-6 w-6 rounded-md border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center justify-center"
+                                    title="Remove highway stop"
                                   >
-                                    <span>🔄</span>
-                                    <span>Move Day</span>
+                                    ✕
                                   </button>
-
-                                  {entry.isOptional && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleToggleActivity(entry.activityId!)}
-                                      className="h-7 w-7 rounded-lg border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50"
-                                      title="Remove Stop"
-                                    >
-                                      ✕
-                                    </button>
-                                  )}
-                                </div>
+                                )}
                               </div>
                             </div>
                           );
-                        }
-
-                        // Render Non-Activity Timeline Milestones (Drive, Pitstop, Meals, Rest, Checkin)
-                        return (
-                          <div
-                            key={entry.id}
-                            className={`rounded-xl border p-3 text-xs flex items-center justify-between ${
-                              entry.category === 'DRIVE'
-                                ? 'border-dashed border-[#BAE3F1] bg-[#F4F9FC] text-[#5A7184]'
-                                : entry.category === 'PITSTOP'
-                                ? 'border-amber-300 bg-amber-50 text-amber-900'
-                                : entry.category === 'MEAL'
-                                ? 'border-amber-200 bg-amber-50/50 text-amber-900'
-                                : entry.category === 'CHECK_IN'
-                                ? 'border-[#E1ECF2] bg-white text-[#5A7184]'
-                                : entry.category === 'REST'
-                                ? 'border-indigo-100 bg-indigo-50/40 text-indigo-900'
-                                : 'border-[#E1ECF2] bg-gray-50 text-gray-600'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span>
-                                {entry.category === 'DRIVE'
-                                  ? '🚗'
-                                  : entry.category === 'PITSTOP'
-                                  ? '☕'
-                                  : entry.category === 'MEAL'
-                                  ? '🍽️'
-                                  : entry.category === 'CHECK_IN'
-                                  ? '🏨'
-                                  : entry.category === 'REST'
-                                  ? '🛌'
-                                  : '⏱️'}
-                              </span>
-                              <div>
-                                <strong className="text-[#193953]">{entry.label}</strong>
-                                <span className="block text-[11px]">
-                                  {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">
-                                {entry.category}
-                              </span>
-                              {entry.category === 'PITSTOP' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleActivity('maddur-tiffanys')}
-                                  className="h-6 w-6 rounded-md border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center justify-center"
-                                  title="Remove highway stop"
-                                >
-                                  ✕
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                        });
+                    })()}
 
                     {/* Saved Wishlist (Unscheduled Places) */}
                     {wishlistPlaces.length > 0 && (
@@ -1539,6 +1860,403 @@ export default function PrototypeV2Screen() {
                     }`}
                   >
                     Confirm & Move Activity →
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* TIMELINE EDITING: LOCAL TRANSFER REVIEW & ADJUSTMENT MODAL                */}
+          {/* ========================================================================= */}
+          {isTransferModalOpen && selectedTransferEntry && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fadeIn">
+              <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-[#E1ECF2] space-y-4 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-start justify-between border-b border-[#E1ECF2] pb-3">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">
+                      Timeline Editing · Local Transit
+                    </span>
+                    <h3 className="text-lg font-black text-[#193953]">Review / Adjust Local Transfer</h3>
+                    <p className="text-xs text-[#5A7184] mt-0.5">
+                      Planning allowance for transit to {transferDetails?.destinationLabel || 'stop'}.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsTransferModalOpen(false)}
+                    className="text-gray-400 hover:text-gray-600 font-bold text-lg p-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="rounded-xl border border-cyan-200 bg-cyan-50/50 p-3 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[#193953]">Route Leg:</span>
+                    <span className="font-bold text-cyan-900">
+                      {transferDetails?.originLabel} → {transferDetails?.destinationLabel}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#5A7184]">Current Duration:</span>
+                    <span className="font-semibold text-[#193953]">{transferDetails?.currentDurationMinutes} minutes</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#5A7184]">Evidence Source:</span>
+                    <span className="inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">
+                      {transferDetails?.evidenceSource}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                    ⚠️ <strong>Planning Allowance:</strong> Local transfers are unverified planning allowances for intra-city transit. Reducing this value does not guarantee faster travel in live traffic; check road conditions before travel.
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-[#193953]">
+                    Adjust Planning Allowance (Minutes):
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[15, 20, 30, 45, 60].map(mins => (
+                      <button
+                        key={mins}
+                        type="button"
+                        onClick={() => setTransferMinutesInput(mins)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          transferMinutesInput === mins
+                            ? 'bg-[#176EA8] text-white shadow-xs'
+                            : 'bg-gray-100 text-[#193953] hover:bg-gray-200'
+                        }`}
+                      >
+                        {mins}m
+                      </button>
+                    ))}
+                    <div className="flex items-center gap-1 ml-auto">
+                      <span className="text-xs text-[#5A7184]">Custom:</span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={180}
+                        value={transferMinutesInput}
+                        onChange={e => setTransferMinutesInput(parseInt(e.target.value) || 5)}
+                        className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-xs font-bold text-center"
+                      />
+                      <span className="text-xs text-[#5A7184]">min</span>
+                    </div>
+                  </div>
+                </div>
+
+                {transferPreview && (
+                  <div className="space-y-3">
+                    {!transferPreview.isValid ? (
+                      <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900 space-y-1">
+                        <div className="font-bold flex items-center gap-1">
+                          <span>🚫</span>
+                          <span>Cannot Apply Adjustment:</span>
+                        </div>
+                        <p>{transferPreview.validationError}</p>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-emerald-300 bg-emerald-50/50 p-3 space-y-2 text-xs">
+                        <div className="font-bold text-emerald-900 flex items-center justify-between">
+                          <span>✓ Valid Planning Adjustment</span>
+                          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                            Feasible
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-emerald-200">
+                          <div>
+                            <span className="text-gray-500 block">Transfer Duration:</span>
+                            <strong>
+                              {transferPreview.currentDurationMinutes}m → {transferPreview.proposedDurationMinutes}m ({transferPreview.deltas.transferDeltaMinutes >= 0 ? '+' : ''}{transferPreview.deltas.transferDeltaMinutes}m)
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block">Return Margin:</span>
+                            <strong className={transferPreview.after.returnMarginMinutes >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                              {transferPreview.before.returnMarginMinutes}m → {transferPreview.after.returnMarginMinutes}m ({transferPreview.deltas.marginDeltaMinutes >= 0 ? '+' : ''}{transferPreview.deltas.marginDeltaMinutes}m)
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block">Home Arrival:</span>
+                            <strong>{transferPreview.before.homeArrival.slice(11)} → {transferPreview.after.homeArrival.slice(11)} IST</strong>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block">Free Time Impact:</span>
+                            <strong>{transferPreview.deltas.downstreamFreeTimeDeltaMinutes >= 0 ? '+' : ''}{transferPreview.deltas.downstreamFreeTimeDeltaMinutes}m</strong>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E1ECF2]">
+                  <button
+                    type="button"
+                    onClick={() => setIsTransferModalOpen(false)}
+                    className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!transferPreview || !transferPreview.isValid}
+                    onClick={handleConfirmTransferAdjustment}
+                    className="rounded-xl bg-[#176EA8] disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-[#135A8A] px-4 py-2 text-xs font-bold text-white shadow-xs"
+                  >
+                    Apply Transfer Allowance
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* TIMELINE EDITING: USE AVAILABLE FREE TIME MODAL                           */}
+          {/* ========================================================================= */}
+          {isFreeTimeModalOpen && selectedFreeEntry && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fadeIn">
+              <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-[#E1ECF2] space-y-4 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-start justify-between border-b border-[#E1ECF2] pb-3">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
+                      Timeline Editing · Use Available Leisure
+                    </span>
+                    <h3 className="text-lg font-black text-[#193953]">Use This Free Time</h3>
+                    <p className="text-xs text-[#5A7184] mt-0.5">
+                      Day {selectedFreeEntry.day} · {selectedFreeEntry.startTime.slice(11)}–{selectedFreeEntry.endTime.slice(11)} IST ({Math.round((parseIST(selectedFreeEntry.endTime) - parseIST(selectedFreeEntry.startTime)) / 60000)}m available)
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsFreeTimeModalOpen(false)}
+                    className="text-gray-400 hover:text-gray-600 font-bold text-lg p-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="flex border-b border-[#E1ECF2]">
+                  <button
+                    type="button"
+                    onClick={() => setFreeTimeTab('buffer')}
+                    className={`flex-1 pb-2 text-xs font-bold border-b-2 text-center transition-all ${
+                      freeTimeTab === 'buffer'
+                        ? 'border-[#176EA8] text-[#176EA8]'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    🧘 Reserve Rest / Buffer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFreeTimeTab('activity')}
+                    className={`flex-1 pb-2 text-xs font-bold border-b-2 text-center transition-all ${
+                      freeTimeTab === 'activity'
+                        ? 'border-[#176EA8] text-[#176EA8]'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    🏛️ Schedule Activity / Place
+                  </button>
+                </div>
+
+                {freeTimeTab === 'buffer' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-bold text-[#193953] mb-1">Buffer Description:</label>
+                      <input
+                        type="text"
+                        value={freeBufferName}
+                        onChange={e => setFreeBufferName(e.target.value)}
+                        placeholder="e.g. Evening Rest & Downtime"
+                        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-[#193953] mb-1">Duration:</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[15, 30, 45, 60].map(mins => (
+                          <button
+                            key={mins}
+                            type="button"
+                            onClick={() => setFreeBufferDuration(mins)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                              freeBufferDuration === mins
+                                ? 'bg-[#176EA8] text-white shadow-xs'
+                                : 'bg-gray-100 text-[#193953] hover:bg-gray-200'
+                            }`}
+                          >
+                            {mins}m
+                          </button>
+                        ))}
+                        <div className="flex items-center gap-1 ml-auto">
+                          <span className="text-xs text-[#5A7184]">Custom:</span>
+                          <input
+                            type="number"
+                            min={10}
+                            max={Math.round((parseIST(selectedFreeEntry.endTime) - parseIST(selectedFreeEntry.startTime)) / 60000)}
+                            value={freeBufferDuration}
+                            onChange={e => setFreeBufferDuration(parseInt(e.target.value) || 15)}
+                            className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-xs font-bold text-center"
+                          />
+                          <span className="text-xs text-[#5A7184]">min</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {freeTimeTab === 'activity' && (
+                  <div className="space-y-3">
+                    <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setFreeActivityMode('existing')}
+                        className={`flex-1 py-1 text-center font-bold rounded-md transition-all ${
+                          freeActivityMode === 'existing' ? 'bg-white shadow-xs text-[#176EA8]' : 'text-gray-600'
+                        }`}
+                      >
+                        Curated Places
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFreeActivityMode('custom')}
+                        className={`flex-1 py-1 text-center font-bold rounded-md transition-all ${
+                          freeActivityMode === 'custom' ? 'bg-white shadow-xs text-[#176EA8]' : 'text-gray-600'
+                        }`}
+                      >
+                        Custom Place
+                      </button>
+                    </div>
+
+                    {freeActivityMode === 'existing' && (
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                        {moveCandidates.map(c => (
+                          <button
+                            key={c.activityId}
+                            type="button"
+                            onClick={() => setFreeSelectedActivityId(c.activityId)}
+                            className={`w-full text-left p-2.5 rounded-xl border transition-all text-xs flex items-center justify-between ${
+                              freeSelectedActivityId === c.activityId
+                                ? 'border-[#176EA8] bg-sky-50/50 ring-1 ring-[#176EA8]'
+                                : 'border-gray-200 hover:border-gray-300'
+                            }`}
+                          >
+                            <div>
+                              <div className="font-bold text-[#193953]">{c.name}</div>
+                              <div className="text-[11px] text-[#5A7184]">
+                                ⏱️ {c.durationMinutes}m visit · {c.localTransferMinutes}m transfer · 🕒 {c.operatingWindow}
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
+                              {c.scheduleStatus === 'scheduled' ? `Day ${c.currentDay}` : 'Unscheduled'}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {freeActivityMode === 'custom' && (
+                      <div className="space-y-2">
+                        <div>
+                          <label className="block text-xs font-bold text-[#193953] mb-1">Place Name:</label>
+                          <input
+                            type="text"
+                            value={freeCustomName}
+                            onChange={e => setFreeCustomName(e.target.value)}
+                            placeholder="e.g. Chamundi Hill viewpoint"
+                            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-xs font-bold text-[#193953] mb-1">Duration (mins):</label>
+                            <input
+                              type="number"
+                              min={15}
+                              max={240}
+                              value={freeCustomDuration}
+                              onChange={e => setFreeCustomDuration(parseInt(e.target.value) || 30)}
+                              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-[#193953] mb-1">Cost (₹/person):</label>
+                            <input
+                              type="number"
+                              min={0}
+                              value={freeCustomCost}
+                              onChange={e => setFreeCustomCost(parseInt(e.target.value) || 0)}
+                              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-bold"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {freeTimePreview && (
+                  <div className="space-y-3">
+                    {!freeTimePreview.isValid ? (
+                      <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900 space-y-1">
+                        <div className="font-bold flex items-center gap-1">
+                          <span>🚫</span>
+                          <span>Cannot Fit Into This Free Window:</span>
+                        </div>
+                        <p>{freeTimePreview.validationError}</p>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-emerald-300 bg-emerald-50/50 p-3 space-y-2 text-xs">
+                        <div className="font-bold text-emerald-900 flex items-center justify-between">
+                          <span>✓ Fits Into Free Leisure Slot</span>
+                          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                            Feasible
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-emerald-200">
+                          <div>
+                            <span className="text-gray-500 block">Remaining Free Time:</span>
+                            <strong>{freeTimePreview.after.remainingFreeMinutes} minutes</strong>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block">Return Margin:</span>
+                            <strong className={freeTimePreview.after.returnMarginMinutes >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                              +{freeTimePreview.after.returnMarginMinutes}m ({freeTimePreview.deltas.marginDeltaMinutes >= 0 ? '+' : ''}{freeTimePreview.deltas.marginDeltaMinutes}m)
+                            </strong>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block">Home Arrival:</span>
+                            <strong>{freeTimePreview.after.homeArrival.slice(11)} IST</strong>
+                          </div>
+                          <div>
+                            <span className="text-gray-500 block">Itinerary Impact:</span>
+                            <strong>{freeTimePreview.deltas.freeTimeDeltaMinutes}m allocated</strong>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E1ECF2]">
+                  <button
+                    type="button"
+                    onClick={() => setIsFreeTimeModalOpen(false)}
+                    className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!freeTimePreview || !freeTimePreview.isValid}
+                    onClick={handleConfirmFreeTimeUsage}
+                    className="rounded-xl bg-emerald-600 disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-emerald-700 px-4 py-2 text-xs font-bold text-white shadow-xs"
+                  >
+                    {freeTimeTab === 'buffer' ? 'Confirm & Reserve Buffer' : 'Confirm & Schedule Place'}
                   </button>
                 </div>
               </div>

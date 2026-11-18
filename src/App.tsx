@@ -91,7 +91,7 @@ export default function App() {
       </header>
 
       {/* Main Content Area (pb-28 reserves space for floating bottom navigation) */}
-      <main className="mx-auto w-full max-w-5xl flex-1 px-3 sm:px-4 py-6 sm:py-8 pb-28 overflow-x-hidden">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-3 sm:px-4 py-6 sm:py-8 pb-28 overflow-x-clip">
         <Routes>
           <Route path="/" element={<HomeScreen />} />
           <Route path="/plan" element={<InputScreen inputs={inputs} setInputs={setInputs} />} />

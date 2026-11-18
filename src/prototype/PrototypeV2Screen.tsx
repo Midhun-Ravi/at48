@@ -2378,7 +2378,7 @@ export default function PrototypeV2Screen() {
                         {visitSchedulingPreview.alternativeTimes.length > 0 && (
                           <div className="pt-2 border-t border-rose-200 space-y-1.5">
                             <span className="text-[11px] font-bold text-amber-900 block">
-                              💡 Suggested Valid Alternative Times:
+                              💡 Suggested Valid Alternative Times (Engine Verified):
                             </span>
                             <div className="flex flex-wrap gap-1.5">
                               {visitSchedulingPreview.alternativeTimes.map(alt => (
@@ -2386,9 +2386,9 @@ export default function PrototypeV2Screen() {
                                   key={alt.startTime}
                                   type="button"
                                   onClick={() => setEditorVisitStartTime(alt.startTime)}
-                                  className="rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-xs font-bold transition-all"
+                                  className="rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 px-2 py-1 text-xs font-bold transition-all flex items-center gap-1"
                                 >
-                                  {alt.label}
+                                  <span>✓ {alt.label}</span>
                                 </button>
                               ))}
                             </div>

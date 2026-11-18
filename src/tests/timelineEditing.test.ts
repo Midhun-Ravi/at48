@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getDestination } from '../data/destinations';
-import { evaluateFeasibility } from '../engine/scheduler';
+import { evaluateFeasibility, parseIST } from '../engine/scheduler';
 import {
   evaluateFreeTimeUsage,
   evaluateTransferAdjustment,
@@ -571,6 +571,128 @@ describe('V2.1 Timeline Editing UX & Correctness Gates', () => {
     expect(restoredSchedule.destinationSlackMinutes).toBe(baselineSlack);
     expect(restoredSchedule.returnDeadlineMarginMinutes).toBe(baselineMargin);
     expect(restoredSchedule.homeArrivalTime).toBe(baselineArrival);
+  });
+
+  it('16. duplicate free time regression: editing Mysore Palace to begin at 15:00 represents 14:15–14:35 exactly once, without overlaps or double-counting', () => {
+    // Check-in ends at 14:15. Mysore Palace is customized to begin at 15:00 with 25m transfer (starts at 14:35).
+    // The gap between 14:15 and 14:35 must appear as a FREE block exactly once in the timetable.
+    const preview = evaluateVisitScheduling(
+      {
+        activityId: 'mysuru-palace',
+        name: 'Mysore Palace',
+        day: 1,
+        visitStartTime: '15:00',
+        durationMinutes: 120,
+        transferMinutes: 25,
+      },
+      mysuru,
+      baseConstraints
+    );
+
+    expect(preview.isValid).toBe(true);
+    const applied = evaluateFeasibility(mysuru, preview.proposedConstraints);
+
+    // 1. Verify 14:15–14:35 free time interval appears EXACTLY ONCE
+    const free1415 = applied.timeline.filter(
+      t =>
+        t.day === 1 &&
+        t.category === 'FREE' &&
+        t.startTime.slice(11) === '14:15' &&
+        t.endTime.slice(11) === '14:35'
+    );
+    expect(free1415.length).toBe(1);
+
+    // 2. Verify all FREE intervals across the entire trip are mutually disjoint without overlaps
+    const allFreeBlocks = applied.timeline.filter(t => t.category === 'FREE');
+    for (let i = 0; i < allFreeBlocks.length; i++) {
+      const aStart = parseIST(allFreeBlocks[i].startTime);
+      const aEnd = parseIST(allFreeBlocks[i].endTime);
+      expect(aEnd).toBeGreaterThan(aStart);
+      for (let j = i + 1; j < allFreeBlocks.length; j++) {
+        if (allFreeBlocks[i].day === allFreeBlocks[j].day) {
+          const bStart = parseIST(allFreeBlocks[j].startTime);
+          const bEnd = parseIST(allFreeBlocks[j].endTime);
+          const overlaps = Math.max(aStart, bStart) < Math.min(aEnd, bEnd);
+          expect(overlaps).toBe(false);
+        }
+      }
+    }
+
+    // 3. Verify total free-time minutes equal the union of actual free intervals
+    const sumFreeIntervalMinutes = allFreeBlocks.reduce((sum, item) => {
+      return sum + Math.round((parseIST(item.endTime) - parseIST(item.startTime)) / 60000);
+    }, 0);
+    expect(applied.destinationSlackMinutes).toBe(sumFreeIntervalMinutes);
+  });
+
+  it('17. engine-validated alternative suggestions: rejects candidates that initially appear available in a window but conflict with another scheduled commitment', () => {
+    // Setup: On Day 1, Devaraja Market Walk is customized to run 19:00–20:00 (closing at 20:00).
+    // A traveler attempts to schedule a custom stop "Art Gallery Visit" with 45m duration and 15m transfer (60m total).
+    // In baseline, Mysore Palace finishes at 17:15 and Market transfer begins at 18:30 (visit 19:00).
+    // The available daytime free window is 17:15–18:30 (75m).
+    // An unvalidated scanner scanning broadly across 17:00–21:00 might suggest 18:00, 18:30, or 19:00.
+    // - 18:00 visit start (transfer 17:45–18:00, visit 18:00–18:45) collides with Market transfer starting at 18:30.
+    // - 18:30 or 19:00 directly collides with Market visit 19:00–20:00.
+    // With full engine validation, only candidates that cleanly fit without conflicting with Market (such as 17:30) are returned.
+    const constraintsWithMarket: UserConstraints = {
+      ...baseConstraints,
+      activityCustomizations: {
+        'mysuru-market': {
+          day: 1,
+          startTime: '2026-10-24T19:00',
+          durationMinutes: 60,
+          transferMinutes: 30,
+        },
+      },
+    };
+
+    const alternatives = findAlternativeValidTimes(
+      1,
+      45,
+      15,
+      mysuru,
+      constraintsWithMarket,
+      '09:00',
+      '21:00',
+      undefined,
+      'cand-art-gallery'
+    );
+
+    // Verify candidate times that would collide with the scheduled Market commitment (e.g. 18:00, 18:30, 19:00) are NEVER offered
+    const conflictingTimes = ['18:00', '18:30', '19:00'];
+    for (const ct of conflictingTimes) {
+      expect(alternatives.some(a => a.startTime === ct)).toBe(false);
+    }
+
+    // Verify every returned suggestion is engine-verified and strictly feasible
+    expect(alternatives.length).toBeGreaterThan(0);
+    for (const alt of alternatives) {
+      expect(alt.isEngineVerified).toBe(true);
+
+      const testConstraints: UserConstraints = {
+        ...constraintsWithMarket,
+        customActivities: [
+          ...(constraintsWithMarket.customActivities ?? []),
+          {
+            id: 'cand-art-gallery',
+            day: 1,
+            name: 'Art Gallery Visit',
+            durationMinutes: 45,
+            transferMinutes: 15,
+            costPerPersonINR: 0,
+            slotStart: `2026-10-24T${alt.startTime}`,
+          },
+        ],
+      };
+      const sim = evaluateFeasibility(mysuru, testConstraints);
+      const blockers = sim.violations.filter(v => v.severity === 'BLOCKER');
+      expect(blockers.length).toBe(0);
+      expect(sim.returnDeadlineMarginMinutes).toBeGreaterThanOrEqual(0);
+      // Ensure Market was not displaced
+      expect(
+        sim.timeline.some(t => t.activityId === 'mysuru-market' && t.category === 'ACTIVITY')
+      ).toBe(true);
+    }
   });
 });
 

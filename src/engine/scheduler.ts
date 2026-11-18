@@ -277,20 +277,6 @@ export function evaluateFeasibility(
         return undefined;
       }
 
-      if (reqTransferStart > cursor) {
-        // Preserve preceding free time between cursor and transfer start
-        const dateStr = formatIST(cursor).slice(0, 10);
-        const sunsetEpoch = at(dateStr, '18:15');
-        if (cursor < sunsetEpoch && reqTransferStart > sunsetEpoch) {
-          push('FREE', 'Daytime free time', cursor, sunsetEpoch, day);
-          push('FREE', 'Evening free time', sunsetEpoch, reqTransferStart, day);
-        } else if (reqTransferStart <= sunsetEpoch) {
-          push('FREE', 'Daytime free time', cursor, reqTransferStart, day);
-        } else {
-          push('FREE', 'Evening free time', cursor, reqTransferStart, day);
-        }
-      }
-
       transferStart = reqTransferStart;
       begin = explicitStart;
       finish = add(begin, durationMinutes);

@@ -738,6 +738,7 @@ export interface AlternativeValidTime {
   startTime: string; // HH:mm
   label: string; // e.g. "17:30 (Day 1 Daytime)"
   day: number;
+  isEngineVerified?: boolean;
 }
 
 export interface VisitSchedulingParams {
@@ -793,6 +794,7 @@ export interface VisitSchedulingPreview {
 
 /**
  * Scans the schedule for valid alternative start times on a target day.
+ * Validates every suggestion through full engine simulation to guarantee zero conflicts or displacements.
  */
 export function findAlternativeValidTimes(
   day: number,
@@ -805,8 +807,23 @@ export function findAlternativeValidTimes(
   lastEntryTime?: string,
   excludeActivityId?: string
 ): AlternativeValidTime[] {
+  const allActivities = [...destination.activities, ...(constraints.additionalActivities ?? [])];
+  const catalogActivity = excludeActivityId
+    ? allActivities.find(a => a.id === excludeActivityId)
+    : undefined;
+
+  const effectiveOpenTime = openTime ?? catalogActivity?.openTime;
+  const effectiveCloseTime = closeTime ?? catalogActivity?.closeTime;
+  const effectiveLastEntryTime = lastEntryTime ?? catalogActivity?.lastEntryTime;
+
+  const tempCustomizations = { ...(constraints.activityCustomizations ?? {}) };
+  if (excludeActivityId) {
+    delete tempCustomizations[excludeActivityId];
+  }
+
   const tempConstraints: UserConstraints = {
     ...constraints,
+    activityCustomizations: tempCustomizations,
     disabledActivityIds: excludeActivityId
       ? [...constraints.disabledActivityIds, excludeActivityId]
       : constraints.disabledActivityIds,
@@ -831,20 +848,20 @@ export function findAlternativeValidTimes(
 
     const earliestVisitStartEpoch = add(winStartEpoch, transferMinutes);
     let effectiveEarliest = earliestVisitStartEpoch;
-    if (openTime) {
-      const openEpoch = at(dateStr, openTime);
+    if (effectiveOpenTime) {
+      const openEpoch = at(dateStr, effectiveOpenTime);
       effectiveEarliest = Math.max(effectiveEarliest, openEpoch);
     }
 
     let effectiveLatestVisitEnd = winEndEpoch;
-    if (closeTime) {
-      const closeEpoch = at(dateStr, closeTime);
+    if (effectiveCloseTime) {
+      const closeEpoch = at(dateStr, effectiveCloseTime);
       effectiveLatestVisitEnd = Math.min(effectiveLatestVisitEnd, closeEpoch);
     }
 
     let effectiveLatestVisitStart = add(effectiveLatestVisitEnd, -durationMinutes);
-    if (lastEntryTime) {
-      const lastEntryEpoch = at(dateStr, lastEntryTime);
+    if (effectiveLastEntryTime) {
+      const lastEntryEpoch = at(dateStr, effectiveLastEntryTime);
       effectiveLatestVisitStart = Math.min(effectiveLatestVisitStart, lastEntryEpoch);
     }
 
@@ -852,11 +869,99 @@ export function findAlternativeValidTimes(
       let cursor = effectiveEarliest;
       while (cursor <= effectiveLatestVisitStart && suggestions.length < 4) {
         const timeStr = formatIST(cursor).slice(11, 16);
-        const label = `${timeStr} (Day ${day} ${timeStr >= '18:15' ? 'Evening' : 'Daytime'})`;
-        if (!suggestions.some(s => s.startTime === timeStr)) {
-          suggestions.push({ startTime: timeStr, label, day });
+        const visitStartTimeIso = `${dateStr}T${timeStr}`;
+
+        let candConstraints: UserConstraints;
+        if (catalogActivity) {
+          const candCustomizations = {
+            ...(constraints.activityCustomizations ?? {}),
+            [excludeActivityId!]: {
+              day,
+              startTime: visitStartTimeIso,
+              durationMinutes,
+              transferMinutes,
+            },
+          };
+          const candDayAssignments = {
+            ...(constraints.activityDayAssignments ?? {}),
+            [excludeActivityId!]: day,
+          };
+          const candDisabled = constraints.disabledActivityIds.filter(id => id !== excludeActivityId);
+          let candOrder = constraints.activityOrder ? [...constraints.activityOrder] : allActivities.map(a => a.id);
+          if (!candOrder.includes(excludeActivityId!)) {
+            candOrder.push(excludeActivityId!);
+          }
+          candConstraints = {
+            ...constraints,
+            disabledActivityIds: candDisabled,
+            activityDayAssignments: candDayAssignments,
+            activityCustomizations: candCustomizations,
+            activityOrder: candOrder,
+          };
+        } else {
+          const customId = excludeActivityId || `cand-custom-${timeStr.replace(':', '')}`;
+          const candCustom: CustomPlannedActivity = {
+            id: customId,
+            day,
+            name: 'Candidate Stop',
+            durationMinutes,
+            transferMinutes,
+            costPerPersonINR: 0,
+            slotStart: visitStartTimeIso,
+            openTime: effectiveOpenTime,
+            closeTime: effectiveCloseTime,
+            lastEntryTime: effectiveLastEntryTime,
+          };
+          const existingCustoms = (constraints.customActivities ?? []).filter(
+            ca => ca.id !== customId
+          );
+          candConstraints = {
+            ...constraints,
+            customActivities: [...existingCustoms, candCustom],
+          };
         }
-        cursor = add(cursor, 30);
+
+        // Full engine feasibility evaluation of the candidate time
+        const simResult = evaluateFeasibility(destination, candConstraints);
+        const blocker = simResult.violations.find(v => v.severity === 'BLOCKER');
+        const isReturnFeasible = simResult.returnDeadlineMarginMinutes >= 0;
+
+        // Anti-displacement verification against baseline
+        const baselineScheduledIds = baseline.timeline
+          .filter(t => t.category === 'ACTIVITY' && !t.isRestBuffer && t.activityId)
+          .map(t => t.activityId!);
+        const simScheduledIds = simResult.timeline
+          .filter(t => t.category === 'ACTIVITY' && !t.isRestBuffer && t.activityId)
+          .map(t => t.activityId!);
+        const displaced = baselineScheduledIds.filter(
+          id => !simScheduledIds.includes(id) && id !== excludeActivityId
+        );
+
+        // Verify candidate actually got scheduled on target day
+        const isTargetScheduled = simResult.timeline.some(
+          t =>
+            t.day === day &&
+            t.category === 'ACTIVITY' &&
+            (catalogActivity
+              ? t.activityId === excludeActivityId
+              : (t.activityId === (excludeActivityId || `cand-custom-${timeStr.replace(':', '')}`) ||
+                 t.startTime === visitStartTimeIso))
+        );
+
+        const isEngineValid = !blocker && isReturnFeasible && displaced.length === 0 && isTargetScheduled;
+
+        if (isEngineValid && !suggestions.some(s => s.startTime === timeStr)) {
+          const label = `${timeStr} (Day ${day} ${timeStr >= '18:15' ? 'Evening' : 'Daytime'})`;
+          suggestions.push({
+            startTime: timeStr,
+            label,
+            day,
+            isEngineVerified: true,
+          });
+          cursor = add(cursor, 30);
+        } else {
+          cursor = add(cursor, 15);
+        }
       }
     }
   }

@@ -57,11 +57,18 @@ const ACTIVITY_IMAGES: Record<string, string> = {
 };
 
 export default function PrototypeV2Screen() {
-  const [currentStep, setCurrentStep] = useState<1 | 2>(1);
-  const [deviceView, setDeviceView] = useState<'desktop' | 'mobile'>('desktop');
+  const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const initStep = searchParams?.get('step') === '2' ? 2 : 1;
+  const initDevice = searchParams?.get('view') === 'mobile' ? 'mobile' : 'desktop';
+  const initTab = searchParams?.get('tab') === 'discover' ? 'discover' : 'schedule';
+  const initMoveModal = searchParams?.get('modal') === 'move';
+  const initVisitEditor = searchParams?.get('modal') === 'visit';
+
+  const [currentStep, setCurrentStep] = useState<1 | 2>(initStep);
+  const [deviceView, setDeviceView] = useState<'desktop' | 'mobile'>(initDevice);
   const [sheetSnap, setSheetSnap] = useState<'peek' | 'half' | 'full'>('half');
   const [selectedWhyDest, setSelectedWhyDest] = useState<DestinationCardData | null>(null);
-  const [builderTab, setBuilderTab] = useState<'schedule' | 'discover'>('schedule');
+  const [builderTab, setBuilderTab] = useState<'schedule' | 'discover'>(initTab);
 
   // Grounded Deterministic Constraints State
   const [constraints, setConstraints] = useState<UserConstraints>(INITIAL_CONSTRAINTS);
@@ -74,7 +81,7 @@ export default function PrototypeV2Screen() {
   const [discoverCategory, setDiscoverCategory] = useState<string>('all');
 
   // Move Activity Modal State
-  const [isMoveModalOpen, setIsMoveModalOpen] = useState<boolean>(false);
+  const [isMoveModalOpen, setIsMoveModalOpen] = useState<boolean>(initMoveModal);
   const [selectedMoveActivityId, setSelectedMoveActivityId] = useState<string>('mysuru-market');
   const [moveTargetDay, setMoveTargetDay] = useState<number>(2);
   const [moveTargetPosition, setMoveTargetPosition] = useState<number>(0);
@@ -93,7 +100,7 @@ export default function PrototypeV2Screen() {
   const [transferMinutesInput, setTransferMinutesInput] = useState<number>(30);
 
   // Traveler-Controlled Visit Scheduling Editor State
-  const [isVisitEditorOpen, setIsVisitEditorOpen] = useState<boolean>(false);
+  const [isVisitEditorOpen, setIsVisitEditorOpen] = useState<boolean>(initVisitEditor);
   const [editorMode, setEditorMode] = useState<'schedule_free' | 'edit_visit'>('schedule_free');
   const [editorTargetDay, setEditorTargetDay] = useState<number>(1);
   const [editorActivityType, setEditorActivityType] = useState<'curated' | 'custom' | 'buffer'>('custom');
@@ -530,13 +537,13 @@ export default function PrototypeV2Screen() {
             </span>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-black uppercase tracking-wider text-[#176EA8] bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
-                  V2.1 Clickable Prototype
+                <span className="text-xs font-black uppercase tracking-wider text-[#176EA8] bg-sky-50 px-2.5 py-0.5 rounded-full border border-sky-200 shadow-2xs">
+                  V2.1 Interactive Prototype
                 </span>
                 <span className="text-xs font-semibold text-[#5A7184]">Route: /prototype/v2</span>
               </div>
               <p className="text-xs text-[#5A7184] mt-0.5">
-                Deterministic engine active. Grounded in scheduler.ts without hardcoded placeholders.
+                Weekend Reality Checker · Powered by verified routes & real operating hours.
               </p>
             </div>
           </div>
@@ -620,7 +627,7 @@ export default function PrototypeV2Screen() {
             </div>
           </div>
 
-          <div className={`grid gap-5 ${deviceView === 'mobile' ? 'grid-cols-1 max-w-[375px] mx-auto' : 'grid-cols-1 md:grid-cols-2'}`}>
+          <div className={`grid gap-6 ${deviceView === 'mobile' ? 'grid-cols-1 max-w-[375px] mx-auto' : 'grid-cols-1 md:grid-cols-2'}`}>
             {PROTOTYPE_DESTINATIONS.map(dest => {
               const isFeasible = dest.feasibilityRating === 'FEASIBLE';
               const isChallenging = dest.feasibilityRating === 'CHALLENGING';
@@ -628,85 +635,102 @@ export default function PrototypeV2Screen() {
               return (
                 <div
                   key={dest.id}
-                  className="group relative flex flex-col justify-between rounded-2xl border border-[#E1ECF2] bg-white overflow-hidden shadow-xs hover:shadow-md hover:border-[#176EA8]/40 transition-all"
+                  className="group relative flex flex-col justify-between rounded-3xl border border-[#E1ECF2] bg-white overflow-hidden shadow-xs hover:shadow-lg hover:border-[#176EA8]/40 transition-all duration-300"
                 >
-                  <div className="relative h-48 w-full overflow-hidden bg-slate-100">
+                  {/* Destination Photo Header */}
+                  <div className={`relative ${deviceView === 'mobile' ? 'h-44' : 'h-56'} w-full overflow-hidden bg-slate-100`}>
                     <img
                       src={dest.imageSrc}
                       alt={dest.imageAlt}
-                      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent"></div>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-black/10"></div>
 
-                    <div className="absolute top-3 left-3">
+                    {/* Feasibility Pill Badge */}
+                    <div className="absolute top-3.5 left-3.5">
                       <span
-                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider shadow-sm ${
-                          isFeasible ? 'bg-emerald-500 text-white' : isChallenging ? 'bg-amber-500 text-white' : 'bg-rose-500 text-white'
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider shadow-sm backdrop-blur-md ${
+                          isFeasible
+                            ? 'bg-emerald-600/95 text-white'
+                            : isChallenging
+                            ? 'bg-amber-600/95 text-white'
+                            : 'bg-rose-600/95 text-white'
                         }`}
                       >
-                        {isFeasible ? '✓' : isChallenging ? '⚡' : '✕'} {dest.feasibilityLabel}
+                        <span>{isFeasible ? '✓' : isChallenging ? '⚡' : '✕'}</span>
+                        <span>{dest.feasibilityLabel}</span>
                       </span>
                     </div>
 
-                    <div className="absolute top-3 right-3">
-                      <span className="rounded-md bg-black/60 backdrop-blur-xs px-2 py-0.5 text-[10px] text-white/90">
-                        📷 {dest.imageAuthor} ({dest.imageLicense})
+                    {/* Verified Photo Attribution */}
+                    <div className="absolute top-3.5 right-3.5">
+                      <span className="rounded-full bg-black/60 backdrop-blur-md px-2.5 py-1 text-[10px] font-medium text-white/90">
+                        📷 {dest.imageAuthor} · {dest.imageLicense}
                       </span>
                     </div>
 
-                    <div className="absolute bottom-3 left-3 right-3 text-white">
+                    {/* Destination Title & Tagline */}
+                    <div className="absolute bottom-3.5 left-4 right-4 text-white">
                       <div className="flex items-baseline gap-2">
-                        <h2 className="text-xl font-black tracking-tight">{dest.name}</h2>
-                        <span className="text-xs text-white/80 font-medium">{dest.state}</span>
+                        <h2 className="text-2xl font-black tracking-tight drop-shadow-xs">{dest.name}</h2>
+                        <span className="text-xs text-white/80 font-bold uppercase tracking-wider">{dest.state}</span>
                       </div>
-                      <p className="text-xs text-white/90 line-clamp-1">{dest.tagline}</p>
+                      <p className="text-xs text-white/90 line-clamp-1 mt-0.5">{dest.tagline}</p>
                     </div>
                   </div>
 
-                  <div className="p-4 space-y-4 flex-1 flex flex-col justify-between">
-                    <div className="grid grid-cols-3 gap-2 text-center bg-[#F4F9FC] p-3 rounded-xl border border-[#E1ECF2]">
+                  {/* Card Content & Metrics */}
+                  <div className="p-5 space-y-4 flex-1 flex flex-col justify-between">
+                    {/* 3-Column Core Metrics Bar */}
+                    <div className="grid grid-cols-3 gap-2 text-center bg-[#F8FAFC] p-3.5 rounded-2xl border border-[#E2E8F0]">
                       <div className="space-y-0.5">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">Est. Drive</span>
-                        <div className="text-sm font-black text-[#193953]">{dest.drivingTimeFormatted}</div>
-                        <span className="text-[9px] text-[#5A7184] block">each way</span>
+                        <div className="text-base font-black text-[#193953]">{dest.drivingTimeFormatted}</div>
+                        <span className="text-[10px] text-[#5A7184] block">each way (+20% traffic)</span>
                       </div>
 
-                      <div className="space-y-0.5 border-x border-[#E1ECF2] px-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">Daylight Sightseeing</span>
-                        <div className="text-sm font-black text-[#176EA8]">
+                      <div className="space-y-0.5 border-x border-[#E2E8F0] px-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">Usable Daylight</span>
+                        <div className="text-base font-black text-[#176EA8]">
                           {Math.floor(dest.daylightSightseeingMinutes / 60)}h {dest.daylightSightseeingMinutes % 60}m
                         </div>
-                        <span className="text-[9px] text-[#5A7184] block">+{Math.floor(dest.unallocatedEveningMinutes / 60)}h eve</span>
+                        <span className="text-[10px] text-[#5A7184] block">
+                          +{Math.floor(dest.unallocatedEveningMinutes / 60)}h {dest.unallocatedEveningMinutes % 60}m eve
+                        </span>
                       </div>
 
                       <div className="space-y-0.5">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">Return Margin</span>
-                        <div className={`text-sm font-black ${dest.returnBufferMinutes >= 60 ? 'text-emerald-700' : dest.returnBufferMinutes > 0 ? 'text-amber-700' : 'text-rose-700'}`}>
+                        <div className={`text-base font-black ${dest.returnBufferMinutes >= 60 ? 'text-emerald-700' : dest.returnBufferMinutes > 0 ? 'text-amber-700' : 'text-rose-700'}`}>
                           {dest.returnBufferMinutes >= 0 ? `+${dest.returnBufferMinutes}m` : `${dest.returnBufferMinutes}m`}
                         </div>
-                        <span className="text-[9px] text-[#5A7184] block">{dest.returnBufferMinutes >= 60 ? 'Safe buffer' : 'Tight / Late'}</span>
+                        <span className="text-[10px] text-[#5A7184] block">
+                          {dest.returnBufferMinutes >= 60 ? 'Safe return buffer' : 'Tight / Late return'}
+                        </span>
                       </div>
                     </div>
 
-                    <div className="space-y-1">
-                      <div className="text-[11px] font-bold text-[#5A7184] uppercase tracking-wider">Key Attractions</div>
+                    {/* Key Highlights Chips */}
+                    <div className="space-y-1.5">
+                      <div className="text-[10px] font-bold text-[#5A7184] uppercase tracking-wider">Top Featured Stops</div>
                       <div className="flex flex-wrap gap-1.5">
                         {dest.highlights.map((h, i) => (
-                          <span key={i} className="inline-block rounded-md bg-white border border-[#E1ECF2] px-2 py-0.5 text-xs text-[#193953]">
+                          <span key={i} className="inline-block rounded-lg bg-white border border-[#E2E8F0] px-2.5 py-1 text-xs text-[#193953] font-medium shadow-2xs">
                             {h}
                           </span>
                         ))}
                       </div>
                     </div>
 
-                    <div className="pt-2 flex items-center justify-between gap-3 border-t border-[#E1ECF2]">
+                    {/* Action Row */}
+                    <div className="pt-2 flex items-center justify-between gap-3 border-t border-[#E2E8F0]">
                       <button
                         type="button"
                         onClick={() => setSelectedWhyDest(dest)}
-                        className="text-xs font-bold text-[#176EA8] hover:underline flex items-center gap-1 py-1"
+                        className="text-xs font-bold text-[#5A7184] hover:text-[#176EA8] flex items-center gap-1.5 py-2 transition-colors"
                       >
                         <span>Why this result?</span>
-                        <span className="text-[10px]">ℹ️</span>
+                        <span className="text-xs">ℹ️</span>
                       </button>
 
                       <button
@@ -715,8 +739,10 @@ export default function PrototypeV2Screen() {
                           if (dest.id === 'mysuru') setCurrentStep(2);
                           else alert(`Interactive prototype workspace is configured for Mysuru. Click "Plan Mysuru Trip".`);
                         }}
-                        className={`rounded-xl px-4 py-2 text-xs font-bold text-white shadow-xs transition-all active:scale-95 ${
-                          dest.id === 'mysuru' ? 'bg-[#176EA8] hover:bg-[#135A8A]' : 'bg-[#5A7184] hover:bg-[#485B6B]'
+                        className={`min-h-[44px] rounded-xl px-5 py-2.5 text-xs font-bold text-white shadow-xs transition-all active:scale-95 flex items-center justify-center ${
+                          dest.id === 'mysuru'
+                            ? 'bg-[#176EA8] hover:bg-[#135A8A] ring-2 ring-[#176EA8]/20'
+                            : 'bg-[#5A7184] hover:bg-[#485B6B]'
                         }`}
                       >
                         Plan {dest.name} Trip →
@@ -730,29 +756,29 @@ export default function PrototypeV2Screen() {
 
           {selectedWhyDest && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fadeIn">
-              <div className="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-[#E1ECF2] space-y-4">
+              <div className="relative w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl border border-[#E1ECF2] space-y-4 max-h-[90vh] overflow-y-auto">
                 <div className="flex items-start justify-between border-b border-[#E1ECF2] pb-3">
                   <div>
-                    <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">Deterministic Feasibility Calculation</span>
+                    <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">Trip Feasibility & Assumptions</span>
                     <h3 className="text-xl font-black text-[#193953]">Why is {selectedWhyDest.name} {selectedWhyDest.feasibilityLabel}?</h3>
                   </div>
                   <button type="button" onClick={() => setSelectedWhyDest(null)} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700">✕</button>
                 </div>
 
                 <div className="space-y-3 text-xs text-[#193953]">
-                  <div className="rounded-xl bg-[#F4F9FC] p-3 border border-[#E1ECF2] space-y-1.5">
+                  <div className="rounded-xl bg-[#F8FAFC] p-3.5 border border-[#E2E8F0] space-y-1.5">
                     <div className="font-bold text-xs text-[#193953] flex justify-between">
                       <span>Highway Routing & Congestion Buffer</span>
                       <span className="text-[#176EA8]">{selectedWhyDest.drivingTimeFormatted} each way</span>
                     </div>
                     <p className="text-[#5A7184]">
-                      Route: {selectedWhyDest.assumptions.route}. Base drive: <strong>{selectedWhyDest.drivingBaseMinutes} min</strong> + <strong>{selectedWhyDest.drivingBufferMinutes} min</strong> (20% buffer).
+                      Route: {selectedWhyDest.assumptions.route}. Base drive: <strong>{selectedWhyDest.drivingBaseMinutes} min</strong> + <strong>{selectedWhyDest.drivingBufferMinutes} min</strong> (20% traffic allowance).
                     </p>
                   </div>
 
-                  <div className="rounded-xl bg-sky-50 p-3 border border-sky-200 space-y-1.5">
+                  <div className="rounded-xl bg-sky-50/70 p-3.5 border border-sky-200/80 space-y-1.5">
                     <div className="font-bold text-xs text-sky-900 flex justify-between">
-                      <span>Daylight vs. Evening Leisure Split</span>
+                      <span>Daylight Sightseeing vs. Evening Leisure Split</span>
                       <span className="text-sky-800">Total Free: {Math.floor(selectedWhyDest.totalFreeTimeMinutes / 60)}h {selectedWhyDest.totalFreeTimeMinutes % 60}m</span>
                     </div>
                     <ul className="list-disc pl-4 space-y-1 text-sky-950">
@@ -761,11 +787,11 @@ export default function PrototypeV2Screen() {
                     </ul>
                   </div>
 
-                  <div className="space-y-1 pt-1">
-                    <div className="font-bold text-[11px] text-[#5A7184] uppercase tracking-wider">Official Evidence Citations</div>
+                  <div className="space-y-1.5 pt-1">
+                    <div className="font-bold text-[10px] text-[#5A7184] uppercase tracking-wider">Official Evidence & Sources</div>
                     {selectedWhyDest.assumptions.evidenceNotes.map((note, idx) => (
                       <div key={idx} className="text-[11px] text-[#5A7184] flex items-start gap-1.5">
-                        <span>•</span>
+                        <span className="text-[#176EA8]">•</span>
                         <span>{note}</span>
                       </div>
                     ))}
@@ -773,7 +799,7 @@ export default function PrototypeV2Screen() {
                 </div>
 
                 <div className="pt-2 flex justify-end">
-                  <button type="button" onClick={() => setSelectedWhyDest(null)} className="rounded-xl bg-[#176EA8] px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#135A8A]">
+                  <button type="button" onClick={() => setSelectedWhyDest(null)} className="rounded-xl bg-[#176EA8] px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-[#135A8A]">
                     Got It
                   </button>
                 </div>
@@ -792,7 +818,7 @@ export default function PrototypeV2Screen() {
           <div
             className={`rounded-2xl p-4 shadow-sm border transition-all ${
               !isTripFeasible
-                ? 'bg-rose-50 border-rose-300 text-rose-900'
+                ? 'bg-rose-50/80 border-rose-300 text-rose-950'
                 : 'bg-white border-[#E1ECF2] text-[#193953]'
             }`}
           >
@@ -800,7 +826,7 @@ export default function PrototypeV2Screen() {
               <div className="flex items-center gap-3">
                 <div
                   className={`flex h-11 w-11 items-center justify-center rounded-xl font-black text-lg ${
-                    !isTripFeasible ? 'bg-rose-500 text-white' : 'bg-emerald-500 text-white'
+                    !isTripFeasible ? 'bg-rose-500 text-white' : 'bg-emerald-600 text-white'
                   }`}
                 >
                   {!isTripFeasible ? '⚠️' : '✓'}
@@ -816,8 +842,8 @@ export default function PrototypeV2Screen() {
                         : `Return Margin: +${returnBufferMinutes}m Safe Buffer`}
                     </span>
                     <span
-                      className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                        !isTripFeasible ? 'bg-rose-200 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                      className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
+                        !isTripFeasible ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                       }`}
                     >
                       {isProjectedLate
@@ -829,8 +855,8 @@ export default function PrototypeV2Screen() {
                   </div>
 
                   <p className="text-xs text-[#5A7184] mt-0.5">
-                    Est. Home Arrival: <strong>{formattedArrival}</strong> · Hard Deadline:{' '}
-                    <strong>Sun 20:30 IST</strong> · Engine Rating:{' '}
+                    Est. Home Arrival: <strong>{formattedArrival} (estimated)</strong> · Hard Deadline:{' '}
+                    <strong>Sun 20:30 IST</strong> · Trip Feasibility:{' '}
                     <strong className={!isTripFeasible ? 'text-rose-700' : 'text-emerald-700'}>
                       {currentResult.rating}
                     </strong>
@@ -848,7 +874,7 @@ export default function PrototypeV2Screen() {
                 <button
                   type="button"
                   onClick={() => setIsMoveModalOpen(true)}
-                  className="rounded-xl bg-[#176EA8] hover:bg-[#135A8A] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition-all flex items-center gap-1.5 active:scale-95"
+                  className="rounded-xl bg-[#176EA8] hover:bg-[#135A8A] px-4 py-2 text-xs font-bold text-white shadow-xs transition-all flex items-center gap-1.5 active:scale-95"
                 >
                   <span>⚡</span>
                   <span>Make This Trip Fit</span>
@@ -863,7 +889,7 @@ export default function PrototypeV2Screen() {
                         'Simulated +60m highway delay. Recalculated feasibility.'
                       );
                     }}
-                    className="rounded-xl bg-amber-500 hover:bg-amber-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs transition-all"
+                    className="rounded-xl bg-amber-500 hover:bg-amber-600 px-3 py-2 text-xs font-bold text-white shadow-xs transition-all"
                   >
                     Simulate Delay (+60m)
                   </button>
@@ -876,7 +902,7 @@ export default function PrototypeV2Screen() {
                         'Reset delay to 0m.'
                       );
                     }}
-                    className="rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white shadow-xs transition-all"
+                    className="rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-xs font-bold text-white shadow-xs transition-all"
                   >
                     Clear Delay
                   </button>
@@ -889,34 +915,60 @@ export default function PrototypeV2Screen() {
                     setHistoryStack([]);
                     setWhatChangedNotice(null);
                   }}
-                  className="rounded-xl border border-[#E1ECF2] bg-white px-3 py-1.5 text-xs font-bold text-[#5A7184] hover:text-[#193953] shadow-xs"
+                  className="rounded-xl border border-[#E1ECF2] bg-white px-3 py-2 text-xs font-bold text-[#5A7184] hover:text-[#193953] shadow-xs"
                 >
-                  Reset
+                  Reset Schedule
                 </button>
               </div>
             </div>
 
-            {/* Violation Alert Callout & Remedies */}
+            {/* Things to check before your trip: clearly separates blocking conflicts from advisories */}
             {currentResult.violations.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-rose-200/80 space-y-2">
-                <div className="text-xs text-rose-800 font-medium">
-                  <strong>Engine Violations Detected:</strong>
-                  <ul className="list-disc pl-5 mt-1 space-y-0.5">
-                    {currentResult.violations.map((v, i) => (
-                      <li key={i}>{v.message}</li>
-                    ))}
-                  </ul>
+              <div className="mt-3 pt-3 border-t border-slate-200/80 space-y-2">
+                <div className="text-xs space-y-2">
+                  <span className="font-bold text-slate-800">Things to check before your trip:</span>
+
+                  {activeBlockers.length > 0 && (
+                    <div className="rounded-xl bg-rose-50 border border-rose-200 p-2.5 text-rose-900 space-y-1">
+                      <span className="font-bold text-[11px] uppercase tracking-wider text-rose-800 block">
+                        🚫 Conflicts that need resolution ({activeBlockers.length})
+                      </span>
+                      <ul className="list-disc pl-4 space-y-0.5 text-xs text-rose-950">
+                        {activeBlockers.map((v, i) => (
+                          <li key={i}>{v.message}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {currentResult.violations.filter(v => v.severity !== 'BLOCKER').length > 0 && (
+                    <div className="rounded-xl bg-amber-50 border border-amber-200 p-2.5 text-amber-900 space-y-1">
+                      <span className="font-bold text-[11px] uppercase tracking-wider text-amber-800 block">
+                        ℹ️ Travel advisories & opening hour notes
+                      </span>
+                      <ul className="list-disc pl-4 space-y-0.5 text-xs text-amber-950">
+                        {currentResult.violations
+                          .filter(v => v.severity !== 'BLOCKER')
+                          .map((v, i) => (
+                            <li key={i}>{v.message}</li>
+                          ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setIsMoveModalOpen(true)}
-                    className="rounded-lg bg-rose-600 hover:bg-rose-700 px-3 py-1 text-xs font-bold text-white shadow-xs flex items-center gap-1"
-                  >
-                    <span>🔄</span>
-                    <span>Move an activity to another day</span>
-                  </button>
-                </div>
+
+                {activeBlockers.length > 0 && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsMoveModalOpen(true)}
+                      className="rounded-lg bg-[#176EA8] hover:bg-[#135A8A] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs flex items-center gap-1.5 transition-all"
+                    >
+                      <span>🔄</span>
+                      <span>Move an activity to resolve conflicts</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1572,53 +1624,299 @@ export default function PrototypeV2Screen() {
               </div>
 
               <div className={`flex-1 bg-white rounded-t-3xl border-t-2 border-[#176EA8]/20 shadow-2xl transition-all duration-300 flex flex-col ${
-                sheetSnap === 'peek' ? 'h-36' : sheetSnap === 'half' ? 'h-[360px]' : 'h-[500px]'
+                sheetSnap === 'peek' ? 'h-36' : sheetSnap === 'half' ? 'h-[440px]' : 'h-[580px]'
               }`}>
-                <div className="p-3 pb-1 flex flex-col items-center">
-                  <div className="w-12 h-1.5 bg-gray-300 rounded-full mb-2"></div>
-                  <div className="flex items-center justify-between w-full px-2">
-                    <span className="text-xs font-black text-[#193953]">Day {activeDay} Itinerary</span>
+                {/* Drag Handle & Snap Bar */}
+                <div className="p-3 pb-2 flex flex-col items-center border-b border-[#E1ECF2] shrink-0 bg-white">
+                  <div
+                    onClick={() => setSheetSnap(sheetSnap === 'peek' ? 'half' : sheetSnap === 'half' ? 'full' : 'peek')}
+                    className="w-12 h-1.5 bg-gray-300 rounded-full mb-2 cursor-pointer hover:bg-gray-400 transition-colors"
+                  ></div>
+                  <div className="flex items-center justify-between w-full px-1">
+                    <span className="text-xs font-black text-[#193953] tracking-tight">
+                      {builderTab === 'schedule' ? `Day ${activeDay} Itinerary` : 'Discover Places'}
+                    </span>
                     <div className="flex gap-1 text-[10px]">
-                      <button type="button" onClick={() => setSheetSnap('peek')} className={`px-2 py-0.5 rounded ${sheetSnap === 'peek' ? 'bg-sky-100 font-bold' : 'text-gray-500'}`}>Peek</button>
-                      <button type="button" onClick={() => setSheetSnap('half')} className={`px-2 py-0.5 rounded ${sheetSnap === 'half' ? 'bg-sky-100 font-bold' : 'text-gray-500'}`}>Half</button>
-                      <button type="button" onClick={() => setSheetSnap('full')} className={`px-2 py-0.5 rounded ${sheetSnap === 'full' ? 'bg-sky-100 font-bold' : 'text-gray-500'}`}>Full</button>
+                      <button
+                        type="button"
+                        onClick={() => setSheetSnap('peek')}
+                        className={`min-h-[32px] px-2.5 py-1 rounded-lg transition-all ${
+                          sheetSnap === 'peek' ? 'bg-[#176EA8] text-white font-bold' : 'text-gray-500 hover:bg-gray-100'
+                        }`}
+                      >
+                        Peek
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSheetSnap('half')}
+                        className={`min-h-[32px] px-2.5 py-1 rounded-lg transition-all ${
+                          sheetSnap === 'half' ? 'bg-[#176EA8] text-white font-bold' : 'text-gray-500 hover:bg-gray-100'
+                        }`}
+                      >
+                        Half
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSheetSnap('full')}
+                        className={`min-h-[32px] px-2.5 py-1 rounded-lg transition-all ${
+                          sheetSnap === 'full' ? 'bg-[#176EA8] text-white font-bold' : 'text-gray-500 hover:bg-gray-100'
+                        }`}
+                      >
+                        Full
+                      </button>
                     </div>
+                  </div>
+
+                  {/* Mobile Navigation Tabs */}
+                  <div className="flex w-full gap-1 mt-2 p-1 bg-[#F4F9FC] rounded-xl border border-[#E1ECF2]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBuilderTab('schedule');
+                        setActiveDay(1);
+                        if (sheetSnap === 'peek') setSheetSnap('half');
+                      }}
+                      className={`flex-1 min-h-[36px] text-xs font-bold rounded-lg transition-all ${
+                        builderTab === 'schedule' && activeDay === 1
+                          ? 'bg-[#176EA8] text-white shadow-xs'
+                          : 'text-[#5A7184] hover:text-[#193953]'
+                      }`}
+                    >
+                      Day 1 (Sat)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBuilderTab('schedule');
+                        setActiveDay(2);
+                        if (sheetSnap === 'peek') setSheetSnap('half');
+                      }}
+                      className={`flex-1 min-h-[36px] text-xs font-bold rounded-lg transition-all ${
+                        builderTab === 'schedule' && activeDay === 2
+                          ? 'bg-[#176EA8] text-white shadow-xs'
+                          : 'text-[#5A7184] hover:text-[#193953]'
+                      }`}
+                    >
+                      Day 2 (Sun)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBuilderTab('discover');
+                        if (sheetSnap === 'peek') setSheetSnap('half');
+                      }}
+                      className={`flex-1 min-h-[36px] text-xs font-bold rounded-lg transition-all ${
+                        builderTab === 'discover'
+                          ? 'bg-[#176EA8] text-white shadow-xs'
+                          : 'text-[#5A7184] hover:text-[#193953]'
+                      }`}
+                    >
+                      + Discover
+                    </button>
                   </div>
                 </div>
 
-                <div className="p-4 overflow-y-auto flex-1 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-bold text-emerald-700">Margin: +{returnBufferMinutes}m</div>
-                    <button
-                      type="button"
-                      onClick={() => setIsMoveModalOpen(true)}
-                      className="rounded-lg bg-[#176EA8] text-white px-2.5 py-1 text-xs font-bold"
-                    >
-                      🔄 Move Activity
-                    </button>
-                  </div>
-
-                  <div className="space-y-2">
-                    {currentResult.timeline.filter(t => t.day === activeDay && t.category === 'ACTIVITY').map(item => (
-                      <div key={item.id} className="rounded-xl border border-[#E1ECF2] p-2.5 bg-white text-xs flex justify-between items-center">
-                        <div>
-                          <div className="font-bold text-[#193953]">{item.label}</div>
-                          <div className="text-[11px] text-[#5A7184]">{item.startTime.slice(11)}–{item.endTime.slice(11)} IST</div>
-                        </div>
+                {/* Mobile Sheet Content */}
+                <div className="p-3.5 overflow-y-auto flex-1 space-y-3">
+                  {/* Summary Bar */}
+                  <div className="flex items-center justify-between gap-2 pb-1 border-b border-[#E1ECF2]">
+                    <div className={`text-xs font-bold ${returnBufferMinutes >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                      {returnBufferMinutes >= 0 ? `✓ Margin: +${returnBufferMinutes}m` : `⚠️ Late: ${returnBufferMinutes}m`}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setIsMoveModalOpen(true)}
+                        className="min-h-[40px] rounded-lg bg-[#176EA8] text-white px-3 py-1.5 text-xs font-bold shadow-xs active:scale-95"
+                      >
+                        ⚡ Make Fit
+                      </button>
+                      {builderTab === 'schedule' && (
                         <button
                           type="button"
                           onClick={() => {
-                            setSelectedMoveActivityId(item.activityId!);
-                            setMoveTargetDay(activeDay === 1 ? 2 : 1);
-                            setIsMoveModalOpen(true);
+                            setBuilderTab('discover');
+                            setSheetSnap('full');
                           }}
-                          className="text-[#176EA8] font-bold text-[11px] px-2 py-1 rounded bg-sky-50 border border-sky-200"
+                          className="min-h-[40px] rounded-lg border border-[#176EA8] text-[#176EA8] bg-sky-50 px-2.5 py-1.5 text-xs font-bold active:scale-95"
                         >
-                          Move
+                          + Add
                         </button>
-                      </div>
-                    ))}
+                      )}
+                    </div>
                   </div>
+
+                  {/* Peek view quick CTA */}
+                  {sheetSnap === 'peek' && (
+                    <button
+                      type="button"
+                      onClick={() => setSheetSnap('half')}
+                      className="w-full min-h-[44px] rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-[#176EA8] flex items-center justify-center gap-1 hover:bg-slate-100 transition-all"
+                    >
+                      <span>Expand Day {activeDay} Schedule ({currentResult.timeline.filter(t => t.day === activeDay && t.category === 'ACTIVITY' && !t.isRestBuffer).length} stops)</span>
+                      <span>↑</span>
+                    </button>
+                  )}
+
+                  {/* Half and Full Views: Complete Chronological Timetable */}
+                  {sheetSnap !== 'peek' && builderTab === 'schedule' && (
+                    <div className="space-y-2.5">
+                      {(() => {
+                        const dayScheduledStops = currentResult.timeline.filter(
+                          t => t.day === activeDay && t.category === 'ACTIVITY' && !t.isRestBuffer
+                        );
+
+                        return currentResult.timeline
+                          .filter(t => t.day === activeDay)
+                          .map((entry) => {
+                            // 1. Tourist Stop
+                            if (entry.category === 'ACTIVITY' && !entry.isRestBuffer) {
+                              const stopIdx = dayScheduledStops.findIndex(s => s.id === entry.id);
+                              const stopNumber = stopIdx >= 0 ? stopIdx + 1 : 1;
+
+                              return (
+                                <div key={entry.id} className="rounded-xl border border-[#E1ECF2] p-3 bg-white text-xs shadow-2xs space-y-2">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex items-start gap-2">
+                                      <div className="flex h-6 w-6 items-center justify-center rounded-md bg-[#176EA8] text-white font-bold text-xs shrink-0">
+                                        #{stopNumber}
+                                      </div>
+                                      <div>
+                                        <div className="font-bold text-[#193953] text-xs">{entry.label}</div>
+                                        <div className="text-[11px] text-[#5A7184] mt-0.5">
+                                          ⏰ {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-50 text-[#176EA8] shrink-0">
+                                      Stop #{stopNumber}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenVisitEditorForActivity(entry)}
+                                      className="flex-1 min-h-[44px] rounded-lg border border-sky-300 bg-sky-50 text-sky-900 font-bold text-xs flex items-center justify-center gap-1 active:scale-95"
+                                    >
+                                      <span>✏️</span>
+                                      <span>Edit Visit</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedMoveActivityId(entry.activityId!);
+                                        setMoveTargetDay(activeDay === 1 ? 2 : 1);
+                                        setIsMoveModalOpen(true);
+                                      }}
+                                      className="flex-1 min-h-[44px] rounded-lg border border-[#E1ECF2] bg-white text-[#176EA8] font-bold text-xs flex items-center justify-center gap-1 active:scale-95"
+                                    >
+                                      <span>🔄</span>
+                                      <span>Move Day</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            // 2. Transfer
+                            if (entry.category === 'TRANSFER') {
+                              const transferMins = Math.round(
+                                (parseIST(entry.endTime) - parseIST(entry.startTime)) / 60000
+                              );
+                              return (
+                                <div key={entry.id} className="rounded-xl border border-cyan-200 bg-cyan-50/50 p-2.5 text-xs flex items-center justify-between gap-2 shadow-2xs">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm">🚗</span>
+                                    <div>
+                                      <div className="font-bold text-cyan-950 text-[11px]">
+                                        {entry.originLabel || 'Stop'} → {entry.destinationLabel || 'Next stop'}
+                                      </div>
+                                      <div className="text-[10px] text-cyan-800">
+                                        ⏱️ {transferMins}m transit ({entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST)
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenTransferModal(entry)}
+                                    className="min-h-[44px] px-3 rounded-lg border border-cyan-300 bg-white text-cyan-900 font-bold text-xs active:scale-95 shrink-0"
+                                  >
+                                    Adjust
+                                  </button>
+                                </div>
+                              );
+                            }
+
+                            // 3. Free Time
+                            if (entry.category === 'FREE') {
+                              const freeMins = Math.round(
+                                (parseIST(entry.endTime) - parseIST(entry.startTime)) / 60000
+                              );
+                              const isEvening = entry.startTime.slice(11) >= '18:15';
+                              return (
+                                <div key={entry.id} className="rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50/40 p-2.5 text-xs flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm">{isEvening ? '🌙' : '☀️'}</span>
+                                    <div>
+                                      <div className="font-bold text-emerald-950 text-[11px]">{entry.label}</div>
+                                      <div className="text-[10px] text-emerald-800">
+                                        ⏰ {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST ({freeMins}m free)
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenVisitEditorForFreeTime(entry)}
+                                    className="min-h-[44px] px-3 rounded-lg bg-emerald-600 text-white font-bold text-xs active:scale-95 shrink-0 shadow-2xs flex items-center gap-1"
+                                  >
+                                    <span>⚡</span>
+                                    <span>Use Time</span>
+                                  </button>
+                                </div>
+                              );
+                            }
+
+                            // 4. Milestone / Meals / Rest
+                            return (
+                              <div key={entry.id} className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-xs text-[#5A7184] flex items-center justify-between">
+                                <span className="font-medium">{entry.label}</span>
+                                <span className="text-[10px]">{entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST</span>
+                              </div>
+                            );
+                          });
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Discover view on mobile */}
+                  {sheetSnap !== 'peek' && builderTab === 'discover' && (
+                    <div className="space-y-3">
+                      <div className="text-xs font-bold text-[#193953]">Suggested Places to Add in Mysuru:</div>
+                      <div className="space-y-2">
+                        {filteredPlaces.map(place => (
+                          <div key={place.id} className="rounded-xl border border-[#E1ECF2] p-2.5 bg-white text-xs space-y-1.5 shadow-2xs">
+                            <div className="flex items-start justify-between">
+                              <span className="font-bold text-[#193953]">{place.name}</span>
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 uppercase">
+                                {place.category}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-[#5A7184]">
+                              ⏱️ {place.durationMinutes}m · 🕒 {place.operatingHours}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAddDiscoverPlace(place)}
+                              className="w-full min-h-[44px] rounded-lg bg-[#176EA8] text-white font-bold text-xs active:scale-95"
+                            >
+                              + Add to Day {activeDay}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1633,11 +1931,11 @@ export default function PrototypeV2Screen() {
                 <div className="flex items-start justify-between border-b border-[#E1ECF2] pb-3">
                   <div>
                     <span className="text-xs font-bold uppercase tracking-wider text-[#176EA8]">
-                      Make This Trip Fit · Conflict Resolution
+                      Make This Trip Fit · Schedule Adjustment
                     </span>
                     <h3 className="text-xl font-black text-[#193953]">Move an Activity Between Days</h3>
                     <p className="text-xs text-[#5A7184] mt-0.5">
-                      Evaluated live by the deterministic scheduling engine. True before and proposed feasibility.
+                      Simulates your proposed timing against travel allowances, opening hours and your Sunday return deadline.
                     </p>
                   </div>
                   <button
@@ -1760,7 +2058,7 @@ export default function PrototypeV2Screen() {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-black uppercase tracking-wider text-[#193953]">
-                        Engine Simulation Preview
+                        Trip Impact & Schedule Preview
                       </span>
                       {movePreview.resolutionLabel === 'Move Fits' && (
                         <span className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
@@ -2378,7 +2676,7 @@ export default function PrototypeV2Screen() {
                         {visitSchedulingPreview.alternativeTimes.length > 0 && (
                           <div className="pt-2 border-t border-rose-200 space-y-1.5">
                             <span className="text-[11px] font-bold text-amber-900 block">
-                              💡 Suggested Valid Alternative Times (Engine Verified):
+                              💡 Suggested Alternative Times (Fits your current plan):
                             </span>
                             <div className="flex flex-wrap gap-1.5">
                               {visitSchedulingPreview.alternativeTimes.map(alt => (

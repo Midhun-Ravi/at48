@@ -62,8 +62,8 @@ function checkConstraints(input: UserConstraints, destination: Destination): voi
     throw new Error('Trip window must cover between 1 and 4 calendar dates inclusive.');
   }
   if (!['relaxed', 'balanced', 'packed'].includes(input.pace)) throw new Error('Invalid pace.');
-  if (!Number.isInteger(input.partySize) || input.partySize < 1 || input.partySize > 10) throw new Error('Party size must be 1–10.');
-  if (input.perPersonBudgetINR <= 0 || !Number.isFinite(input.perPersonBudgetINR)) throw new Error('Budget must be positive.');
+  if (!Number.isInteger(input.partySize) || input.partySize < 1) throw new Error('Party size must be a positive integer.');
+  if (input.perPersonBudgetINR < 0 || !Number.isFinite(input.perPersonBudgetINR)) throw new Error('Budget must be non-negative.');
   if (!Number.isInteger(input.drivingAdjustmentMinutes) || input.drivingAdjustmentMinutes < -60 ||
     input.drivingAdjustmentMinutes > 120 || input.drivingAdjustmentMinutes % 15 !== 0)
     throw new Error('Driving adjustment must be −60 to +120 in 15-minute increments.');
@@ -927,8 +927,13 @@ export function evaluateFeasibility(
   const numNights = Math.max(0, numDays - 1);
   const hotelTotalINR = destination.approximateOneNightStayINR * numNights * Math.ceil(input.partySize / 2);
 
-  const estimatedTripTotalINR = destination.approximateRoundTripFuelINR +
-    destination.approximateRoundTripTollsINR + hotelTotalINR +
+  // Model vehicle fleet arrangement: 1 vehicle for up to 6 people (car/SUV);
+  // for groups > 6, models multi-car convoy or tempo traveller arrangement (scaled by 5 seats per vehicle)
+  const vehicleCount = input.partySize <= 6 ? 1 : Math.ceil(input.partySize / 5);
+  const totalFuelINR = destination.approximateRoundTripFuelINR * vehicleCount;
+  const totalTollsINR = destination.approximateRoundTripTollsINR * vehicleCount;
+
+  const estimatedTripTotalINR = totalFuelINR + totalTollsINR + hotelTotalINR +
     ticketPerPerson * input.partySize;
   const estimatedCostPerPersonINR = Math.round(estimatedTripTotalINR / input.partySize);
   const isBudgetExceeded = estimatedCostPerPersonINR > input.perPersonBudgetINR;

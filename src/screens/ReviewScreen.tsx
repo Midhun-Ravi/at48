@@ -358,7 +358,7 @@ export default function ReviewScreen({ inputs }: Props) {
             Expected home: <strong className="text-[#193953]">{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>
           </p>
           <p>
-            Estimated cost: <strong className="text-[#193953]">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person</strong> (₹{r.estimatedTripTotalINR.toLocaleString('en-IN')} total for party of {activeInputs.partySize})
+            Estimated cost: <strong className="text-[#193953]">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person</strong> (₹{r.estimatedTripTotalINR.toLocaleString('en-IN')} total for party of {activeInputs.partySize}{activeInputs.partySize > 6 ? ` across ${Math.ceil(activeInputs.partySize / 5)} vehicles` : ''})
           </p>
         </div>
       </div>

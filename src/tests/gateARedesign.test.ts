@@ -65,13 +65,15 @@ describe('Gate A Redesign Features & Invariants', () => {
       expect(r.estimatedTripTotalINR).toBeGreaterThan(r.estimatedCostPerPersonINR);
     });
 
-    it('rejects party size greater than 10', () => {
-      expect(() =>
-        evaluateFeasibility(destination('mysuru'), {
-          ...baseConstraints,
-          partySize: 11,
-        })
-      ).toThrow('Party size must be 1–10.');
+    it('supports group sizes greater than 10 with vehicle capacity scaling', () => {
+      const r = evaluateFeasibility(destination('mysuru'), {
+        ...baseConstraints,
+        partySize: 12,
+        planningMode: 'group',
+      });
+      expect(r.rating).toBeDefined();
+      expect(r.estimatedCostPerPersonINR).toBeGreaterThan(0);
+      expect(r.estimatedTripTotalINR).toBeGreaterThan(r.estimatedCostPerPersonINR);
     });
 
     it('rejects non-integer party size', () => {
@@ -80,7 +82,7 @@ describe('Gate A Redesign Features & Invariants', () => {
           ...baseConstraints,
           partySize: 3.5,
         })
-      ).toThrow('Party size must be 1–10.');
+      ).toThrow('Party size must be a positive integer.');
     });
   });
 

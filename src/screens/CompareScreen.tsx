@@ -56,8 +56,8 @@ export default function CompareScreen({ inputs, setInputs }: Props) {
       ...inputs,
       departureDateTime: dep,
       returnDeadlineDateTime: ret,
-      partySize: !isNaN(party) && party >= 1 && party <= 10 ? party : inputs.partySize,
-      perPersonBudgetINR: !isNaN(budget) && budget >= 500 ? budget : inputs.perPersonBudgetINR,
+      partySize: !isNaN(party) && party >= 1 ? party : inputs.partySize,
+      perPersonBudgetINR: !isNaN(budget) && budget >= 0 ? budget : inputs.perPersonBudgetINR,
       pace: pace as PacePreference,
     };
   }, [searchParams, inputs]);

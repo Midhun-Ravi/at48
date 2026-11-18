@@ -9,6 +9,7 @@ import ReviewScreen from './screens/ReviewScreen';
 import PrototypeV2Screen from './prototype/PrototypeV2Screen';
 import BottomNav from './components/BottomNav';
 import ScrollToTop from './components/ScrollToTop';
+import TactileButton from './components/ui/TactileButton';
 
 function upcomingWeekend(): [string, string] {
   const nowIST = new Date(Date.now() + 330 * 60_000);
@@ -69,25 +70,27 @@ export default function App() {
             </div>
           </Link>
 
-          <div className="flex items-center gap-3 sm:gap-5">
+          <div className="flex items-center gap-2.5 sm:gap-5">
             <a
               href="/#how-it-works"
-              className="text-xs font-semibold text-[#193953] hover:text-[#176EA8] transition-colors"
+              className="text-xs font-semibold text-[#193953] hover:text-[#176EA8] transition-colors hidden sm:inline"
             >
               How It Works
             </a>
-            <Link
+            <TactileButton
+              variant="primary"
+              size="sm"
               to="/plan"
-              className="rounded-xl bg-[#176EA8] px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-[#135A8A] active:scale-95 transition-all"
+              className="!px-3 !py-1.5 text-xs"
             >
               Plan a Trip
-            </Link>
+            </TactileButton>
           </div>
         </div>
       </header>
 
       {/* Main Content Area (pb-28 reserves space for floating bottom navigation) */}
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:py-8 pb-28">
+      <main className="mx-auto w-full max-w-5xl flex-1 px-3 sm:px-4 py-6 sm:py-8 pb-28 overflow-x-hidden">
         <Routes>
           <Route path="/" element={<HomeScreen />} />
           <Route path="/plan" element={<InputScreen inputs={inputs} setInputs={setInputs} />} />

@@ -62,7 +62,7 @@ export default function OriginPicker({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <label className="block text-xs font-bold uppercase tracking-wider text-[#5A7184]">
           Starting Point (Bengaluru)
         </label>
@@ -115,11 +115,11 @@ export default function OriginPicker({
             <div className="space-y-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-base">📍</span>
-                <strong className="text-sm font-bold text-[#193953]">
-                  Koramangala, Bengaluru — Demo Location
+                <strong className="text-sm font-bold text-[#193953] break-words">
+                  Koramangala, Bengaluru
                 </strong>
-                <span className="rounded-full bg-[#FF9870]/20 text-[#193953] border border-[#FF9870]/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-                  Demo Location
+                <span className="rounded-full bg-[#176EA8] text-white px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                  Demo Origin
                 </span>
               </div>
               <p className="text-xs text-[#5A7184]">

@@ -1,4 +1,5 @@
 import {
+  CustomPlannedActivity,
   Destination,
   TimetableEntry,
   UserConstraints,
@@ -48,13 +49,20 @@ export interface TransferAdjustmentPreview {
     marginDeltaMinutes: number;
     homeArrivalDeltaMinutes: number;
     downstreamFreeTimeDeltaMinutes: number;
+    displacedActivities: string[];
   };
 }
 
 export type FreeTimeAction =
   | { type: 'RESERVE_BUFFER'; name: string; durationMinutes: number }
   | { type: 'SCHEDULE_ACTIVITY'; activityId: string }
-  | { type: 'ADD_CUSTOM_PLACE'; name: string; durationMinutes: number; costPerPersonINR?: number };
+  | {
+      type: 'ADD_CUSTOM_PLACE';
+      name: string;
+      durationMinutes: number;
+      transferMinutes: number;
+      costPerPersonINR?: number;
+    };
 
 export interface FreeTimeUsagePreview {
   action: FreeTimeAction;
@@ -198,6 +206,7 @@ export function evaluateTransferAdjustment(
         marginDeltaMinutes: 0,
         homeArrivalDeltaMinutes: 0,
         downstreamFreeTimeDeltaMinutes: 0,
+        displacedActivities: [],
       },
     };
   }
@@ -222,6 +231,7 @@ export function evaluateTransferAdjustment(
         marginDeltaMinutes: 0,
         homeArrivalDeltaMinutes: 0,
         downstreamFreeTimeDeltaMinutes: 0,
+        displacedActivities: [],
       },
     };
   }
@@ -242,14 +252,68 @@ export function evaluateTransferAdjustment(
     t => t.activityId === activityId && t.category === 'ACTIVITY'
   );
 
-  // Check for blocker violations or operating hours conflicts introduced by the adjustment
-  const blockerViolation = proposedResult.violations.find(v => v.severity === 'BLOCKER');
+  // Compare scheduled activities before and after to prevent silent displacement
+  const beforeScheduledActivityIds = baselineResult.timeline
+    .filter(t => t.category === 'ACTIVITY' && !t.isRestBuffer && t.activityId)
+    .map(t => t.activityId!);
+
+  const afterScheduledActivityIds = proposedResult.timeline
+    .filter(t => t.category === 'ACTIVITY' && !t.isRestBuffer && t.activityId)
+    .map(t => t.activityId!);
+
+  const displacedActivityIds = beforeScheduledActivityIds.filter(
+    id => !afterScheduledActivityIds.includes(id)
+  );
+  const displacedActivityNames = displacedActivityIds.map(id => {
+    const act = allActivities.find(a => a.id === id);
+    return act?.name ?? id;
+  });
+
+  // Check for silent shortening of scheduled activities
+  let shortenedActivityName: string | undefined;
+  let shortenedOrigMins = 0;
+  let shortenedNewMins = 0;
+  for (const afterEntry of proposedResult.timeline.filter(t => t.category === 'ACTIVITY' && !t.isRestBuffer && t.activityId)) {
+    const origAct = allActivities.find(a => a.id === afterEntry.activityId);
+    if (origAct) {
+      const actualDuration = Math.round(
+        (parseIST(afterEntry.endTime) - parseIST(afterEntry.startTime)) / MINUTE_MS
+      );
+      if (actualDuration < origAct.durationMinutes) {
+        shortenedActivityName = origAct.name;
+        shortenedOrigMins = origAct.durationMinutes;
+        shortenedNewMins = actualDuration;
+        break;
+      }
+    }
+  }
+
+  // Detect newly introduced blocker violations
+  const baselineBlockerSignatures = new Set(
+    baselineResult.violations
+      .filter(v => v.severity === 'BLOCKER')
+      .map(v => `${v.type}:${v.activityId ?? ''}`)
+  );
+  const newBlockers = proposedResult.violations.filter(
+    v => v.severity === 'BLOCKER' && !baselineBlockerSignatures.has(`${v.type}:${v.activityId ?? ''}`)
+  );
+
   let isValid = true;
   let validationError: string | undefined;
 
-  if (blockerViolation) {
+  if (displacedActivityNames.length > 0) {
     isValid = false;
-    validationError = `Cannot apply adjustment: ${blockerViolation.message}`;
+    validationError = `Cannot apply transfer adjustment: Displaces previously scheduled stop "${displacedActivityNames.join(', ')}". Increasing transfer leaves insufficient time for this activity.`;
+  } else if (shortenedActivityName) {
+    isValid = false;
+    validationError = `Cannot apply transfer adjustment: Silently shortens "${shortenedActivityName}" from ${shortenedOrigMins}m to ${shortenedNewMins}m.`;
+  } else if (newBlockers.length > 0) {
+    isValid = false;
+    validationError = `Cannot apply transfer adjustment: Introduces new scheduling conflict: ${newBlockers[0].message}`;
+  } else if (proposedResult.violations.some(v => v.severity === 'BLOCKER')) {
+    const blocker = proposedResult.violations.find(v => v.severity === 'BLOCKER');
+    isValid = false;
+    validationError = `Cannot apply adjustment: ${blocker?.message}`;
   } else if (proposedResult.returnDeadlineMarginMinutes < 0) {
     isValid = false;
     validationError = `Cannot apply adjustment: Delays return arrival (${proposedResult.homeArrivalTime.slice(11)}) past deadline (${constraints.returnDeadlineDateTime.slice(11)}).`;
@@ -276,7 +340,7 @@ export function evaluateTransferAdjustment(
       returnMarginMinutes: proposedResult.returnDeadlineMarginMinutes,
       activityStartTime: proposedActivity?.startTime,
       activityEndTime: proposedActivity?.endTime,
-      isFeasible: proposedResult.returnDeadlineMarginMinutes >= 0 && !blockerViolation,
+      isFeasible: proposedResult.returnDeadlineMarginMinutes >= 0 && isValid,
     },
     deltas: {
       transferDeltaMinutes: proposedDurationMinutes - currentDurationMinutes,
@@ -287,6 +351,7 @@ export function evaluateTransferAdjustment(
           MINUTE_MS
       ),
       downstreamFreeTimeDeltaMinutes: proposedFreeMins - baselineFreeMins,
+      displacedActivities: displacedActivityNames,
     },
   };
 }
@@ -418,6 +483,23 @@ export function evaluateFreeTimeUsage(
     const transferMinutes =
       constraints.transferAdjustments?.[activity.id] ?? activity.localTransferMinutes;
     const totalRequiredMinutes = activity.durationMinutes + transferMinutes;
+
+    // Check 0: Already scheduled on this day
+    const alreadyScheduledOnThisDay = baselineResult.timeline.some(
+      t => t.activityId === activity.id && t.day === freeEntry.day && t.category === 'ACTIVITY'
+    );
+    if (alreadyScheduledOnThisDay) {
+      return {
+        action,
+        freeWindow: freeWindowMeta,
+        isValid: false,
+        validationError: `"${activity.name}" is already scheduled on Day ${freeEntry.day}. Choose an unscheduled activity or move it using "Move Day".`,
+        proposedConstraints: constraints,
+        before: baselineState,
+        after: baselineState,
+        deltas: { marginDeltaMinutes: 0, homeArrivalDeltaMinutes: 0, freeTimeDeltaMinutes: 0 },
+      };
+    }
 
     // Check 1: Operating hours vs window
     const windowDate = freeEntry.startTime.slice(0, 10);
@@ -570,12 +652,12 @@ export function evaluateFreeTimeUsage(
       };
     }
 
-    if (action.durationMinutes > availableSlotMinutes) {
+    if (!action.transferMinutes || action.transferMinutes < 5) {
       return {
         action,
         freeWindow: freeWindowMeta,
         isValid: false,
-        validationError: `Insufficient free time: "${action.name}" requires ${action.durationMinutes}m, but this window only has ${availableSlotMinutes}m.`,
+        validationError: 'An explicit planning allowance (minimum 5 minutes) is required for custom location transit.',
         proposedConstraints: constraints,
         before: baselineState,
         after: baselineState,
@@ -583,11 +665,26 @@ export function evaluateFreeTimeUsage(
       };
     }
 
-    const newCustom = {
+    const totalRequired = action.durationMinutes + action.transferMinutes;
+    if (totalRequired > availableSlotMinutes) {
+      return {
+        action,
+        freeWindow: freeWindowMeta,
+        isValid: false,
+        validationError: `Insufficient free time: "${action.name}" requires ${totalRequired}m (${action.durationMinutes}m visit + ${action.transferMinutes}m transfer allowance), but this window only has ${availableSlotMinutes}m available.`,
+        proposedConstraints: constraints,
+        before: baselineState,
+        after: baselineState,
+        deltas: { marginDeltaMinutes: 0, homeArrivalDeltaMinutes: 0, freeTimeDeltaMinutes: 0 },
+      };
+    }
+
+    const newCustom: CustomPlannedActivity = {
       id: `custom-act-${Date.now()}`,
       day: freeEntry.day,
       name: action.name.trim() || 'Custom Stop',
       durationMinutes: action.durationMinutes,
+      transferMinutes: action.transferMinutes,
       costPerPersonINR: action.costPerPersonINR ?? 0,
       slotStart: freeEntry.startTime,
     };
@@ -610,7 +707,7 @@ export function evaluateFreeTimeUsage(
       after: {
         homeArrival: proposedResult.homeArrivalTime,
         returnMarginMinutes: proposedResult.returnDeadlineMarginMinutes,
-        remainingFreeMinutes: Math.max(0, availableSlotMinutes - action.durationMinutes),
+        remainingFreeMinutes: Math.max(0, availableSlotMinutes - totalRequired),
         isFeasible: proposedResult.returnDeadlineMarginMinutes >= 0 && !blocker,
       },
       deltas: {
@@ -620,7 +717,7 @@ export function evaluateFreeTimeUsage(
           (parseIST(proposedResult.homeArrivalTime) - parseIST(baselineResult.homeArrivalTime)) /
             MINUTE_MS
         ),
-        freeTimeDeltaMinutes: -action.durationMinutes,
+        freeTimeDeltaMinutes: -totalRequired,
       },
     };
   }

@@ -102,6 +102,7 @@ export default function PrototypeV2Screen() {
   const [freeSelectedActivityId, setFreeSelectedActivityId] = useState<string>('mysuru-market');
   const [freeCustomName, setFreeCustomName] = useState<string>('');
   const [freeCustomDuration, setFreeCustomDuration] = useState<number>(45);
+  const [freeCustomTransfer, setFreeCustomTransfer] = useState<number>(15);
   const [freeCustomCost, setFreeCustomCost] = useState<number>(0);
 
   // Execute scheduling engine against active constraints
@@ -231,6 +232,7 @@ export default function PrototypeV2Screen() {
     }
     setFreeCustomName('');
     setFreeCustomDuration(45);
+    setFreeCustomTransfer(15);
     setFreeCustomCost(0);
     setIsFreeTimeModalOpen(true);
   };
@@ -255,6 +257,7 @@ export default function PrototypeV2Screen() {
         type: 'ADD_CUSTOM_PLACE',
         name: freeCustomName.trim() || 'Custom Stop',
         durationMinutes: freeCustomDuration,
+        transferMinutes: freeCustomTransfer,
         costPerPersonINR: freeCustomCost,
       };
     }
@@ -268,6 +271,7 @@ export default function PrototypeV2Screen() {
     freeSelectedActivityId,
     freeCustomName,
     freeCustomDuration,
+    freeCustomTransfer,
     freeCustomCost,
     constraints,
   ]);
@@ -2171,15 +2175,26 @@ export default function PrototypeV2Screen() {
                             className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs"
                           />
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-3 gap-2">
                           <div>
-                            <label className="block text-xs font-bold text-[#193953] mb-1">Duration (mins):</label>
+                            <label className="block text-xs font-bold text-[#193953] mb-1">Visit (mins):</label>
                             <input
                               type="number"
                               min={15}
                               max={240}
                               value={freeCustomDuration}
                               onChange={e => setFreeCustomDuration(parseInt(e.target.value) || 30)}
+                              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-[#193953] mb-1">Transfer (mins):</label>
+                            <input
+                              type="number"
+                              min={5}
+                              max={120}
+                              value={freeCustomTransfer}
+                              onChange={e => setFreeCustomTransfer(parseInt(e.target.value) || 15)}
                               className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs font-bold"
                             />
                           </div>
@@ -2202,12 +2217,34 @@ export default function PrototypeV2Screen() {
                 {freeTimePreview && (
                   <div className="space-y-3">
                     {!freeTimePreview.isValid ? (
-                      <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900 space-y-1">
+                      <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900 space-y-2">
                         <div className="font-bold flex items-center gap-1">
                           <span>🚫</span>
                           <span>Cannot Fit Into This Free Window:</span>
                         </div>
                         <p>{freeTimePreview.validationError}</p>
+                        {freeTimePreview.validationError?.includes('Insufficient free time') && (
+                          <div className="pt-2 border-t border-rose-200 flex items-center justify-between gap-2">
+                            <span className="text-[11px] text-rose-800">Save to wishlist without scheduling?</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const placeName = freeActivityMode === 'existing'
+                                  ? moveCandidates.find(c => c.activityId === freeSelectedActivityId)?.name || 'Custom Place'
+                                  : freeCustomName.trim() || 'Custom Stop';
+                                const duration = freeActivityMode === 'existing'
+                                  ? moveCandidates.find(c => c.activityId === freeSelectedActivityId)?.durationMinutes || 45
+                                  : freeCustomDuration;
+                                setWishlistPlaces(prev => [...prev, { id: `wishlist-${Date.now()}`, name: placeName, durationMinutes: duration }]);
+                                setIsFreeTimeModalOpen(false);
+                                recordHistory(constraints, `Saved "${placeName}" to wishlist (unscheduled · 0m impact).`);
+                              }}
+                              className="rounded-lg bg-sky-600 hover:bg-sky-700 text-white px-2.5 py-1 text-xs font-bold shrink-0 shadow-xs"
+                            >
+                              📌 Save to Wishlist (0m impact)
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="rounded-xl border border-emerald-300 bg-emerald-50/50 p-3 space-y-2 text-xs">

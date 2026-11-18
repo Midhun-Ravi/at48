@@ -641,10 +641,52 @@ export function evaluateFeasibility(
         const outerIdx = customActivities.indexOf(matching);
         if (outerIdx !== -1) customActivities.splice(outerIdx, 1);
 
-        const availableSlotMins = Math.round((winEnd - winCursor) / MINUTE_MS);
-        const actMins = Math.min(matching.durationMinutes, availableSlotMins);
-        const actEnd = add(winCursor, actMins);
+        let startEpoch = winCursor;
+        if (matching.slotStart) {
+          const caEpoch = parseIST(matching.slotStart);
+          if (caEpoch >= winCursor && caEpoch < winEnd) {
+            startEpoch = caEpoch;
+          }
+        }
 
+        // If requested start time is after winCursor, preserve preceding free time
+        if (startEpoch > winCursor) {
+          const dateStr = formatIST(winCursor).slice(0, 10);
+          const sunsetEpoch = at(dateStr, '18:15');
+          if (winCursor < sunsetEpoch && startEpoch > sunsetEpoch) {
+            push('FREE', 'Daytime free time', winCursor, sunsetEpoch, day);
+            push('FREE', 'Evening free time', sunsetEpoch, startEpoch, day);
+          } else if (startEpoch <= sunsetEpoch) {
+            push('FREE', 'Daytime free time', winCursor, startEpoch, day);
+          } else {
+            push('FREE', 'Evening free time', winCursor, startEpoch, day);
+          }
+          freeMinutes += (startEpoch - winCursor) / MINUTE_MS;
+          winCursor = startEpoch;
+        }
+
+        // Handle user-specified transfer allowance if present
+        const transferMins = matching.transferMinutes ?? 0;
+        let actStart = startEpoch;
+        if (transferMins > 0) {
+          const transEnd = add(actStart, transferMins);
+          const prevEntry = [...timeline].reverse().find(t => t.day === day && t.category !== 'FREE');
+          const originLabel = prevEntry ? prevEntry.label : (day === 1 ? 'Hotel check-in' : 'Hotel / Overnight stay');
+          push('TRANSFER', `Local transfer to ${matching.name}`, actStart, transEnd, day, matching.id, undefined, undefined, originLabel, matching.name);
+          actStart = transEnd;
+        }
+
+        const totalNeededMins = transferMins + matching.durationMinutes;
+        const availableFromStart = Math.round((winEnd - startEpoch) / MINUTE_MS);
+
+        if (totalNeededMins > availableFromStart) {
+          violation('OPERATING_HOURS_CONFLICT', 'BLOCKER',
+            `Cannot fit "${matching.name}": requires ${totalNeededMins}m (${matching.durationMinutes}m duration + ${transferMins}m transfer), but only ${availableFromStart}m remains in free window.`,
+            matching.id);
+          continue;
+        }
+
+        const actEnd = add(actStart, matching.durationMinutes);
         const isRest = Boolean(
           matching.isRestBuffer ||
           matching.name.toLowerCase().includes('buffer') ||
@@ -652,7 +694,7 @@ export function evaluateFeasibility(
           matching.name.toLowerCase().includes('downtime')
         );
         const cat: TimelineCategory = isRest ? 'REST' : 'ACTIVITY';
-        push(cat, matching.name, winCursor, actEnd, day, matching.id, true, true, undefined, undefined, isRest);
+        push(cat, matching.name, actStart, actEnd, day, matching.id, true, true, undefined, undefined, isRest);
         winCursor = actEnd;
       }
 

@@ -35,6 +35,7 @@ export interface CustomPlannedActivity {
   day: number;
   name: string;
   durationMinutes: number;
+  transferMinutes?: number; // user-specified planning allowance to reach this location
   costPerPersonINR?: number;
   slotStart?: string; // optional ISO anchor to slot into a specific free window
   isRestBuffer?: boolean; // true if this represents a personal rest or downtime buffer

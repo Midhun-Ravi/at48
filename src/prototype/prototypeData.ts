@@ -206,7 +206,7 @@ export interface ScheduledActivity {
   durationMinutes: number;
   costINR: number;
   locationName: string;
-  coordinates: [number, number]; // [lat, lng]
+  coordinates?: [number, number]; // [lat, lng]
   imageSrc?: string;
   notes?: string;
   detourMinutes: number;

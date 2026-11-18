@@ -73,7 +73,10 @@ export default function PrototypeMap({
 }: PrototypeMapProps) {
   // Filter activities that have valid coordinates
   const validStops = useMemo(() => {
-    return scheduledActivities.filter(a => a.coordinates && a.coordinates.length === 2);
+    return scheduledActivities.filter(
+      (a): a is ScheduledActivity & { coordinates: [number, number] } =>
+        Boolean(a.coordinates && a.coordinates.length === 2)
+    );
   }, [scheduledActivities]);
 
   // Calculate dynamic bounds including Origin and all active stops

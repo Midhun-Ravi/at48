@@ -4,6 +4,7 @@ import type {
   FeasibilityResult,
   MoveActivityCandidate,
   MoveActivityPreview,
+  MoveResolutionStatus,
   UserConstraints,
 } from '../types';
 import { evaluateFeasibility, getCalendarDaysCount, parseIST } from './scheduler';
@@ -111,6 +112,9 @@ export function evaluateActivityMove(
       toPosition: targetPosition,
       isValid: false,
       validationError: `Target Day ${targetDay} is outside trip window (1 to ${totalDays} days).`,
+      resolutionStatus: 'INVALID',
+      resolutionMessage: `Target Day ${targetDay} is outside trip window (1 to ${totalDays} days).`,
+      proposedConstraints: baseConstraints,
       before: {
         homeArrival: beforeResult.homeArrivalTime.slice(11) + ' IST',
         returnMarginMinutes: beforeResult.returnDeadlineMarginMinutes,
@@ -142,6 +146,7 @@ export function evaluateActivityMove(
         homeArrivalDeltaMinutes: 0,
         originalViolationResolved: false,
         newConflicts: [`Target Day ${targetDay} exceeds trip length`],
+        displacedActivities: [],
         additionalTravelAllowanceMinutes: 0,
       },
     };
@@ -223,19 +228,60 @@ export function evaluateActivityMove(
   let isValid = true;
   let validationError: string | undefined = undefined;
 
-  // Check if activity was actually scheduled on the target day
+  // 1. Check if activity was actually scheduled on the target day
   if (!afterTimelineEntry || afterTimelineEntry.day !== targetDay) {
     isValid = false;
     const failReason = afterOutcome?.reason ?? 'Activity cannot fit into target day schedule.';
     validationError = `${activityName} cannot fit on Day ${targetDay}: ${failReason}`;
-  } else {
-    // Check if any blocker violation was introduced on this activity
-    const activityBlockers = afterResult.violations.filter(
-      v => v.activityId === activityId && v.severity === 'BLOCKER'
-    );
-    if (activityBlockers.length > 0) {
-      isValid = false;
+  }
+
+  // 2. Full Itinerary Validity: Ensure no previously scheduled activity was displaced/dropped
+  const beforeScheduledActivityIds = new Set(
+    beforeResult.timeline
+      .filter(t => t.category === 'ACTIVITY' && t.activityId && t.activityId !== activityId)
+      .map(t => t.activityId!)
+  );
+
+  const afterScheduledActivityIds = new Set(
+    afterResult.timeline
+      .filter(t => t.category === 'ACTIVITY' && t.activityId)
+      .map(t => t.activityId!)
+  );
+
+  const displacedActivities: string[] = [];
+  for (const prevId of beforeScheduledActivityIds) {
+    if (!afterScheduledActivityIds.has(prevId)) {
+      const act = allActivities.find(a => a.id === prevId);
+      displacedActivities.push(act ? act.name : prevId);
+    }
+  }
+
+  if (displacedActivities.length > 0) {
+    isValid = false;
+    validationError = `Moving ${activityName} displaces previously scheduled activity: ${displacedActivities.join(', ')}.`;
+  }
+
+  // 3. Check for blockers on the moved activity or NEW blockers introduced in the proposed trip
+  const activityBlockers = afterResult.violations.filter(
+    v => v.activityId === activityId && v.severity === 'BLOCKER'
+  );
+  if (activityBlockers.length > 0) {
+    isValid = false;
+    if (!validationError) {
       validationError = activityBlockers.map(b => b.message).join('; ');
+    }
+  }
+
+  const beforeBlockerKeys = new Set(
+    beforeResult.violations.filter(v => v.severity === 'BLOCKER').map(v => `${v.type}:${v.activityId ?? ''}`)
+  );
+  const newBlockers = afterResult.violations.filter(
+    v => v.severity === 'BLOCKER' && !beforeBlockerKeys.has(`${v.type}:${v.activityId ?? ''}`)
+  );
+  if (newBlockers.length > 0) {
+    isValid = false;
+    if (!validationError) {
+      validationError = newBlockers.map(b => b.message).join('; ');
     }
   }
 
@@ -251,10 +297,42 @@ export function evaluateActivityMove(
     .filter(v => !beforeViolationKeys.has(`${v.type}:${v.activityId ?? ''}`))
     .map(v => v.message);
 
-  // Check if original blocker violation was resolved
-  const beforeBlockers = beforeResult.violations.filter(v => v.severity === 'BLOCKER');
-  const afterBlockers = afterResult.violations.filter(v => v.severity === 'BLOCKER');
-  const originalViolationResolved = beforeBlockers.length > 0 && afterBlockers.length < beforeBlockers.length;
+  // Detailed violation resolution analysis
+  const hadDeadlineBlocker = beforeResult.returnDeadlineMarginMinutes < 0;
+  const hadActivityBlocker = beforeResult.violations.some(
+    v => v.severity === 'BLOCKER' && v.activityId === activityId
+  );
+  const beforeBlockerCount = beforeResult.violations.filter(v => v.severity === 'BLOCKER').length;
+
+  const deadlineOkNow = afterResult.returnDeadlineMarginMinutes >= 0;
+  const blockersNow = afterResult.violations.filter(v => v.severity === 'BLOCKER').length;
+
+  let originalViolationResolved = false;
+  let resolutionStatus: MoveResolutionStatus;
+  let resolutionMessage: string;
+
+  if (!isValid) {
+    resolutionStatus = 'INVALID';
+    resolutionMessage = validationError || 'Proposed slot is invalid.';
+    originalViolationResolved = false;
+  } else {
+    // If the trip had a blocker or lateness conflict
+    if (hadDeadlineBlocker || hadActivityBlocker || beforeBlockerCount > 0) {
+      if (deadlineOkNow && blockersNow === 0) {
+        originalViolationResolved = true;
+        resolutionStatus = 'VALID_AND_RESOLVED';
+        resolutionMessage = 'Valid move: Successfully resolves the scheduling conflict and restores a feasible trip.';
+      } else {
+        originalViolationResolved = false;
+        resolutionStatus = 'VALID_UNRESOLVED';
+        resolutionMessage = 'Valid slot: Activity fits on target day, but trip remains overdue or has unresolved constraints.';
+      }
+    } else {
+      originalViolationResolved = true;
+      resolutionStatus = 'VALID_AND_RESOLVED';
+      resolutionMessage = 'Valid move: Activity rescheduled with 0 constraint conflicts.';
+    }
+  }
 
   return {
     activityId,
@@ -264,6 +342,9 @@ export function evaluateActivityMove(
     toPosition: targetPosition,
     isValid,
     validationError,
+    resolutionStatus,
+    resolutionMessage,
+    proposedConstraints,
     before: {
       homeArrival: beforeResult.homeArrivalTime.slice(11) + ' IST',
       returnMarginMinutes: beforeResult.returnDeadlineMarginMinutes,
@@ -287,6 +368,7 @@ export function evaluateActivityMove(
       homeArrivalDeltaMinutes,
       originalViolationResolved,
       newConflicts,
+      displacedActivities,
       additionalTravelAllowanceMinutes,
     },
   };

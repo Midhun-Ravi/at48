@@ -176,6 +176,8 @@ export interface MoveActivityCandidate {
   costINR: number;
 }
 
+export type MoveResolutionStatus = 'VALID_AND_RESOLVED' | 'VALID_UNRESOLVED' | 'INVALID';
+
 export interface MoveActivityPreview {
   activityId: string;
   activityName: string;
@@ -184,6 +186,9 @@ export interface MoveActivityPreview {
   toPosition?: number;
   isValid: boolean;
   validationError?: string;
+  resolutionStatus: MoveResolutionStatus;
+  resolutionMessage: string;
+  proposedConstraints: UserConstraints;
   before: {
     homeArrival: string;
     returnMarginMinutes: number;
@@ -207,6 +212,7 @@ export interface MoveActivityPreview {
     homeArrivalDeltaMinutes: number;
     originalViolationResolved: boolean;
     newConflicts: string[];
+    displacedActivities: string[];
     additionalTravelAllowanceMinutes: number;
   };
 }

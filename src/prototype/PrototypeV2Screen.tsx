@@ -79,6 +79,7 @@ export default function PrototypeV2Screen() {
   const [customDuration, setCustomDuration] = useState<number>(45);
   const [customDetourMode, setCustomDetourMode] = useState<'wishlist' | 'schedule'>('schedule');
   const [customUserAllowance, setCustomUserAllowance] = useState<number>(15);
+  const [wishlistPlaces, setWishlistPlaces] = useState<Array<{ id: string; name: string; durationMinutes: number }>>([]);
 
   // Execute scheduling engine against active constraints
   const currentResult = useMemo(() => {
@@ -134,25 +135,12 @@ export default function PrototypeV2Screen() {
     );
   }, [constraints, selectedMoveActivityId, moveTargetDay, moveTargetPosition]);
 
-  // Confirm and apply Move Activity transaction
+  // Confirm and apply Move Activity transaction (P0: exact snapshot apply)
   const handleConfirmMove = () => {
     if (!movePreview || !movePreview.isValid) return;
 
-    const newDayAssignments = {
-      ...(constraints.activityDayAssignments ?? {}),
-      [selectedMoveActivityId]: moveTargetDay,
-    };
-
-    const newOrder = constraints.activityOrder ? [...constraints.activityOrder] : [];
-    if (!newOrder.includes(selectedMoveActivityId)) {
-      newOrder.push(selectedMoveActivityId);
-    }
-
-    const nextConstraints: UserConstraints = {
-      ...constraints,
-      activityDayAssignments: newDayAssignments,
-      activityOrder: newOrder,
-    };
+    // Apply the exact proposedConstraints snapshot returned by evaluateActivityMove
+    const nextConstraints: UserConstraints = movePreview.proposedConstraints;
 
     const deltaMsg = movePreview.deltas.marginDeltaMinutes !== 0
       ? ` (Return margin: ${movePreview.after.returnMarginMinutes >= 0 ? '+' : ''}${movePreview.after.returnMarginMinutes}m)`
@@ -170,26 +158,56 @@ export default function PrototypeV2Screen() {
   const mapScheduledActivities = useMemo(() => {
     return currentResult.timeline
       .filter(t => t.category === 'ACTIVITY' && t.activityId)
-      .map(t => ({
-        id: t.activityId!,
-        name: t.label,
-        category: (t.activityId?.startsWith('place-mylari') ? 'food' : 'sightseeing') as any,
-        day: t.day,
-        startTime: t.startTime.slice(11),
-        endTime: t.endTime.slice(11),
-        durationMinutes: 60,
-        costINR: t.activityId === 'mysuru-palace' ? 120 : 0,
-        locationName: t.activityId === 'mysuru-palace' ? 'Sayyaji Rao Rd' : 'Devaraja Market',
-        coordinates: ACTIVITY_COORDS[t.activityId!] ?? [12.3051, 76.6551],
-        imageSrc: ACTIVITY_IMAGES[t.activityId!],
-        detourMinutes: 10,
-        detourSource: 'engine_verified' as const,
-        isDeletable: true,
-      }));
+      .map(t => {
+        const coords = ACTIVITY_COORDS[t.activityId!];
+        return {
+          id: t.activityId!,
+          name: t.label,
+          category: (t.activityId?.startsWith('place-mylari') ? 'food' : 'sightseeing') as any,
+          day: t.day,
+          startTime: t.startTime.slice(11),
+          endTime: t.endTime.slice(11),
+          durationMinutes: 60,
+          costINR: t.activityId === 'mysuru-palace' ? 120 : 0,
+          locationName: coords ? (t.activityId === 'mysuru-palace' ? 'Sayyaji Rao Rd' : 'Devaraja Market') : 'Custom location (unverified)',
+          coordinates: coords, // No fake coordinates! Excluded from Leaflet pins if undefined
+          imageSrc: ACTIVITY_IMAGES[t.activityId!],
+          detourMinutes: 10,
+          detourSource: coords ? ('engine_verified' as const) : ('user_specified' as const),
+          isDeletable: true,
+        };
+      });
   }, [currentResult.timeline]);
 
-  // Toggle optional activity disabled status
+  // Toggle optional activity disabled status or remove custom/pitstop
   const handleToggleActivity = (activityId: string) => {
+    // 1. Pitstop toggle
+    if (activityId === 'maddur-tiffanys' || activityId === 'place-maddur-tiffanys') {
+      const nextStops = (constraints.selectedPitstopIds ?? []).filter(id => id !== 'maddur-tiffanys');
+      recordHistory({ ...constraints, selectedPitstopIds: nextStops }, 'Removed Maddur Tiffanys highway pitstop from route.');
+      return;
+    }
+
+    // 2. Added/custom activity removal
+    const isAdditional = (constraints.additionalActivities ?? []).some(a => a.id === activityId);
+    if (isAdditional) {
+      const nextAdditional = (constraints.additionalActivities ?? []).filter(a => a.id !== activityId);
+      const nextDayAssignments = { ...(constraints.activityDayAssignments ?? {}) };
+      delete nextDayAssignments[activityId];
+      const nextOrder = (constraints.activityOrder ?? []).filter(id => id !== activityId);
+      recordHistory(
+        {
+          ...constraints,
+          additionalActivities: nextAdditional,
+          activityDayAssignments: nextDayAssignments,
+          activityOrder: nextOrder,
+        },
+        'Removed added activity from itinerary.'
+      );
+      return;
+    }
+
+    // 3. Built-in optional activity disable/restore
     const isCurrentlyDisabled = constraints.disabledActivityIds.includes(activityId);
     const nextDisabled = isCurrentlyDisabled
       ? constraints.disabledActivityIds.filter(id => id !== activityId)
@@ -204,8 +222,24 @@ export default function PrototypeV2Screen() {
     recordHistory(nextConstraints, `${action} activity in itinerary.`);
   };
 
-  // Add Place from Discover (converting to real Activity and scheduling)
+  // Add Place from Discover (converting to real Activity or Pitstop and scheduling)
   const handleAddDiscoverPlace = (place: DiscoverPlace) => {
+    if (place.id === 'place-maddur-tiffanys') {
+      const currentStops = constraints.selectedPitstopIds ?? [];
+      if (!currentStops.includes('maddur-tiffanys')) {
+        const nextConstraints: UserConstraints = {
+          ...constraints,
+          selectedPitstopIds: [...currentStops, 'maddur-tiffanys'],
+        };
+        recordHistory(
+          nextConstraints,
+          `Added Maddur Tiffanys highway pitstop on NH 275 expressway corridor. 30m dwell + 10m detour evaluated by scheduler.`
+        );
+      }
+      setBuilderTab('schedule');
+      return;
+    }
+
     const activityObj = discoverPlaceToActivity(place);
     const nextAdditional = [...(constraints.additionalActivities ?? []), activityObj];
     const nextDayAssignments = {
@@ -226,10 +260,22 @@ export default function PrototypeV2Screen() {
     setBuilderTab('schedule');
   };
 
-  // Add Custom Spot
+  // Add Custom Spot (Wishlist-only places remain unscheduled with 0m schedule impact)
   const handleAddCustomSpot = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customName.trim()) return;
+
+    if (customDetourMode === 'wishlist') {
+      const newWishlistPlace = {
+        id: `wishlist-${Date.now()}`,
+        name: customName.trim(),
+        durationMinutes: customDuration,
+      };
+      setWishlistPlaces(prev => [...prev, newWishlistPlace]);
+      setCustomName('');
+      setBuilderTab('schedule');
+      return;
+    }
 
     const customId = `custom-${Date.now()}`;
     const customActivityObj: Activity = {
@@ -241,7 +287,7 @@ export default function PrototypeV2Screen() {
       costPerPersonINR: 0,
       isOptional: true,
       priority: 3,
-      localTransferMinutes: customDetourMode === 'wishlist' ? 0 : customUserAllowance,
+      localTransferMinutes: customUserAllowance,
       openingHoursEvidence: { level: 'assumption', note: 'User-specified timing' },
       costEvidence: { level: 'assumption' },
     };
@@ -814,13 +860,15 @@ export default function PrototypeV2Screen() {
                           );
                         }
 
-                        // Render Non-Activity Timeline Milestones (Drive, Meals, Rest, Checkin)
+                        // Render Non-Activity Timeline Milestones (Drive, Pitstop, Meals, Rest, Checkin)
                         return (
                           <div
                             key={entry.id}
                             className={`rounded-xl border p-3 text-xs flex items-center justify-between ${
                               entry.category === 'DRIVE'
                                 ? 'border-dashed border-[#BAE3F1] bg-[#F4F9FC] text-[#5A7184]'
+                                : entry.category === 'PITSTOP'
+                                ? 'border-amber-300 bg-amber-50 text-amber-900'
                                 : entry.category === 'MEAL'
                                 ? 'border-amber-200 bg-amber-50/50 text-amber-900'
                                 : entry.category === 'CHECK_IN'
@@ -832,7 +880,17 @@ export default function PrototypeV2Screen() {
                           >
                             <div className="flex items-center gap-2">
                               <span>
-                                {entry.category === 'DRIVE' ? '🚗' : entry.category === 'MEAL' ? '🍽️' : entry.category === 'CHECK_IN' ? '🏨' : entry.category === 'REST' ? '🛌' : '⏱️'}
+                                {entry.category === 'DRIVE'
+                                  ? '🚗'
+                                  : entry.category === 'PITSTOP'
+                                  ? '☕'
+                                  : entry.category === 'MEAL'
+                                  ? '🍽️'
+                                  : entry.category === 'CHECK_IN'
+                                  ? '🏨'
+                                  : entry.category === 'REST'
+                                  ? '🛌'
+                                  : '⏱️'}
                               </span>
                               <div>
                                 <strong className="text-[#193953]">{entry.label}</strong>
@@ -841,12 +899,65 @@ export default function PrototypeV2Screen() {
                                 </span>
                               </div>
                             </div>
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">
-                              {entry.category}
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-[#5A7184]">
+                                {entry.category}
+                              </span>
+                              {entry.category === 'PITSTOP' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleActivity('maddur-tiffanys')}
+                                  className="h-6 w-6 rounded-md border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center justify-center"
+                                  title="Remove highway stop"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
+
+                    {/* Saved Wishlist (Unscheduled Places) */}
+                    {wishlistPlaces.length > 0 && (
+                      <div className="rounded-2xl border border-sky-200 bg-sky-50/50 p-4 space-y-2 mt-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm">📌</span>
+                            <span className="text-xs font-black text-[#193953] uppercase tracking-wider">
+                              Wishlist Places ({wishlistPlaces.length})
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold text-sky-700 bg-sky-100 px-2 py-0.5 rounded">
+                            Unscheduled · 0m impact
+                          </span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {wishlistPlaces.map(w => (
+                            <div
+                              key={w.id}
+                              className="flex items-center justify-between bg-white rounded-xl p-2.5 border border-sky-100 text-xs shadow-2xs"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-[#193953]">{w.name}</span>
+                                <span className="text-[11px] text-[#5A7184]">({w.durationMinutes}m duration)</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-gray-400">Wishlist only</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setWishlistPlaces(prev => prev.filter(p => p.id !== w.id))}
+                                  className="h-5 w-5 rounded text-gray-400 hover:text-rose-600 flex items-center justify-center font-bold text-xs"
+                                  title="Remove from wishlist"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1215,15 +1326,21 @@ export default function PrototypeV2Screen() {
                       <span className="text-xs font-black uppercase tracking-wider text-[#193953]">
                         Engine Simulation Preview
                       </span>
-                      <span
-                        className={`text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full ${
-                          movePreview.isValid
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : 'bg-rose-100 text-rose-800'
-                        }`}
-                      >
-                        {movePreview.isValid ? '✓ Feasible Move' : '⚠️ Slot Conflict / Cannot Fit'}
-                      </span>
+                      {movePreview.resolutionStatus === 'VALID_AND_RESOLVED' && (
+                        <span className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                          ✓ Feasible · Conflict Resolved
+                        </span>
+                      )}
+                      {movePreview.resolutionStatus === 'VALID_UNRESOLVED' && (
+                        <span className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                          ⚠️ Valid Slot · Conflict Unresolved
+                        </span>
+                      )}
+                      {movePreview.resolutionStatus === 'INVALID' && (
+                        <span className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800">
+                          ✕ Cannot Fit / Conflict
+                        </span>
+                      )}
                     </div>
 
                     {/* Before vs Proposed Metrics Grid */}
@@ -1283,12 +1400,14 @@ export default function PrototypeV2Screen() {
                         <div className="text-gray-600">{movePreview.before.violationsCount} violations</div>
                         <div className="font-bold text-gray-900">{movePreview.after.violationsCount} violations</div>
                         <div>
-                          {movePreview.deltas.originalViolationResolved ? (
+                          {movePreview.resolutionStatus === 'VALID_AND_RESOLVED' ? (
                             <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                               ✓ Resolved!
                             </span>
-                          ) : movePreview.isValid ? (
-                            <span className="text-[11px] text-gray-500">Preserved</span>
+                          ) : movePreview.resolutionStatus === 'VALID_UNRESOLVED' ? (
+                            <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                              Unresolved
+                            </span>
                           ) : (
                             <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
                               Conflict
@@ -1298,24 +1417,41 @@ export default function PrototypeV2Screen() {
                       </div>
                     </div>
 
-                    {/* Conflict Explanation if Invalid */}
-                    {!movePreview.isValid && (
-                      <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900 space-y-1">
+                    {/* Resolution Banner */}
+                    {movePreview.resolutionStatus === 'VALID_AND_RESOLVED' && (
+                      <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900 font-medium">
+                        ✓ {movePreview.resolutionMessage}
+                      </div>
+                    )}
+
+                    {movePreview.resolutionStatus === 'VALID_UNRESOLVED' && (
+                      <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-1">
                         <div className="font-bold flex items-center gap-1.5">
                           <span>⚠️</span>
-                          <span>Why this slot cannot be scheduled:</span>
+                          <span>Slot is valid, but trip constraints remain:</span>
                         </div>
-                        <p>{movePreview.validationError}</p>
-                        <p className="text-[11px] text-rose-700 pt-1 font-medium">
-                          Alternative adjustments: choose another day, adjust visit order, or remove an optional stop.
+                        <p>{movePreview.resolutionMessage}</p>
+                        <p className="text-[11px] text-amber-800 pt-0.5 font-medium">
+                          The activity fits on Day {movePreview.toDay}, but the overall trip remains overdue or has other active constraints. Additional adjustments are needed to achieve feasibility.
                         </p>
                       </div>
                     )}
 
-                    {/* Success Notice if Valid */}
-                    {movePreview.isValid && movePreview.deltas.originalViolationResolved && (
-                      <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900 font-medium">
-                        ✓ Moving this activity resolves the schedule conflict and restores a safe return deadline!
+                    {movePreview.resolutionStatus === 'INVALID' && (
+                      <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900 space-y-1">
+                        <div className="font-bold flex items-center gap-1.5">
+                          <span>✕</span>
+                          <span>Why this slot cannot be scheduled:</span>
+                        </div>
+                        <p>{movePreview.validationError}</p>
+                        {movePreview.deltas.displacedActivities && movePreview.deltas.displacedActivities.length > 0 && (
+                          <p className="text-[11px] text-rose-800 font-semibold">
+                            Displaced activity: {movePreview.deltas.displacedActivities.join(', ')}
+                          </p>
+                        )}
+                        <p className="text-[11px] text-rose-700 pt-1 font-medium">
+                          Alternative adjustments: choose another day, adjust visit order, or remove an optional stop.
+                        </p>
                       </div>
                     )}
                   </div>

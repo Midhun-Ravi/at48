@@ -6,6 +6,7 @@ import InputScreen from './screens/InputScreen';
 import CompareScreen from './screens/CompareScreen';
 import ScheduleScreen from './screens/ScheduleScreen';
 import ReviewScreen from './screens/ReviewScreen';
+import PrototypeV2Screen from './prototype/PrototypeV2Screen';
 import BottomNav from './components/BottomNav';
 import ScrollToTop from './components/ScrollToTop';
 
@@ -93,6 +94,7 @@ export default function App() {
           <Route path="/compare" element={<CompareScreen inputs={inputs} setInputs={setInputs} />} />
           <Route path="/schedule/:id" element={<ScheduleScreen inputs={inputs} setInputs={setInputs} />} />
           <Route path="/review/:id" element={<ReviewScreen inputs={inputs} setInputs={setInputs} />} />
+          <Route path="/prototype/v2" element={<PrototypeV2Screen />} />
           <Route
             path="*"
             element={

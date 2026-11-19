@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Dispatch, SetStateAction } from 'react';
 import type { CustomPlannedActivity, UserConstraints, TimetableEntry } from '../types';
@@ -1503,16 +1504,16 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       )}
 
       {/* 2. VISIT SCHEDULING MODAL ("Use This Time") */}
-      {!isGuestView && isVisitEditorOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
-          <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4 max-h-[90vh] overflow-y-auto">
+      {!isGuestView && isVisitEditorOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center overflow-y-auto bg-black/60 backdrop-blur-xs px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 animate-in fade-in duration-200" role="presentation">
+          <div role="dialog" aria-modal="true" aria-labelledby="visit-scheduling-title" className="relative w-full max-w-lg rounded-t-2xl rounded-b-xl sm:rounded-3xl bg-white p-4 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4 max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
             <div className="flex items-start justify-between border-b border-[#EADBCE] pb-3">
               <div>
                 <span className="text-[10px] font-bold text-[#5F7B6B] uppercase tracking-wider">
                   {editorMode === 'edit_visit' ? 'Edit Scheduled Stop' : 'Use Free Time Window'}
                 </span>
                 <h3 className="text-lg sm:text-xl font-black text-[#344F48]">
-                  {editorMode === 'edit_visit' ? 'Adjust Stop Timing' : 'Schedule Activity or Buffer'}
+                  <span id="visit-scheduling-title">{editorMode === 'edit_visit' ? 'Adjust Stop Timing' : 'Schedule Activity or Buffer'}</span>
                 </h3>
               </div>
               <button
@@ -1696,7 +1697,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
             </div>
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* 3. LOCAL TRANSFER ADJUSTMENT MODAL */}
       {!isGuestView && isTransferModalOpen && selectedTransferEntry && (

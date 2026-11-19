@@ -74,6 +74,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   }
 
   // Active inputs: Reconstructed from URL if valid share link opened; otherwise use props from planning flow
+  const isGuestView = Boolean(parsedTrip?.valid && parsedTrip.data.isGuestView);
   const initialInputs = parsedTrip?.valid ? parsedTrip.data.inputs : inputs;
   const [currentInputs, setCurrentInputs] = useState<UserConstraints>(initialInputs);
 
@@ -162,6 +163,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
   // Transactional state modifier: pushes current snapshot to history stack
   const recordHistory = (newConstraints: UserConstraints, message: string) => {
+    if (isGuestView) return;
     setHistoryStack(prev => [...prev, currentInputs]);
     setCurrentInputs(newConstraints);
     setInputs(newConstraints);
@@ -173,6 +175,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
   // Undo handler
   const handleUndo = () => {
+    if (isGuestView) return;
     if (historyStack.length === 0) return;
     const previous = historyStack[historyStack.length - 1];
     setHistoryStack(prev => prev.slice(0, -1));
@@ -533,12 +536,14 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
               <span className="capitalize">{currentInputs.pace} pace</span>
             </span>
 
-            <Link
-              to="/plan"
-              className="text-xs font-bold text-[#C65B32] hover:underline px-2 py-1 transition-colors"
-            >
-              Edit dates & limits ✎
-            </Link>
+            {!isGuestView && (
+              <Link
+                to="/plan"
+                className="text-xs font-bold text-[#C65B32] hover:underline px-2 py-1 transition-colors"
+              >
+                Edit dates & limits ✎
+              </Link>
+            )}
           </div>
         </div>
       </div>
@@ -617,6 +622,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
             <TactileButton
               variant="secondary"
               size="sm"
+              disabled={isGuestView}
               onClick={() => handleOpenMoveModal()}
               className="!px-3 !py-1 text-xs font-bold"
             >
@@ -643,6 +649,13 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
           </p>
         )}
       </div>
+
+      {isGuestView && (
+        <div role="status" className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3 text-sm text-[#344F48]">
+          Shared trip preview · Editing is disabled. Review the route and itinerary, then continue to RSVP.
+          <TactileButton variant="primary" size="sm" onClick={goToReviewScreen} className="ml-3">Review & RSVP →</TactileButton>
+        </div>
+      )}
 
       {/* Road & Operating Advisories Banner (if night curfew active) */}
       {dest.routeRestriction && (
@@ -676,7 +689,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
             destination={dest}
             inputs={currentInputs}
             result={r}
-            onTogglePitstop={togglePitstop}
+            onTogglePitstop={isGuestView ? undefined : togglePitstop}
           />
         </div>
       )}
@@ -684,7 +697,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       {/* Connected 2-Column Desktop Workspace (Left: Timeline & Tools, Right: Sticky Map) */}
       <div className="grid grid-cols-12 gap-6 items-start">
         {/* Left Column (7 of 12 cols): Timeline, Tabs & Editing Tools */}
-        <div className="col-span-12 lg:col-span-7 space-y-5">
+        <fieldset disabled={isGuestView} className="col-span-12 lg:col-span-7 min-w-0 space-y-5 border-0 p-0">
           {/* Day Selector Tabs & Action Strip */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#EADBCE] pb-2">
             <div className="flex items-center gap-1.5 overflow-x-auto">
@@ -1283,7 +1296,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
               Review Trip & Cost Sharing →
             </TactileButton>
           </div>
-        </div>
+        </fieldset>
 
         {/* Right Column (5 of 12 cols): Sticky Connected Leaflet Map */}
         <div className="hidden lg:block col-span-5 sticky top-24 space-y-3 self-start">
@@ -1292,7 +1305,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
               destination={dest}
               inputs={currentInputs}
               result={r}
-              onTogglePitstop={togglePitstop}
+              onTogglePitstop={isGuestView ? undefined : togglePitstop}
             />
           </div>
 
@@ -1308,7 +1321,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       {/* ===================== MODALS ===================== */}
 
       {/* 1. MOVE ACTIVITY MODAL ("Make This Trip Fit") */}
-      {isMoveModalOpen && (
+      {!isGuestView && isMoveModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
           <div className="relative w-full max-w-2xl rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between border-b border-[#EADBCE] pb-3">
@@ -1474,7 +1487,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       )}
 
       {/* 2. VISIT SCHEDULING MODAL ("Use This Time") */}
-      {isVisitEditorOpen && (
+      {!isGuestView && isVisitEditorOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
           <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between border-b border-[#EADBCE] pb-3">
@@ -1670,7 +1683,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       )}
 
       {/* 3. LOCAL TRANSFER ADJUSTMENT MODAL */}
-      {isTransferModalOpen && selectedTransferEntry && (
+      {!isGuestView && isTransferModalOpen && selectedTransferEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
           <div className="relative w-full max-w-md rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4">
             <div className="flex items-start justify-between border-b border-[#EADBCE] pb-3">

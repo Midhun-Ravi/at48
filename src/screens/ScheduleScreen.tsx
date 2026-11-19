@@ -45,6 +45,62 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   const [showMobileMap, setShowMobileMap] = useState<boolean>(false);
   const [activeGuideId, setActiveGuideId] = useState<string | null>(null);
 
+  // Parse shareable URL query parameters if present
+  const parsedTrip = useMemo(() => {
+    if (!searchParams || searchParams.toString().length === 0) return null;
+    return parseShareableTrip(searchParams, id ?? '');
+  }, [searchParams, id]);
+
+  // Defensive fallback: If URL parameters were provided but corrupted/invalid, render friendly error
+  if (parsedTrip && !parsedTrip.valid) {
+    return (
+      <div className="mx-auto max-w-xl space-y-4 rounded-2xl border border-red-200 bg-red-50 p-6 text-center text-red-800">
+        <div className="text-3xl">⚠️</div>
+        <h2 className="text-xl font-bold text-red-900">Trip Link Could Not Be Loaded</h2>
+        <p className="text-sm text-red-700">{parsedTrip.error}</p>
+        <p className="text-xs text-red-600">
+          The link may be corrupted, truncated, or contains out-of-range travel dates.
+        </p>
+        <div className="pt-2">
+          <Link
+            to="/"
+            className="inline-block rounded-xl bg-[#C65B32] px-5 py-3 text-sm font-bold text-white hover:bg-[#B04E27] transition-colors"
+          >
+            ← Create a new trip
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Active inputs: Reconstructed from URL if valid share link opened; otherwise use props from planning flow
+  const isGuestView = Boolean(parsedTrip?.valid && parsedTrip.data.isGuestView);
+  const initialInputs = parsedTrip?.valid ? parsedTrip.data.inputs : inputs;
+  const [currentInputs, setCurrentInputs] = useState<UserConstraints>(initialInputs);
+
+  const dest = getDestination(id ?? '');
+
+  if (!dest) {
+    return (
+      <div className="mx-auto max-w-xl space-y-4 py-8 text-center text-[#344F48]">
+        <p className="text-lg font-bold text-[#344F48]">Unknown destination.</p>
+        <Link to="/compare" className="text-[#C65B32] underline font-semibold">
+          ← Back to comparison
+        </Link>
+      </div>
+    );
+  }
+
+  // Re-evaluate feasibility dynamically using deterministic scheduling engine
+  const r = evaluateFeasibility(dest, currentInputs);
+
+  // Progressive disclosure toggle states
+  const selectedPitstopIds = currentInputs.selectedPitstopIds ?? [];
+  const [isPitstopsOpen, setIsPitstopsOpen] = useState<boolean>(selectedPitstopIds.length > 0);
+  const [isDelayScenarioOpen, setIsDelayScenarioOpen] = useState<boolean>(
+    (currentInputs.drivingAdjustmentMinutes ?? 0) !== 0
+  );
+
   // Pitstop dietary filter: 'all' | 'veg' | 'non-veg'
   const [dietaryFilter, setDietaryFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
 
@@ -84,54 +140,6 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   const customPlaceCost = 0;
   const [customPlaceTransfer, setCustomPlaceTransfer] = useState<number>(15);
 
-  // Parse shareable URL query parameters if present
-  const parsedTrip = useMemo(() => {
-    if (!searchParams || searchParams.toString().length === 0) return null;
-    return parseShareableTrip(searchParams, id ?? '');
-  }, [searchParams, id]);
-
-  // Defensive fallback: If URL parameters were provided but corrupted/invalid, render friendly error
-  if (parsedTrip && !parsedTrip.valid) {
-    return (
-      <div className="mx-auto max-w-xl space-y-4 rounded-2xl border border-red-200 bg-red-50 p-6 text-center text-red-800">
-        <div className="text-3xl">⚠️</div>
-        <h2 className="text-xl font-bold text-red-900">Trip Link Could Not Be Loaded</h2>
-        <p className="text-sm text-red-700">{parsedTrip.error}</p>
-        <p className="text-xs text-red-600">
-          The link may be corrupted, truncated, or contains out-of-range travel dates.
-        </p>
-        <div className="pt-2">
-          <Link
-            to="/"
-            className="inline-block rounded-xl bg-[#C65B32] px-5 py-3 text-sm font-bold text-white hover:bg-[#B04E27] transition-colors"
-          >
-            ← Create a new trip
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  // Active inputs: Reconstructed from URL if valid share link opened; otherwise use props from planning flow
-  const initialInputs = parsedTrip?.valid ? parsedTrip.data.inputs : inputs;
-  const [currentInputs, setCurrentInputs] = useState<UserConstraints>(initialInputs);
-
-  const dest = getDestination(id ?? '');
-
-  if (!dest) {
-    return (
-      <div className="mx-auto max-w-xl space-y-4 py-8 text-center text-[#344F48]">
-        <p className="text-lg font-bold text-[#344F48]">Unknown destination.</p>
-        <Link to="/compare" className="text-[#C65B32] underline font-semibold">
-          ← Back to comparison
-        </Link>
-      </div>
-    );
-  }
-
-  // Re-evaluate feasibility dynamically using deterministic scheduling engine
-  const r = evaluateFeasibility(dest, currentInputs);
-
   // Available days dynamically extracted from timeline entries
   const availableDays = useMemo(() => {
     const days = Array.from(new Set(r.timeline.map(t => t.day))).sort((a, b) => a - b);
@@ -141,7 +149,6 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   const currentActiveDay = availableDays.includes(activeDay) ? activeDay : availableDays[0] || 1;
 
   const compatibleStops = getCompatiblePitstops(dest.id);
-  const selectedPitstopIds = currentInputs.selectedPitstopIds ?? [];
 
   // Filter highway pitstops by dietary preference
   const filteredStops = useMemo(() => {
@@ -156,6 +163,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
   // Transactional state modifier: pushes current snapshot to history stack
   const recordHistory = (newConstraints: UserConstraints, message: string) => {
+    if (isGuestView) return;
     setHistoryStack(prev => [...prev, currentInputs]);
     setCurrentInputs(newConstraints);
     setInputs(newConstraints);
@@ -167,6 +175,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
   // Undo handler
   const handleUndo = () => {
+    if (isGuestView) return;
     if (historyStack.length === 0) return;
     const previous = historyStack[historyStack.length - 1];
     setHistoryStack(prev => prev.slice(0, -1));
@@ -462,47 +471,79 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
   };
 
   return (
-    <section className="relative space-y-6 w-full min-w-0">
+    <section className="relative space-y-5 w-full min-w-0">
       {/* 4-part segmented progress meter */}
       <ProgressBar currentStep={3} />
 
-      {/* Screen Hero Banner with Warm Scenic Layers */}
+      {/* 1. Page 3 Calm Workspace Header */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-b from-[#F8E1D2]/50 via-[#FAF2EB] to-[#FFF7F0] p-4 sm:p-6 border border-[#EADBCE]">
         <ScenicBackground variant="compact" />
-        <div className="relative z-10 flex flex-wrap items-end justify-between gap-4">
-          <div className="space-y-1">
+        <div className="relative z-10 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[11px] font-bold text-[#C65B32] border border-[#EADBCE] shadow-2xs">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#C65B32]" />
-                Step 3 · Interactive Workspace
+                Step 3 · Trip Workspace
               </span>
-              <span className="text-xs font-semibold text-[#6B7C77]">
+              <span className="rounded-full bg-white/80 border border-[#EADBCE] px-2.5 py-0.5 text-xs font-semibold text-[#344F48]">
                 📍 {dest.name} ({dest.routeName})
               </span>
             </div>
+
+            <div className="flex items-center gap-2">
+              <Link
+                to="/compare"
+                className="text-xs font-bold text-[#6B7C77] hover:text-[#C65B32] px-3 py-1.5 rounded-xl border border-[#EADBCE] bg-white transition-colors"
+              >
+                ← Other Destinations
+              </Link>
+              <TactileButton
+                variant="primary"
+                size="sm"
+                onClick={goToReviewScreen}
+                className="!px-3.5 !py-1.5 text-xs font-bold"
+              >
+                Review & Share →
+              </TactileButton>
+            </div>
+          </div>
+
+          <div>
             <h1 className="text-2xl sm:text-3xl font-black text-[#344F48] tracking-tight leading-snug">
               What should we explore along the way?
             </h1>
-            <p className="text-xs sm:text-sm text-[#6B7C77] max-w-2xl leading-relaxed">
+            <p className="text-xs sm:text-sm text-[#6B7C77] max-w-2xl leading-relaxed mt-0.5">
               Connected itinerary and map workspace. Reorder activities, adjust transfer allowances, or reserve personal free time while maintaining deterministic return feasibility.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Link
-              to="/compare"
-              className="text-xs font-bold text-[#6B7C77] hover:text-[#C65B32] px-3 py-1.5 rounded-xl border border-[#EADBCE] bg-white transition-colors"
-            >
-              ← Other Destinations
-            </Link>
-            <TactileButton
-              variant="primary"
-              size="sm"
-              onClick={goToReviewScreen}
-              className="!px-3 !py-1.5 text-xs"
-            >
-              Review & Share →
-            </TactileButton>
+          {/* Editable Trip Summary Pill Bar */}
+          <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-xl bg-white border border-[#EADBCE] px-3 py-1.5 font-bold text-[#344F48]">
+              <span>📅</span>
+              <span>
+                {formatReadableDateTime(currentInputs.departureDateTime)} – {formatReadableDateTime(currentInputs.returnDeadlineDateTime)}
+              </span>
+            </span>
+
+            <span className="inline-flex items-center gap-1.5 rounded-xl bg-white border border-[#EADBCE] px-3 py-1.5 font-bold text-[#344F48]">
+              <span>👥</span>
+              <span>{currentInputs.partySize} {currentInputs.partySize === 1 ? 'Traveler' : 'Travelers'}</span>
+            </span>
+
+            <span className="inline-flex items-center gap-1.5 rounded-xl bg-white border border-[#EADBCE] px-3 py-1.5 font-bold text-[#344F48]">
+              <span>⚡</span>
+              <span className="capitalize">{currentInputs.pace} pace</span>
+            </span>
+
+            {!isGuestView && (
+              <Link
+                to="/plan"
+                className="text-xs font-bold text-[#C65B32] hover:underline px-2 py-1 transition-colors"
+              >
+                Edit dates & limits ✎
+              </Link>
+            )}
           </div>
         </div>
       </div>
@@ -520,7 +561,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
             type="button"
             onClick={handleUndo}
             disabled={historyStack.length === 0}
-            className="flex items-center gap-1.5 rounded-xl bg-[#FAF2EB] border border-[#EADBCE] hover:bg-[#F8E1D2] px-3 py-1.5 text-xs font-black text-[#C65B32] transition-colors shrink-0 shadow-2xs"
+            className="flex items-center gap-1.5 rounded-xl bg-[#FAF2EB] border border-[#EADBCE] hover:bg-[#F8E1D2] px-3 py-1.5 text-xs font-black text-[#C65B32] transition-colors shrink-0 shadow-2xs cursor-pointer"
           >
             <span>↩</span>
             <span>Undo</span>
@@ -528,168 +569,154 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         </div>
       )}
 
-      {/* Primary Feasibility Summary & Action Bar */}
-      <div className="rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-4 sm:p-6 text-[#344F48] shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#EADBCE] pb-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-3 py-0.5 text-xs font-bold uppercase tracking-wider text-[#C65B32]">
-              Feasibility Reality Check
-            </span>
+      {/* 2. Sticky Compact Feasibility Indicator */}
+      <div className="sticky top-16 z-30 rounded-2xl border border-[#EADBCE] bg-white/95 backdrop-blur-md p-3 sm:p-4 shadow-sm transition-all duration-200">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Left: Grounded Feasibility Verdict & Return Margin */}
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-4">
             <span
-              className={`rounded-full px-2.5 py-0.5 text-xs font-black border ${
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider ${
                 isComfortable
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
                   : isTight
-                  ? 'bg-amber-50 text-amber-800 border-amber-300'
-                  : 'bg-red-50 text-red-800 border-red-300'
+                  ? 'bg-amber-50 text-amber-800 border border-amber-300'
+                  : 'bg-red-50 text-red-800 border border-red-300'
               }`}
             >
-              {isComfortable ? '✓ Comfortable' : isTight ? '⚠️ Tight Schedule' : '❌ Not Recommended'}
+              <span>{isComfortable ? '✓' : isTight ? '⚠️' : '✕'}</span>
+              <span>{isComfortable ? 'Comfortable' : isTight ? 'Tight Schedule' : 'Not Recommended'}</span>
             </span>
+
+            {/* Return Margin Pill */}
+            <div className="flex items-center gap-1.5 text-xs sm:text-sm">
+              <span className="text-[#6B7C77] font-medium hidden sm:inline">Return Margin:</span>
+              <strong
+                className={`font-black ${
+                  r.returnDeadlineMarginMinutes >= 60
+                    ? 'text-emerald-700'
+                    : r.returnDeadlineMarginMinutes >= 0
+                    ? 'text-amber-700'
+                    : 'text-red-700'
+                }`}
+              >
+                {r.returnDeadlineMarginMinutes >= 0
+                  ? `+${formatDuration(r.returnDeadlineMarginMinutes)} margin`
+                  : `−${formatDuration(Math.abs(r.returnDeadlineMarginMinutes))} projected late`}
+              </strong>
+            </div>
+
+            {/* Home arrival & deadline reminder */}
+            <span className="text-xs text-[#6B7C77] hidden md:inline">
+              (Arrive ~{r.homeArrivalTime.slice(11, 16)} IST · Deadline {currentInputs.returnDeadlineDateTime.slice(11, 16)})
+            </span>
+
             {hasBlocker && (
-              <span className="rounded-full bg-rose-50 text-rose-800 border border-rose-300 px-2 py-0.5 text-[10px] font-bold">
+              <span className="rounded-full bg-rose-50 text-rose-800 border border-rose-300 px-2.5 py-0.5 text-xs font-bold animate-pulse">
                 {activeBlockers.length} Blocker Violation
               </span>
             )}
           </div>
 
-          {/* "Make This Trip Fit" Button */}
-          <TactileButton
-            variant="primary"
-            size="sm"
-            onClick={() => handleOpenMoveModal()}
-            className="!px-3 !py-1 text-xs"
-          >
-            🔄 Move Activity / Make Fit
-          </TactileButton>
-        </div>
-
-        <p className="text-xs sm:text-sm font-semibold text-[#344F48] leading-relaxed">
-          {r.ratingExplanation}
-        </p>
-
-        {/* HERO METRIC: Return Deadline Margin */}
-        <div
-          className={`rounded-xl border p-3.5 space-y-1.5 ${
-            r.returnDeadlineMarginMinutes >= 60
-              ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
-              : r.returnDeadlineMarginMinutes >= 0
-              ? 'bg-amber-50/80 border-amber-200 text-amber-950'
-              : 'bg-red-50/80 border-red-200 text-red-950'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#6B7C77]">
-              Will I return before my deadline?
-            </span>
-            <strong
-              className={`text-sm sm:text-base font-black ${
-                r.returnDeadlineMarginMinutes >= 60
-                  ? 'text-emerald-700'
-                  : r.returnDeadlineMarginMinutes >= 0
-                  ? 'text-amber-700'
-                  : 'text-red-700'
-              }`}
+          {/* Right: Make Fit Button & Review Action */}
+          <div className="flex items-center gap-2">
+            <TactileButton
+              variant="secondary"
+              size="sm"
+              disabled={isGuestView}
+              onClick={() => handleOpenMoveModal()}
+              className="!px-3 !py-1 text-xs font-bold"
             >
-              {r.returnDeadlineMarginMinutes >= 0
-                ? `+${formatDuration(r.returnDeadlineMarginMinutes)} margin`
-                : `−${formatDuration(Math.abs(r.returnDeadlineMarginMinutes))} projected late`}
-            </strong>
+              🔄 Move Activity / Make Fit
+            </TactileButton>
+
+            <TactileButton
+              variant="primary"
+              size="sm"
+              onClick={goToReviewScreen}
+              className="!px-3 !py-1 text-xs font-bold hidden sm:inline-flex"
+            >
+              Review & Share →
+            </TactileButton>
           </div>
-          <p className="text-xs leading-relaxed font-medium">
-            {r.returnDeadlineMarginMinutes >= 60 ? (
-              <>
-                <strong className="text-emerald-800">✓ Safe return buffer:</strong> Expected arrival home is{' '}
-                <strong>{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>, arriving{' '}
-                <strong>{formatDuration(r.returnDeadlineMarginMinutes)}</strong> before your{' '}
-                <strong>{formatReadableDateTime(currentInputs.returnDeadlineDateTime)}</strong> return deadline.
-              </>
-            ) : r.returnDeadlineMarginMinutes >= 0 ? (
-              <>
-                <strong className="text-amber-800">⚠️ Narrow buffer:</strong> Expected arrival home is{' '}
-                <strong>{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>, leaving only{' '}
-                <strong>{formatDuration(r.returnDeadlineMarginMinutes)}</strong> before your deadline. Highway delays risk being late.
-              </>
-            ) : (
-              <>
-                <strong className="text-red-800">❌ Return deadline missed:</strong> Expected return arrival is{' '}
-                <strong>{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>, which exceeds your{' '}
-                <strong>{formatReadableDateTime(currentInputs.returnDeadlineDateTime)}</strong> deadline by{' '}
-                <strong>{formatDuration(Math.abs(r.returnDeadlineMarginMinutes))}</strong>.
-              </>
-            )}
-          </p>
         </div>
 
-        {/* 3-Part Metric Breakdown */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-[#EADBCE] pt-3 text-xs">
-          <div>
-            <p className="text-[#6B7C77] font-medium">Usable Destination Free Time</p>
-            <strong className="text-base sm:text-lg font-black text-[#344F48]">{formatDuration(r.destinationSlackMinutes)}</strong>
-            <span className="text-[10px] text-[#6B7C77] block">Unallocated daytime & evening slots</span>
-          </div>
-          <div>
-            <p className="text-[#6B7C77] font-medium">Estimated Budget Per Person</p>
-            <strong className="text-base sm:text-lg font-black text-[#C65B32]">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}</strong>
-            <span className="text-[10px] text-[#6B7C77] block">Fuel, tolls, stay & tickets ({currentInputs.partySize} travelers)</span>
-          </div>
-          <div>
-            <p className="text-[#6B7C77] font-medium">Highway Traffic Buffer</p>
-            <strong className="text-base sm:text-lg font-black text-[#344F48]">
-              +{formatDuration(Math.round(dest.baselineOneWayDriveMinutes * 0.20))} each way
-            </strong>
-            <span className="text-[10px] text-[#6B7C77] block">Standard 20% contingency included</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Road & Operating Advisories Banner */}
-      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 space-y-1.5">
-        <div className="flex items-center gap-2 font-bold text-sm text-amber-950">
-          <span>⚠️</span>
-          <span>Road & Operating Advisories</span>
-        </div>
-        {dest.routeRestriction ? (
-          <p className="leading-relaxed">
-            <strong>Night Curfew in Effect:</strong> {dest.routeRestriction.name} gates close between {dest.routeRestriction.startTime} and {dest.routeRestriction.endTime}. Transit through the reserve must clear before 21:00.
-          </p>
-        ) : (
-          <p className="leading-relaxed">
-            <strong>Standard Highway Corridor:</strong> Departure timing models standard expressway speeds with realistic buffer margins. Always verify live highway conditions and attraction rules before departure.
+        {/* Subtitle / Advisory text if tight or blocker exists */}
+        {!isComfortable && (
+          <p className="text-[11px] text-[#6B7C77] mt-1.5 pt-1.5 border-t border-[#EADBCE] font-medium">
+            {hasBlocker
+              ? `⚠️ Schedule conflict: ${activeBlockers[0]?.message || 'Operating window or transfer exceeded.'} Click "Move Activity / Make Fit" to resolve.`
+              : `⚠️ Return buffer is tight (+${r.returnDeadlineMarginMinutes}m). Highway traffic or prolonged stops risk missing the return deadline.`}
           </p>
         )}
       </div>
 
-      {/* Mobile Map Toggle Button */}
-      <div className="lg:hidden flex justify-end">
+      {isGuestView && (
+        <div role="status" className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3 text-sm text-[#344F48]">
+          Shared trip preview · Editing is disabled. Review the route and itinerary, then continue to RSVP.
+          <TactileButton variant="primary" size="sm" onClick={goToReviewScreen} className="ml-3">Review & RSVP →</TactileButton>
+        </div>
+      )}
+
+      {/* Road & Operating Advisories Banner (if night curfew active) */}
+      {dest.routeRestriction && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/90 p-3 text-xs text-amber-900 flex items-start gap-2">
+          <span className="text-sm">⚠️</span>
+          <p className="leading-relaxed">
+            <strong>Night Curfew in Effect:</strong> {dest.routeRestriction.name} gates close between {dest.routeRestriction.startTime} and {dest.routeRestriction.endTime}. Transit through the reserve must clear before 21:00.
+          </p>
+        </div>
+      )}
+
+      {/* Mobile Map Toggle Button (Collapsible) */}
+      <div className="lg:hidden flex items-center justify-between bg-white border border-[#EADBCE] p-2.5 rounded-2xl shadow-2xs">
+        <span className="text-xs font-bold text-[#344F48] flex items-center gap-1.5">
+          <span>🗺️</span>
+          <span>Corridor Map & Stops</span>
+        </span>
         <button
           type="button"
           onClick={() => setShowMobileMap(!showMobileMap)}
-          className="flex items-center gap-1.5 rounded-xl border border-[#EADBCE] bg-white px-3 py-1.5 text-xs font-bold text-[#344F48] shadow-2xs hover:bg-[#FAF2EB]"
+          className="flex items-center gap-1.5 rounded-xl border border-[#EADBCE] bg-[#FAF2EB] hover:bg-[#F8E1D2] px-3 py-1.5 text-xs font-bold text-[#C65B32] shadow-2xs cursor-pointer transition-colors"
         >
-          <span>{showMobileMap ? '✕ Hide Map' : '🗺️ View Corridor Map'}</span>
+          <span>{showMobileMap ? '✕ Hide Map' : '🗺️ Show Map'}</span>
         </button>
       </div>
 
       {/* Mobile Map View (Collapsible) */}
       {showMobileMap && (
-        <div className="lg:hidden rounded-2xl border border-[#EADBCE] overflow-hidden shadow-sm">
+        <div className="lg:hidden rounded-2xl border border-[#EADBCE] overflow-hidden shadow-sm animate-in fade-in duration-200">
           <TripMap
             destination={dest}
             inputs={currentInputs}
             result={r}
-            onTogglePitstop={togglePitstop}
+            onTogglePitstop={isGuestView ? undefined : togglePitstop}
           />
         </div>
+      )}
+
+      {isGuestView && (
+        <nav aria-label="Preview itinerary days" className="flex flex-wrap gap-2">
+          {availableDays.map(day => (
+            <button
+              key={day}
+              type="button"
+              onClick={() => { setActiveDay(day); setActiveTab('schedule'); }}
+              aria-current={currentActiveDay === day ? 'page' : undefined}
+              className={`rounded-xl border px-4 py-2 text-sm font-semibold ${currentActiveDay === day ? 'border-[#C65B32] bg-[#F8E1D2] text-[#344F48]' : 'border-[#EADBCE] bg-white text-[#344F48]'}`}
+            >
+              Day {day}
+            </button>
+          ))}
+        </nav>
       )}
 
       {/* Connected 2-Column Desktop Workspace (Left: Timeline & Tools, Right: Sticky Map) */}
       <div className="grid grid-cols-12 gap-6 items-start">
         {/* Left Column (7 of 12 cols): Timeline, Tabs & Editing Tools */}
-        <div className="col-span-12 lg:col-span-7 space-y-5">
+        <fieldset disabled={isGuestView} className="col-span-12 lg:col-span-7 min-w-0 space-y-5 border-0 p-0">
           {/* Day Selector Tabs & Action Strip */}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#EADBCE] pb-2">
-            <div className="flex items-center gap-1 overflow-x-auto">
+            <div className="flex items-center gap-1.5 overflow-x-auto">
               {availableDays.map(dayNum => {
                 const dayStopsCount = r.timeline.filter(
                   t => t.day === dayNum && t.category === 'ACTIVITY' && !t.isRestBuffer
@@ -703,7 +730,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                       setActiveDay(dayNum);
                       setActiveTab('schedule');
                     }}
-                    className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+                    className={`rounded-xl px-3.5 py-1.5 text-xs font-bold transition-all cursor-pointer ${
                       activeDay === dayNum && activeTab === 'schedule'
                         ? 'bg-[#C65B32] text-white shadow-xs'
                         : 'bg-[#FAF2EB] text-[#6B7C77] hover:text-[#344F48] border border-[#EADBCE]'
@@ -735,7 +762,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
           {/* TAB 1: Chronological Timetable View */}
           {activeTab === 'schedule' && (
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               {(() => {
                 const dayEntries = r.timeline.filter(t => t.day === currentActiveDay);
                 const dayScheduledStops = dayEntries.filter(
@@ -760,16 +787,16 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                     return (
                       <div
                         key={entry.id}
-                        className="group rounded-2xl border border-[#EADBCE] bg-white p-4 transition-all shadow-xs hover:border-[#C65B32]/40 hover:shadow-md space-y-3"
+                        className="group rounded-2xl border border-[#EADBCE] bg-white p-4 sm:p-5 transition-all shadow-xs hover:border-[#C65B32]/40 hover:shadow-md space-y-3"
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-start gap-3">
-                            <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#C65B32] text-white font-black text-xs shrink-0 shadow-2xs">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#C65B32] text-white font-black text-xs shrink-0 shadow-2xs">
                               #{stopNumber}
                             </div>
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
-                                <h4 className="text-sm font-black text-[#344F48]">{entry.label}</h4>
+                                <h4 className="text-sm sm:text-base font-black text-[#344F48]">{entry.label}</h4>
                                 <span className="rounded-md bg-[#FAF2EB] border border-[#EADBCE] px-2 py-0.5 text-[10px] font-bold text-[#C65B32] uppercase tracking-wider">
                                   Stop #{stopNumber}
                                 </span>
@@ -780,7 +807,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                                 )}
                               </div>
                               <div className="text-xs text-[#6B7C77] mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                                <span>⏰ <strong>{entry.startTime.slice(11)}–{entry.endTime.slice(11)}</strong> IST</span>
+                                <span className="font-bold text-[#344F48]">⏰ {entry.startTime.slice(11)}–{entry.endTime.slice(11)} IST</span>
                                 {actCost !== undefined && actCost > 0 && (
                                   <span>🎟️ ₹{actCost}/person</span>
                                 )}
@@ -1007,7 +1034,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
                 <button
                   type="button"
                   onClick={() => setActiveTab('schedule')}
-                  className="text-xs font-bold text-[#6B7C77] hover:text-[#C65B32]"
+                  className="text-xs font-bold text-[#6B7C77] hover:text-[#C65B32] cursor-pointer"
                 >
                   ✕ Close
                 </button>
@@ -1090,140 +1117,187 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
             </div>
           )}
 
-          {/* Highway Pitstops Selector with Dietary Filters */}
-          <div className="space-y-3 rounded-2xl border border-[#EADBCE] bg-white p-4 sm:p-5 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-black text-[#344F48]">
-                  Verified Highway Pitstops ({filteredStops.length} Along Corridor)
-                </h3>
-                <p className="text-xs text-[#6B7C77]">
-                  Curated highway rest stops with verified coordinates, clean restrooms, and dining options.
-                </p>
+          {/* PROGRESSIVE DISCLOSURE 1: Verified Highway Pitstops (Collapsible Drawer) */}
+          <div className="rounded-2xl border border-[#EADBCE] bg-white overflow-hidden shadow-sm">
+            <button
+              type="button"
+              onClick={() => setIsPitstopsOpen(!isPitstopsOpen)}
+              className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-[#FAF2EB]/40 transition-colors cursor-pointer"
+              aria-expanded={isPitstopsOpen}
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="text-base">☕</span>
+                <div>
+                  <h3 className="text-sm font-black text-[#344F48]">
+                    Verified Highway Pitstops ({filteredStops.length} Along Corridor)
+                  </h3>
+                  <p className="text-xs text-[#6B7C77]">
+                    {selectedPitstopIds.length > 0
+                      ? `${selectedPitstopIds.length} pitstop(s) selected for this trip`
+                      : 'Curated highway rest stops with verified coordinates & dining'}
+                  </p>
+                </div>
               </div>
 
-              {/* Dietary Filter Pills */}
-              <div className="flex items-center gap-1 bg-[#FAF2EB] p-1 rounded-xl border border-[#EADBCE]">
-                {(['all', 'veg', 'non-veg'] as const).map(f => (
-                  <button
-                    key={f}
-                    type="button"
-                    onClick={() => setDietaryFilter(f)}
-                    className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all cursor-pointer ${
-                      dietaryFilter === f
-                        ? 'bg-[#C65B32] text-white shadow-2xs'
-                        : 'text-[#6B7C77] hover:text-[#344F48]'
-                    }`}
-                  >
-                    {f === 'all' ? 'All Food' : f === 'veg' ? 'Pure Veg' : 'Non-Veg'}
-                  </button>
-                ))}
-              </div>
-            </div>
+              <span className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] px-3 py-1 text-xs font-bold text-[#344F48] flex items-center gap-1">
+                <span>{isPitstopsOpen ? 'Hide' : 'Explore'}</span>
+                <span className={`text-[10px] transition-transform duration-200 ${isPitstopsOpen ? 'rotate-180' : ''}`}>▼</span>
+              </span>
+            </button>
 
-            <div className="grid gap-2.5">
-              {filteredStops.map(stop => {
-                const isSelected = selectedPitstopIds.includes(stop.id);
-
-                return (
-                  <div
-                    key={stop.id}
-                    className={`rounded-xl border p-3 text-xs transition-all flex items-center justify-between gap-3 ${
-                      isSelected
-                        ? 'border-[#C65B32] bg-[#FAF2EB] shadow-2xs'
-                        : 'border-[#EADBCE] bg-white hover:border-[#C65B32]/30'
-                    }`}
-                  >
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <strong className="font-bold text-[#344F48]">{stop.name}</strong>
-                        <span className="rounded bg-white border border-[#EADBCE] px-1.5 py-0.2 text-[10px] font-semibold text-[#6B7C77]">
-                          {stop.categoryLabel}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-[#6B7C77]">
-                        📍 {stop.location.address} · {stop.dwellMinutes}m dwell · {stop.dietary || 'Food & Rest'}
-                      </p>
-                    </div>
-
-                    <TactileButton
-                      variant={isSelected ? 'primary' : 'secondary'}
-                      size="sm"
-                      onClick={() => togglePitstop(stop.id)}
-                      className="!px-3 !py-1 text-xs shrink-0"
-                    >
-                      {isSelected ? '✓ Added' : '+ Add Stop'}
-                    </TactileButton>
+            {isPitstopsOpen && (
+              <div className="p-4 sm:p-5 pt-0 space-y-3 border-t border-[#EADBCE] animate-in fade-in duration-200">
+                {/* Dietary Filter Pills */}
+                <div className="flex items-center justify-between gap-2 pt-3">
+                  <span className="text-xs font-bold text-[#6B7C77]">Dietary Preference:</span>
+                  <div className="flex items-center gap-1 bg-[#FAF2EB] p-1 rounded-xl border border-[#EADBCE]">
+                    {(['all', 'veg', 'non-veg'] as const).map(f => (
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => setDietaryFilter(f)}
+                        className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition-all cursor-pointer ${
+                          dietaryFilter === f
+                            ? 'bg-[#C65B32] text-white shadow-2xs'
+                            : 'text-[#6B7C77] hover:text-[#344F48]'
+                        }`}
+                      >
+                        {f === 'all' ? 'All Food' : f === 'veg' ? 'Pure Veg' : 'Non-Veg'}
+                      </button>
+                    ))}
                   </div>
-                );
-              })}
-            </div>
+                </div>
+
+                <div className="grid gap-2.5">
+                  {filteredStops.map(stop => {
+                    const isSelected = selectedPitstopIds.includes(stop.id);
+
+                    return (
+                      <div
+                        key={stop.id}
+                        className={`rounded-xl border p-3 text-xs transition-all flex items-center justify-between gap-3 ${
+                          isSelected
+                            ? 'border-[#C65B32] bg-[#FAF2EB] shadow-2xs'
+                            : 'border-[#EADBCE] bg-white hover:border-[#C65B32]/30'
+                        }`}
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <strong className="font-bold text-[#344F48]">{stop.name}</strong>
+                            <span className="rounded bg-white border border-[#EADBCE] px-1.5 py-0.2 text-[10px] font-semibold text-[#6B7C77]">
+                              {stop.categoryLabel}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[#6B7C77]">
+                            📍 {stop.location.address} · {stop.dwellMinutes}m dwell · {stop.dietary || 'Food & Rest'}
+                          </p>
+                        </div>
+
+                        <TactileButton
+                          variant={isSelected ? 'primary' : 'secondary'}
+                          size="sm"
+                          onClick={() => togglePitstop(stop.id)}
+                          className="!px-3 !py-1 text-xs shrink-0"
+                        >
+                          {isSelected ? '✓ Added' : '+ Add Stop'}
+                        </TactileButton>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* "What if the drive takes longer?" Scenario Adjustment */}
-          <div className="space-y-4 rounded-2xl border border-[#EADBCE] bg-white p-4 sm:p-5 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-1">
-              <div>
-                <h2 className="text-sm sm:text-base font-black text-[#344F48]">What if the drive takes longer?</h2>
-                <p className="text-xs text-[#6B7C77]">
-                  Add extra travel time to see how it affects your itinerary and return deadline.
+          {/* PROGRESSIVE DISCLOSURE 2: "What if the drive takes longer?" Scenario Adjustment (Collapsible Drawer) */}
+          <div className="rounded-2xl border border-[#EADBCE] bg-white overflow-hidden shadow-sm">
+            <button
+              type="button"
+              onClick={() => setIsDelayScenarioOpen(!isDelayScenarioOpen)}
+              className="w-full p-4 sm:p-5 flex items-center justify-between text-left hover:bg-[#FAF2EB]/40 transition-colors cursor-pointer"
+              aria-expanded={isDelayScenarioOpen}
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="text-base">⏱️</span>
+                <div>
+                  <h2 className="text-sm sm:text-base font-black text-[#344F48]">What if the drive takes longer?</h2>
+                  <p className="text-xs text-[#6B7C77]">
+                    {(currentInputs.drivingAdjustmentMinutes ?? 0) !== 0
+                      ? `Active delay allowance: +${currentInputs.drivingAdjustmentMinutes}m extra`
+                      : 'Test highway delay scenarios against your return deadline'}
+                  </p>
+                </div>
+              </div>
+
+              <span className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] px-3 py-1 text-xs font-bold text-[#344F48] flex items-center gap-1">
+                <span>{isDelayScenarioOpen ? 'Hide' : 'Test Scenarios'}</span>
+                <span className={`text-[10px] transition-transform duration-200 ${isDelayScenarioOpen ? 'rotate-180' : ''}`}>▼</span>
+              </span>
+            </button>
+
+            {isDelayScenarioOpen && (
+              <div className="p-4 sm:p-5 pt-0 space-y-3.5 border-t border-[#EADBCE] animate-in fade-in duration-200">
+                <div className="flex flex-wrap items-center justify-between gap-1 pt-3">
+                  <p className="text-xs text-[#6B7C77]">
+                    Add extra travel time to see how it affects your itinerary and return deadline.
+                  </p>
+                  <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-2.5 py-0.5 text-[10px] font-bold text-[#C65B32]">
+                    Planning scenario · Not live GPS
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-[#344F48]">Extra travel allowance:</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setDrivingAdjustment((currentInputs.drivingAdjustmentMinutes ?? 0) - 15)}
+                      disabled={(currentInputs.drivingAdjustmentMinutes ?? 0) <= -60}
+                      className="h-7 w-7 rounded-lg bg-[#FAF2EB] border border-[#EADBCE] text-xs font-bold text-[#344F48] hover:bg-[#F8E1D2] disabled:opacity-30 cursor-pointer"
+                    >
+                      −15
+                    </button>
+                    <span className="min-w-12 text-center text-xs font-black text-[#C65B32]">
+                      {(currentInputs.drivingAdjustmentMinutes ?? 0) > 0
+                        ? `+${currentInputs.drivingAdjustmentMinutes}m`
+                        : (currentInputs.drivingAdjustmentMinutes ?? 0) < 0
+                        ? `${currentInputs.drivingAdjustmentMinutes}m`
+                        : '0m'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setDrivingAdjustment((currentInputs.drivingAdjustmentMinutes ?? 0) + 15)}
+                      disabled={(currentInputs.drivingAdjustmentMinutes ?? 0) >= 120}
+                      className="h-7 w-7 rounded-lg bg-[#FAF2EB] border border-[#EADBCE] text-xs font-bold text-[#344F48] hover:bg-[#F8E1D2] disabled:opacity-30 cursor-pointer"
+                    >
+                      +15
+                    </button>
+                  </div>
+
+                  {/* Quick Presets */}
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    {([0, 30, 45, 60] as const).map(p => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setDrivingAdjustment(p)}
+                        className={`rounded-lg px-2.5 py-1 text-[11px] font-bold cursor-pointer transition-colors ${
+                          (currentInputs.drivingAdjustmentMinutes ?? 0) === p
+                            ? 'bg-[#C65B32] text-white shadow-xs'
+                            : 'bg-[#FAF2EB] border border-[#EADBCE] text-[#344F48] hover:bg-white'
+                        }`}
+                      >
+                        {p === 0 ? 'Baseline' : `+${p}m`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-[#6B7C77] leading-relaxed">
+                  Standard 20% highway traffic buffer (+{Math.round(dest.baselineOneWayDriveMinutes * 0.20)}m) is always active. Use these controls to stress-test your return margin against extra toll gate slowdowns or roadwork delays.
                 </p>
               </div>
-              <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-2.5 py-0.5 text-[10px] font-bold text-[#C65B32]">
-                Planning scenario · Not live GPS
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-bold text-[#344F48]">Extra travel allowance:</span>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setDrivingAdjustment((currentInputs.drivingAdjustmentMinutes ?? 0) - 15)}
-                  disabled={(currentInputs.drivingAdjustmentMinutes ?? 0) <= -60}
-                  className="h-7 w-7 rounded-lg bg-white border border-[#EADBCE] text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] disabled:opacity-30 cursor-pointer"
-                >
-                  −15
-                </button>
-                <span className="min-w-12 text-center text-xs font-black text-[#C65B32]">
-                  {(currentInputs.drivingAdjustmentMinutes ?? 0) > 0
-                    ? `+${currentInputs.drivingAdjustmentMinutes}m`
-                    : (currentInputs.drivingAdjustmentMinutes ?? 0) < 0
-                    ? `${currentInputs.drivingAdjustmentMinutes}m`
-                    : '0m'}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setDrivingAdjustment((currentInputs.drivingAdjustmentMinutes ?? 0) + 15)}
-                  disabled={(currentInputs.drivingAdjustmentMinutes ?? 0) >= 120}
-                  className="h-7 w-7 rounded-lg bg-white border border-[#EADBCE] text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] disabled:opacity-30 cursor-pointer"
-                >
-                  +15
-                </button>
-              </div>
-
-              {/* Quick Presets */}
-              <div className="flex items-center gap-1.5 ml-auto">
-                {([0, 30, 45, 60] as const).map(p => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setDrivingAdjustment(p)}
-                    className={`rounded-lg px-2.5 py-1 text-[11px] font-bold cursor-pointer transition-colors ${
-                      (currentInputs.drivingAdjustmentMinutes ?? 0) === p
-                        ? 'bg-[#C65B32] text-white shadow-xs'
-                        : 'bg-white border border-[#EADBCE] text-[#344F48] hover:bg-[#FAF2EB]'
-                    }`}
-                  >
-                    {p === 0 ? 'Baseline' : `+${p}m`}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <p className="text-[11px] text-[#6B7C77] leading-relaxed">
-              Standard 20% highway traffic buffer (+{Math.round(dest.baselineOneWayDriveMinutes * 0.20)}m) is always active. Use these controls to stress-test your return margin against extra toll gate slowdowns or roadwork delays.
-            </p>
+            )}
           </div>
 
           {/* Primary Footer Navigation CTA */}
@@ -1233,21 +1307,21 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
               size="lg"
               fullWidth
               onClick={goToReviewScreen}
-              className="text-base"
+              className="text-base font-black shadow-md"
             >
               Review Trip & Cost Sharing →
             </TactileButton>
           </div>
-        </div>
+        </fieldset>
 
         {/* Right Column (5 of 12 cols): Sticky Connected Leaflet Map */}
-        <div className="hidden lg:block col-span-5 sticky top-24 space-y-3">
+        <div className="hidden lg:block col-span-5 sticky top-24 space-y-3 self-start">
           <div className="rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white overflow-hidden shadow-sm">
             <TripMap
               destination={dest}
               inputs={currentInputs}
               result={r}
-              onTogglePitstop={togglePitstop}
+              onTogglePitstop={isGuestView ? undefined : togglePitstop}
             />
           </div>
 
@@ -1263,7 +1337,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       {/* ===================== MODALS ===================== */}
 
       {/* 1. MOVE ACTIVITY MODAL ("Make This Trip Fit") */}
-      {isMoveModalOpen && (
+      {!isGuestView && isMoveModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
           <div className="relative w-full max-w-2xl rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between border-b border-[#EADBCE] pb-3">
@@ -1279,7 +1353,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
               <button
                 type="button"
                 onClick={() => setIsMoveModalOpen(false)}
-                className="h-8 w-8 rounded-full bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm flex items-center justify-center"
+                className="h-8 w-8 rounded-full bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm flex items-center justify-center cursor-pointer"
               >
                 ✕
               </button>
@@ -1429,7 +1503,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       )}
 
       {/* 2. VISIT SCHEDULING MODAL ("Use This Time") */}
-      {isVisitEditorOpen && (
+      {!isGuestView && isVisitEditorOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
           <div className="relative w-full max-w-lg rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start justify-between border-b border-[#EADBCE] pb-3">
@@ -1444,7 +1518,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
               <button
                 type="button"
                 onClick={() => setIsVisitEditorOpen(false)}
-                className="h-8 w-8 rounded-full bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm flex items-center justify-center"
+                className="h-8 w-8 rounded-full bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm flex items-center justify-center cursor-pointer"
               >
                 ✕
               </button>
@@ -1625,7 +1699,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       )}
 
       {/* 3. LOCAL TRANSFER ADJUSTMENT MODAL */}
-      {isTransferModalOpen && selectedTransferEntry && (
+      {!isGuestView && isTransferModalOpen && selectedTransferEntry && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
           <div className="relative w-full max-w-md rounded-2xl sm:rounded-3xl bg-white p-5 sm:p-6 shadow-2xl border border-[#EADBCE] space-y-4">
             <div className="flex items-start justify-between border-b border-[#EADBCE] pb-3">
@@ -1638,7 +1712,7 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
               <button
                 type="button"
                 onClick={() => setIsTransferModalOpen(false)}
-                className="h-8 w-8 rounded-full bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm flex items-center justify-center"
+                className="h-8 w-8 rounded-full bg-[#FAF2EB] text-[#344F48] hover:bg-[#F8E1D2] font-black text-sm flex items-center justify-center cursor-pointer"
               >
                 ✕
               </button>

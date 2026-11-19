@@ -2,7 +2,7 @@ import { getDestination } from '../data/destinations.js';
 import { getCompatiblePitstops } from '../data/pitstops.js';
 import { parseIST, getCalendarDaysCount } from '../engine/scheduler.js';
 import { formatReadableDate, formatReadableDateTime } from './formatters.js';
-import type { CustomPlannedActivity, PacePreference, UserConstraints } from '../types.js';
+import type { ActivityVisitCustomization, CustomPlannedActivity, PacePreference, UserConstraints } from '../types.js';
 
 export const MAX_NAME_LENGTH = 40;
 export const MAX_URL_PAYLOAD_LENGTH = 2048;
@@ -80,6 +80,47 @@ export function buildShareableParams(
         .join(';');
       params.set('ca', compact);
     } catch {}
+  }
+
+  const dest = getDestination(destinationId);
+  const validActivityIds = dest ? dest.activities.map(a => a.id) : [];
+
+  // User-specified activity order
+  if (inputs.activityOrder && inputs.activityOrder.length > 0) {
+    const validOrder = inputs.activityOrder.filter(id => validActivityIds.includes(id));
+    if (validOrder.length > 0) {
+      params.set('ord', validOrder.join(','));
+    }
+  }
+
+  // Explicit activity day assignments
+  if (inputs.activityDayAssignments && Object.keys(inputs.activityDayAssignments).length > 0) {
+    const validDays = Object.entries(inputs.activityDayAssignments)
+      .filter(([id, d]) => validActivityIds.includes(id) && d >= 1 && d <= 4)
+      .map(([id, d]) => `${id}:${d}`);
+    if (validDays.length > 0) {
+      params.set('days', validDays.join(','));
+    }
+  }
+
+  // User-specified transfer allowances per activity
+  if (inputs.transferAdjustments && Object.keys(inputs.transferAdjustments).length > 0) {
+    const validTrans = Object.entries(inputs.transferAdjustments)
+      .filter(([id, mins]) => validActivityIds.includes(id) && typeof mins === 'number' && mins >= 0 && mins <= 300)
+      .map(([id, mins]) => `${id}:${mins}`);
+    if (validTrans.length > 0) {
+      params.set('trans', validTrans.join(','));
+    }
+  }
+
+  // Explicit activity visit customizations (custom visit start time, duration, transfer)
+  if (inputs.activityCustomizations && Object.keys(inputs.activityCustomizations).length > 0) {
+    const validCust = Object.entries(inputs.activityCustomizations)
+      .filter(([id]) => validActivityIds.includes(id))
+      .map(([id, c]) => `${id}~${c.day ?? ''}~${c.startTime ?? ''}~${c.durationMinutes ?? ''}~${c.transferMinutes ?? ''}`);
+    if (validCust.length > 0) {
+      params.set('cust', validCust.join(';'));
+    }
   }
 
   return params;
@@ -296,15 +337,125 @@ export function parseShareableTrip(
         const durationMinutes = parseInt(durStr, 10);
         const costPerPersonINR = parseInt(costStr || '0', 10);
         if (day >= 1 && day <= 4 && name && durationMinutes > 0 && durationMinutes <= 600) {
+          let safeSlotStart: string | undefined = undefined;
+          if (slotStart) {
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(slotStart)) {
+              safeSlotStart = slotStart;
+            } else if (/^\d{2}:\d{2}$/.test(slotStart)) {
+              try {
+                const depDate = new Date(parseIST(dep));
+                depDate.setDate(depDate.getDate() + (day - 1));
+                const yyyy = depDate.getFullYear();
+                const mm = String(depDate.getMonth() + 1).padStart(2, '0');
+                const dd = String(depDate.getDate()).padStart(2, '0');
+                safeSlotStart = `${yyyy}-${mm}-${dd}T${slotStart}`;
+              } catch {}
+            }
+          }
+
           customActivities.push({
             id: `custom_${i + 1}`,
             day,
             name,
             durationMinutes,
             costPerPersonINR: !isNaN(costPerPersonINR) ? costPerPersonINR : 0,
-            slotStart: slotStart || undefined,
+            slotStart: safeSlotStart,
           });
         }
+      }
+    }
+
+    // 12. Activity ordering
+    const rawOrd = searchParams.get('ord');
+    const validActivityIds = dest.activities.map(a => a.id);
+    let activityOrder: string[] | undefined = undefined;
+    if (rawOrd) {
+      const parsedOrder = rawOrd
+        .split(',')
+        .map(s => s.trim())
+        .filter(id => validActivityIds.includes(id));
+      if (parsedOrder.length > 0) {
+        activityOrder = parsedOrder;
+      }
+    }
+
+    // 13. Activity day assignments
+    const rawDays = searchParams.get('days');
+    let activityDayAssignments: Record<string, number> | undefined = undefined;
+    if (rawDays) {
+      const daysMap: Record<string, number> = {};
+      for (const pair of rawDays.split(',').map(s => s.trim()).filter(Boolean)) {
+        const [actId, dayStr] = pair.split(':');
+        const dayNum = parseInt(dayStr, 10);
+        if (validActivityIds.includes(actId) && dayNum >= 1 && dayNum <= 4) {
+          daysMap[actId] = dayNum;
+        }
+      }
+      if (Object.keys(daysMap).length > 0) {
+        activityDayAssignments = daysMap;
+      }
+    }
+
+    // 14. Transfer adjustments
+    const rawTrans = searchParams.get('trans');
+    let transferAdjustments: Record<string, number> | undefined = undefined;
+    if (rawTrans) {
+      const transMap: Record<string, number> = {};
+      for (const pair of rawTrans.split(',').map(s => s.trim()).filter(Boolean)) {
+        const [actId, minStr] = pair.split(':');
+        const mins = parseInt(minStr, 10);
+        if (validActivityIds.includes(actId) && !isNaN(mins) && mins >= 0 && mins <= 300) {
+          transMap[actId] = mins;
+        }
+      }
+      if (Object.keys(transMap).length > 0) {
+        transferAdjustments = transMap;
+      }
+    }
+
+    // 15. Activity visit customizations
+    const rawCust = searchParams.get('cust');
+    let activityCustomizations: Record<string, ActivityVisitCustomization> | undefined = undefined;
+    if (rawCust) {
+      const custMap: Record<string, ActivityVisitCustomization> = {};
+      for (const item of rawCust.split(';').map(s => s.trim()).filter(Boolean)) {
+        const [actId, dayStr, startTime, durStr, transStr] = item.split('~');
+        if (validActivityIds.includes(actId)) {
+          const cust: ActivityVisitCustomization = {};
+          if (dayStr) {
+            const d = parseInt(dayStr, 10);
+            if (d >= 1 && d <= 4) cust.day = d;
+          }
+          if (startTime) {
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(startTime)) {
+              cust.startTime = startTime;
+            } else if (/^\d{2}:\d{2}$/.test(startTime)) {
+              try {
+                const targetDay = cust.day ?? 1;
+                const depDate = new Date(parseIST(dep));
+                depDate.setDate(depDate.getDate() + (targetDay - 1));
+                const yyyy = depDate.getFullYear();
+                const mm = String(depDate.getMonth() + 1).padStart(2, '0');
+                const dd = String(depDate.getDate()).padStart(2, '0');
+                cust.startTime = `${yyyy}-${mm}-${dd}T${startTime}`;
+              } catch {}
+            }
+          }
+          if (durStr) {
+            const dur = parseInt(durStr, 10);
+            if (!isNaN(dur) && dur > 0 && dur <= 600) cust.durationMinutes = dur;
+          }
+          if (transStr) {
+            const tr = parseInt(transStr, 10);
+            if (!isNaN(tr) && tr >= 0 && tr <= 300) cust.transferMinutes = tr;
+          }
+          if (Object.keys(cust).length > 0) {
+            custMap[actId] = cust;
+          }
+        }
+      }
+      if (Object.keys(custMap).length > 0) {
+        activityCustomizations = custMap;
       }
     }
 
@@ -325,6 +476,10 @@ export function parseShareableTrip(
       planningMode,
       destinationAdjustments: { [destinationId]: drivingAdjustmentMinutes },
       customActivities: customActivities.length > 0 ? customActivities : undefined,
+      activityOrder,
+      activityDayAssignments,
+      transferAdjustments,
+      activityCustomizations,
     };
 
     return {

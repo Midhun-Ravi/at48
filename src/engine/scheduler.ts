@@ -729,7 +729,12 @@ export function evaluateFeasibility(
         const matchingIdx = dayCustoms.findIndex(ca => {
           if (!ca.durationMinutes || ca.durationMinutes <= 0) return false;
           if (ca.slotStart) {
-            const visitEpoch = parseIST(ca.slotStart);
+            let visitEpoch: number;
+            try {
+              visitEpoch = parseIST(ca.slotStart);
+            } catch {
+              return false;
+            }
             const trMins = ca.transferMinutes ?? 0;
             const trStart = add(visitEpoch, -trMins);
             return (trStart >= winCursor && trStart < winEnd) || (visitEpoch >= winCursor && visitEpoch < winEnd);
@@ -749,15 +754,26 @@ export function evaluateFeasibility(
         let transferStartEpoch: number;
 
         if (matching.slotStart) {
-          const reqEpoch = parseIST(matching.slotStart);
-          if (reqEpoch === winCursor) {
-            // Anchored to the start of the free window: transfer starts at window start
+          let reqEpoch: number | null = null;
+          try {
+            reqEpoch = parseIST(matching.slotStart);
+          } catch {
+            reqEpoch = null;
+          }
+
+          if (reqEpoch !== null) {
+            if (reqEpoch === winCursor) {
+              // Anchored to the start of the free window: transfer starts at window start
+              transferStartEpoch = winCursor;
+              visitStartEpoch = add(transferStartEpoch, transferMins);
+            } else {
+              // Explicit user-chosen visit start time
+              visitStartEpoch = reqEpoch;
+              transferStartEpoch = add(visitStartEpoch, -transferMins);
+            }
+          } else {
             transferStartEpoch = winCursor;
             visitStartEpoch = add(transferStartEpoch, transferMins);
-          } else {
-            // Explicit user-chosen visit start time
-            visitStartEpoch = reqEpoch;
-            transferStartEpoch = add(visitStartEpoch, -transferMins);
           }
         } else {
           transferStartEpoch = winCursor;

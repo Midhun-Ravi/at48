@@ -38,7 +38,7 @@ export default function ReviewScreen({ inputs }: Props) {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [guestName, setGuestName] = useState('');
   const [guestError, setGuestError] = useState('');
-  const [rsvpSent, setRsvpSent] = useState(false);
+  const [whatsappOpened, setWhatsappOpened] = useState(false);
 
   // Parse shareable query parameters if present
   const parsedTrip = useMemo(() => {
@@ -106,12 +106,17 @@ export default function ReviewScreen({ inputs }: Props) {
       tripUrl,
     });
 
-    setRsvpSent(true);
+    setWhatsappOpened(true);
     window.open(buildWhatsAppShareUrl(text), '_blank', 'noopener,noreferrer');
   };
 
   // Evaluate feasibility using the deterministic engine
   const r = evaluateFeasibility(dest, activeInputs);
+
+  const isNotRecommended = r.rating === 'Not Recommended' || r.returnDeadlineMarginMinutes < 0;
+  const isTight = r.rating === 'Tight' && !isNotRecommended;
+  const blockers = r.violations.filter(v => v.severity === 'BLOCKER');
+  const warnings = r.violations.filter(v => v.severity === 'WARNING');
 
   const availableDays = Array.from(new Set(r.timeline.map(t => t.day))).sort((a, b) => a - b);
 
@@ -229,20 +234,52 @@ export default function ReviewScreen({ inputs }: Props) {
       {/* 4-part segmented progress meter */}
       <ProgressBar currentStep={4} />
 
-      {/* Screen Hero Banner with Warm Scenic Layers */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-b from-[#F8E1D2]/50 via-[#FAF2EB] to-[#FFF7F0] p-4 sm:p-6 border border-[#EADBCE]">
+      {/* Screen Hero Banner with Warm Scenic Layers - Honest Header based on Feasibility */}
+      <div
+        className={`relative overflow-hidden rounded-2xl sm:rounded-3xl border p-4 sm:p-6 transition-all ${
+          isNotRecommended
+            ? 'bg-gradient-to-b from-rose-50/90 via-[#FAF2EB] to-[#FFF7F0] border-rose-300'
+            : isTight
+            ? 'bg-gradient-to-b from-amber-50/80 via-[#FAF2EB] to-[#FFF7F0] border-amber-300'
+            : 'bg-gradient-to-b from-[#F8E1D2]/50 via-[#FAF2EB] to-[#FFF7F0] border-[#EADBCE]'
+        }`}
+      >
         <ScenicBackground variant="compact" />
         <div className="relative z-10 flex flex-wrap items-end justify-between gap-4">
           <div className="space-y-1">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[11px] font-bold text-[#C65B32] border border-[#EADBCE] shadow-2xs">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#C65B32]" />
-              Step 4 · Final Reality Check & RSVP
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold border shadow-2xs ${
+                isNotRecommended
+                  ? 'bg-rose-100 text-rose-800 border-rose-200'
+                  : isTight
+                  ? 'bg-amber-100 text-amber-900 border-amber-200'
+                  : 'bg-white text-[#C65B32] border-[#EADBCE]'
+              }`}
+            >
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  isNotRecommended ? 'bg-rose-600' : isTight ? 'bg-amber-600' : 'bg-[#C65B32]'
+                }`}
+              />
+              {isNotRecommended
+                ? 'Schedule Alert · Return Blocker Detected'
+                : isTight
+                ? 'Step 4 · Trip Review · Tight Schedule'
+                : 'Step 4 · Final Reality Check & RSVP'}
             </span>
             <h1 className="text-2xl sm:text-3xl font-black text-[#344F48] tracking-tight leading-snug">
-              Ready to hit the road?
+              {isNotRecommended
+                ? 'Schedule requires adjustments'
+                : isTight
+                ? 'Trip confirmed with narrow buffers'
+                : 'Ready to hit the road?'}
             </h1>
             <p className="text-xs sm:text-sm text-[#6B7C77] max-w-xl leading-relaxed">
-              Review your return deadline margin, transparent vehicle fleet costs, and invite your crew via WhatsApp.
+              {isNotRecommended
+                ? 'Return blockers or timing conflicts detected. Review issues below before locking your road trip.'
+                : isTight
+                ? 'Review your tight return margin, transparent vehicle fleet costs, and invite your crew via WhatsApp.'
+                : 'Review your return deadline margin, transparent vehicle fleet costs, and invite your crew via WhatsApp.'}
             </p>
           </div>
 
@@ -261,7 +298,7 @@ export default function ReviewScreen({ inputs }: Props) {
           <div className="flex items-center gap-2.5">
             <span className="text-xl">🚗</span>
             <span>
-              <strong>Trip Invitation from {organizerName || 'your organizer'}:</strong> Review the planned timeline below, then send your RSVP at the bottom of the page.
+              <strong>Trip Invitation from {organizerName || 'your organizer'}:</strong> Review the planned timeline below, then send your RSVP via WhatsApp.
             </span>
           </div>
           <a
@@ -273,7 +310,39 @@ export default function ReviewScreen({ inputs }: Props) {
         </div>
       )}
 
-      {/* Section A: Trip Overview Hero Card */}
+      {/* Prominent Blocker Alert Box (if Not Recommended or violations exist) */}
+      {isNotRecommended && (
+        <div className="rounded-2xl border-2 border-rose-300 bg-rose-50/70 p-4 sm:p-5 text-rose-950 space-y-3 shadow-xs">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">⚠️</span>
+            <h2 className="text-sm sm:text-base font-extrabold text-rose-900 uppercase tracking-wide">
+              Critical Schedule Blockers
+            </h2>
+          </div>
+          <ul className="space-y-1.5 text-xs text-rose-900 list-disc list-inside">
+            {r.returnDeadlineMarginMinutes < 0 && (
+              <li>
+                <strong>Missed Return Deadline:</strong> Projected home arrival is {formatReadableDateTime(r.homeArrivalTime)}, which is <strong>{formatDuration(Math.abs(r.returnDeadlineMarginMinutes))} after your deadline</strong> ({formatReadableDateTime(activeInputs.returnDeadlineDateTime)}).
+              </li>
+            )}
+            {blockers.map((b, i) => (
+              <li key={`blocker-${i}`}>
+                <strong>{b.type.replace(/_/g, ' ')}:</strong> {b.message}
+              </li>
+            ))}
+            {warnings.map((w, i) => (
+              <li key={`warn-${i}`}>
+                <strong>{w.type.replace(/_/g, ' ')}:</strong> {w.message}
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-rose-800 pt-1 border-t border-rose-200">
+            💡 Recommended action: Use <strong>← Edit Schedule</strong> above to adjust departure time, prune optional activities, or extend your return deadline.
+          </p>
+        </div>
+      )}
+
+      {/* Section A: Concise Destination Hero Card */}
       <div className="overflow-hidden rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white shadow-sm">
         {/* Destination Photo Header */}
         <div className="relative aspect-[16/9] sm:aspect-[21/9] w-full bg-slate-100 overflow-hidden">
@@ -285,24 +354,44 @@ export default function ReviewScreen({ inputs }: Props) {
               className="h-full w-full object-cover"
             />
           )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-          <div className="absolute bottom-3 left-4 right-4 flex items-end justify-between text-white">
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-black/10" />
+          <div className="absolute bottom-3 left-4 right-4 flex flex-wrap items-end justify-between gap-2 text-white">
             <div>
-              <span className="rounded-full bg-[#C65B32] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider backdrop-blur-xs">
-                {isGroup ? 'Group Escape' : 'Solo Road Trip'}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-[#C65B32] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider backdrop-blur-xs">
+                  {isGroup ? 'Group Escape' : 'Solo Road Trip'}
+                </span>
+                <span className="rounded-full bg-black/50 px-2.5 py-0.5 text-xs font-medium backdrop-blur-xs">
+                  {formatReadableDate(activeInputs.departureDateTime)} – {formatReadableDate(activeInputs.returnDeadlineDateTime)}
+                </span>
+              </div>
               <h2 className="mt-1 text-2xl sm:text-3xl font-black">{dest.name}</h2>
+              <p className="text-xs text-white/80">{dest.routeName}</p>
             </div>
-            {heroImage && (
-              <span className="text-[10px] text-white/80 bg-black/60 px-2 py-0.5 rounded backdrop-blur-xs">
-                Photo: {heroImage.author} · {heroImage.license}
+            
+            <div className="flex flex-col items-end gap-1">
+              <span
+                className={`rounded-xl px-3 py-1 text-xs font-extrabold uppercase tracking-wide border shadow-xs ${
+                  r.rating === 'Not Recommended'
+                    ? 'bg-rose-600 text-white border-rose-700'
+                    : r.rating === 'Tight'
+                    ? 'bg-amber-500 text-white border-amber-600'
+                    : 'bg-emerald-600 text-white border-emerald-700'
+                }`}
+              >
+                {r.rating === 'Tight' ? 'Tight Schedule' : r.rating}
               </span>
-            )}
+              {heroImage && (
+                <span className="text-[10px] text-white/70 bg-black/60 px-2 py-0.5 rounded backdrop-blur-xs">
+                  Photo: {heroImage.author} · {heroImage.license}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Core Trip Parameters Grid */}
-        <div className="p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs border-t border-[#EADBCE] bg-[#FAF2EB]">
+        {/* Core Trip Parameters Bar */}
+        <div className="p-4 sm:p-5 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs border-t border-[#EADBCE] bg-[#FAF2EB]">
           <div>
             <span className="block text-[#6B7C77] font-medium">Organizer</span>
             <strong className="text-sm font-bold text-[#344F48]">
@@ -328,288 +417,116 @@ export default function ReviewScreen({ inputs }: Props) {
             </strong>
           </div>
         </div>
-
-        {/* Travel Window Times */}
-        <div className="p-4 sm:p-6 border-t border-[#EADBCE] grid sm:grid-cols-2 gap-4 text-sm bg-white">
-          <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3.5">
-            <span className="block text-xs font-bold uppercase text-[#C65B32]">Leave Bengaluru</span>
-            <strong className="mt-1 block text-[#344F48]">
-              {formatReadableDateTime(activeInputs.departureDateTime)} (IST)
-            </strong>
-            <span className="text-xs text-[#6B7C77]">Origin: MG Road reference corridor</span>
-          </div>
-          <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3.5">
-            <span className="block text-xs font-bold uppercase text-[#344F48]">Must Be Home By</span>
-            <strong className="mt-1 block text-[#344F48]">
-              {formatReadableDateTime(activeInputs.returnDeadlineDateTime)} (IST)
-            </strong>
-            <span className="text-xs text-[#6B7C77]">
-              Expected arrival: {formatReadableDateTime(r.homeArrivalTime)}
-            </span>
-          </div>
-        </div>
       </div>
 
-      {/* Section B: Feasibility Verdict & Return Margin Card */}
-      <div className="rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 text-[#344F48] shadow-sm space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#EADBCE] pb-3">
-          <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-3 py-1 text-xs font-bold uppercase tracking-wider text-[#C65B32]">
-            Feasibility Verdict
-          </span>
-          <span className="text-xs text-[#6B7C77]">Deterministic MG Road baseline</span>
-        </div>
-
-        <div>
-          <p className="text-2xl sm:text-3xl font-black tracking-tight text-[#344F48]">{r.rating}</p>
-          <p className="mt-1 text-xs sm:text-sm text-[#6B7C77]">{r.ratingExplanation}</p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4 border-t border-[#EADBCE] pt-4 text-sm">
-          <div>
-            <p className="text-xs text-[#6B7C77]">Usable destination free time</p>
-            <strong className="text-xl sm:text-2xl font-black text-[#344F48]">
-              {formatDuration(r.destinationSlackMinutes)}
+      {/* Section B: Immediate 3 Primary Facts Bar */}
+      <div className="rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 divide-y sm:divide-y-0 sm:divide-x divide-[#EADBCE]">
+          {/* Fact 1: Expected Home Arrival */}
+          <div className="sm:pr-4 pt-2 sm:pt-0">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-[#6B7C77]">
+              Expected Home Arrival
+            </span>
+            <strong className="mt-1 block text-lg sm:text-xl font-black text-[#344F48]">
+              {formatReadableDateTime(r.homeArrivalTime)}
             </strong>
+            <span className="text-xs text-[#6B7C77] block mt-0.5">
+              Deadline: {formatTimelineTime(activeInputs.returnDeadlineDateTime)} (IST)
+            </span>
           </div>
-          <div>
-            <p className="text-xs text-[#6B7C77]">Return deadline margin</p>
+
+          {/* Fact 2: Return Deadline Margin */}
+          <div className="sm:px-4 pt-3 sm:pt-0">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-[#6B7C77]">
+              Return Deadline Margin
+            </span>
             <strong
-              className={`text-xl sm:text-2xl font-black ${
+              className={`mt-1 block text-lg sm:text-xl font-black ${
                 r.returnDeadlineMarginMinutes < 0 ? 'text-rose-700' : 'text-emerald-700'
               }`}
             >
               {formatDuration(r.returnDeadlineMarginMinutes, true)}
             </strong>
-          </div>
-        </div>
-
-        <div className="border-t border-[#EADBCE] pt-3 text-xs text-[#6B7C77] space-y-1">
-          <p>
-            Expected home: <strong className="text-[#344F48]">{formatReadableDateTime(r.homeArrivalTime)} (IST)</strong>
-          </p>
-          <p>
-            Estimated cost: <strong className="text-[#344F48]">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person</strong> (₹{r.estimatedTripTotalINR.toLocaleString('en-IN')} total for party of {activeInputs.partySize})
-          </p>
-        </div>
-      </div>
-
-      {/* Section C: Transparent Vehicle Fleet & Cost Breakdown */}
-      <div className="space-y-4 rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
-        <div className="flex items-center justify-between border-b border-[#EADBCE] pb-3">
-          <div>
-            <h2 className="text-base font-black text-[#344F48]">Vehicle Fleet & Cost Sharing</h2>
-            <p className="text-xs text-[#6B7C77]">
-              Transparent cost-sharing model based on party size of {activeInputs.partySize}.
-            </p>
-          </div>
-          <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-3 py-1 text-xs font-bold text-[#C65B32]">
-            {fleet.badge}
-          </span>
-        </div>
-
-        <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 text-xs space-y-2">
-          <strong className="block text-sm text-[#344F48]">{fleet.label}</strong>
-          <p className="text-[#6B7C77] leading-relaxed">{fleet.note}</p>
-          <div className="pt-2 border-t border-[#EADBCE] grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-            <div>
-              <span className="text-[#6B7C77] block">Round-Trip Fuel:</span>
-              <strong className="text-[#344F48]">₹{(dest.approximateRoundTripFuelINR * fleet.vehicles).toLocaleString('en-IN')}</strong>
-            </div>
-            <div>
-              <span className="text-[#6B7C77] block">Highway Tolls:</span>
-              <strong className="text-[#344F48]">₹{(dest.approximateRoundTripTollsINR * fleet.vehicles).toLocaleString('en-IN')}</strong>
-            </div>
-            <div>
-              <span className="text-[#6B7C77] block">Stays ({Math.ceil(activeInputs.partySize / 2)} rooms):</span>
-              <strong className="text-[#344F48]">₹{(dest.approximateOneNightStayINR * Math.ceil(activeInputs.partySize / 2)).toLocaleString('en-IN')}</strong>
-            </div>
-            <div>
-              <span className="text-[#6B7C77] block">Cost Per Traveler:</span>
-              <strong className="text-[#C65B32] font-black">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}</strong>
-            </div>
-          </div>
-        </div>
-
-        <p className="text-[11px] text-[#6B7C77] leading-relaxed">
-          💡 Fuel and toll expenses are divided equally among all {activeInputs.partySize} travelers. Accommodation assumes twin sharing rooms. Personal dining and souvenir purchases are excluded.
-        </p>
-      </div>
-
-      {/* Section D: Route & Stop Highlights with External Links */}
-      <div className="space-y-4 rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-black text-[#344F48]">Route & Landmark Destinations</h2>
-          <a
-            href={googleMapsDirectionsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs font-bold text-[#C65B32] hover:underline"
-          >
-            Open in Google Maps ↗
-          </a>
-        </div>
-
-        {/* Selected Pitstop Highlight */}
-        {selectedStops.length > 0 && (
-          <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 space-y-2 text-xs">
-            <span className="font-bold text-[#344F48] block uppercase tracking-wider text-[11px]">
-              ☕ Selected Highway Pitstops ({selectedStops.length})
+            <span className="text-xs text-[#6B7C77] block mt-0.5">
+              {r.returnDeadlineMarginMinutes >= 0 ? 'Buffer before deadline' : 'Projected late return'}
             </span>
-            {selectedStops.map(stop => (
-              <div key={stop.id} className="flex gap-3 items-center pt-1 border-t border-[#EADBCE] first:border-t-0">
-                <div className="text-xs text-[#6B7C77] flex-1">
-                  <strong className="block text-sm text-[#344F48]">{stop.name}</strong>
-                  <p className="mt-0.5">
-                    Est. Dwell: {stop.dwellMinutes}m · Detour: {stop.detourMinutes}m (+{stop.dwellMinutes + stop.detourMinutes}m total)
-                  </p>
-                </div>
-                <a
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.name)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-lg bg-white border border-[#EADBCE] px-3 py-1.5 text-xs font-bold text-[#C65B32] hover:bg-[#FAF2EB] transition-colors"
-                >
-                  Directions ↗
-                </a>
-              </div>
-            ))}
           </div>
-        )}
 
-        {/* Planned Attractions & Custom Activities */}
-        <div className="space-y-2 text-xs">
-          <span className="block font-bold text-[#6B7C77] uppercase tracking-wider text-[11px]">
-            Planned Attractions & Activities
-          </span>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {dest.activities.map(a => {
-              const isSkipped = activeInputs.disabledActivityIds.includes(a.id);
-              const aImg = getPlaceImage(a.id);
-              return (
-                <div
-                  key={a.id}
-                  className={`flex items-center gap-3 rounded-xl border p-2.5 ${
-                    isSkipped ? 'border-[#EADBCE] bg-[#FAF2EB] opacity-60' : 'border-[#EADBCE] bg-white'
-                  }`}
-                >
-                  {aImg && (
-                    <img
-                      src={aImg.src}
-                      alt={aImg.alt}
-                      className="h-10 w-10 rounded-lg object-cover flex-shrink-0"
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <strong className="block text-[#344F48] truncate">{a.name}</strong>
-                    <span className="text-[#6B7C77]">
-                      {isSkipped ? 'Skipped' : `${formatDuration(a.durationMinutes)} planned visit`}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-
-            {(activeInputs.customActivities ?? []).map(ca => (
-              <div
-                key={ca.id}
-                className="flex items-center gap-3 rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2.5"
-              >
-                <div className="h-10 w-10 rounded-lg bg-[#C65B32] text-white flex items-center justify-center text-base font-bold flex-shrink-0">
-                  ✨
-                </div>
-                <div className="min-w-0 flex-1">
-                  <strong className="block text-[#344F48] truncate">{ca.name}</strong>
-                  <span className="text-[#6B7C77]">
-                    Day {ca.day} · {ca.durationMinutes}m · {ca.costPerPersonINR ? `₹${ca.costPerPersonINR}` : 'Free'}
-                  </span>
-                </div>
-              </div>
-            ))}
+          {/* Fact 3: Estimated Cost Per Traveler */}
+          <div className="sm:pl-4 pt-3 sm:pt-0">
+            <span className="block text-[11px] font-bold uppercase tracking-wider text-[#6B7C77]">
+              Estimated Cost Per Traveler
+            </span>
+            <strong className="mt-1 block text-lg sm:text-xl font-black text-[#C65B32]">
+              ₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}
+            </strong>
+            <span className="text-xs text-[#6B7C77] block mt-0.5">
+              ₹{r.estimatedTripTotalINR.toLocaleString('en-IN')} total ({activeInputs.partySize} {activeInputs.partySize === 1 ? 'traveler' : 'travelers'})
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Section E: Day-by-Day Itinerary Review */}
-      <div className="space-y-5 rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#EADBCE] pb-3">
-          <div>
-            <h2 className="text-base font-black text-[#344F48]">Day-by-Day Itinerary Review</h2>
-            <p className="text-xs text-[#6B7C77]">
-              Hour-by-hour breakdown of highway driving, stops, and leisure windows.
-            </p>
-          </div>
-          <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-3 py-1 text-xs font-bold text-[#5F7B6B]">
-            Verified Schedule
-          </span>
-        </div>
-
-        {/* Day-by-Day Cards */}
-        {availableDays.map(day => {
-          const items = r.timeline.filter(t => t.day === day && t.category !== 'REST');
-          const dayDate = r.timeline.find(t => t.day === day)?.startTime;
-          return (
-            <div key={day} className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 space-y-3">
-              <div className="flex items-center justify-between border-b border-[#EADBCE] pb-2">
-                <h3 className="text-sm font-extrabold text-[#344F48] uppercase tracking-wide">
-                  Day {day} {dayDate && <span className="text-xs font-normal text-[#6B7C77] lowercase">· {formatReadableDate(dayDate)}</span>}
-                </h3>
-                <span className="text-[11px] font-semibold text-[#6B7C77]">
-                  {items.length} segments
-                </span>
-              </div>
-
-              <div className="space-y-2">
-                {items.map(item => {
-                  const duration = Math.round((parseIST(item.endTime) - parseIST(item.startTime)) / 60_000);
-
-                  return (
-                    <div
-                      key={item.id}
-                      className="flex items-center justify-between gap-3 rounded-lg border border-[#EADBCE] bg-white p-2.5 text-xs"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <span className="font-semibold text-[#344F48]">{item.label}</span>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0 text-[#6B7C77]">
-                        <span>
-                          {formatTimelineTime(item.startTime)} - {formatTimelineTime(item.endTime)}
-                        </span>
-                        <span className="font-bold text-[#344F48]">({formatDuration(duration)})</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Expandable Plain-Text Preview for Copying */}
-        <details className="group border-t border-[#EADBCE] pt-3">
-          <summary className="cursor-pointer text-xs font-bold text-[#C65B32] hover:underline select-none flex items-center justify-between">
-            <span>Show plain-text messaging preview</span>
-            <span className="group-open:rotate-180 transition-transform">▼</span>
-          </summary>
-          <div className="mt-3">
-            <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 text-xs text-[#344F48] font-mono leading-relaxed">
-              {summaryText}
-            </pre>
-          </div>
-        </details>
-      </div>
-
-      {/* Section F: Save & Share Actions */}
+      {/* Section C: Clear Action-Oriented Hierarchy (Save Trip, Share Trip, WhatsApp Invite) */}
       <div className="space-y-4 rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-[#FAF2EB]/70 p-5 sm:p-6 shadow-sm">
         <div>
           <h2 className="text-base font-black text-[#344F48]">Save & Share Trip</h2>
           <p className="text-xs text-[#6B7C77]">
-            Save this itinerary to your browser storage, or share with your crew via WhatsApp.
+            Lock this verified itinerary locally to this device, or invite your group via WhatsApp.
           </p>
         </div>
 
-        {/* If guest view, provide the RSVP action (Preserved for tests & guests) */}
+        {/* Primary Action Buttons */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <TactileButton
+            variant="primary"
+            size="md"
+            onClick={handleCopyTripLink}
+            className="w-full justify-center"
+          >
+            <span>🔗</span>
+            <span>Share Trip (Copy Link)</span>
+          </TactileButton>
+
+          <TactileButton
+            variant="secondary"
+            size="md"
+            onClick={handleSaveTrip}
+            className="w-full justify-center"
+          >
+            <span>{savedSuccess ? '✓' : '💾'}</span>
+            <span>{savedSuccess ? 'Saved to My Trip!' : 'Save Trip (This Device)'}</span>
+          </TactileButton>
+        </div>
+
+        {/* Supporting Quick Options */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+          <button
+            type="button"
+            onClick={handleShareInviteWhatsApp}
+            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-3.5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
+          >
+            <span>💬</span> WhatsApp Invite
+          </button>
+          <button
+            type="button"
+            onClick={handleCopySummary}
+            className="flex items-center justify-center gap-2 rounded-xl border border-[#EADBCE] bg-white px-3.5 py-2.5 text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] shadow-xs active:scale-[0.99] transition-all cursor-pointer"
+          >
+            <span>📋</span> Copy Text Summary
+          </button>
+          <button
+            type="button"
+            onClick={handleShareSummaryWhatsApp}
+            className="flex items-center justify-center gap-2 rounded-xl border border-[#EADBCE] bg-white px-3.5 py-2.5 text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] shadow-xs active:scale-[0.99] transition-all cursor-pointer"
+          >
+            <span>💬</span> WhatsApp Summary
+          </button>
+        </div>
+
+        {/* Guest RSVP Card (Active only on shared guest view) */}
         {isGuestView && (
-          <div id="guest-rsvp" className="rounded-xl border border-[#EADBCE] bg-white p-4 space-y-3 shadow-2xs">
+          <div id="guest-rsvp" className="rounded-xl border border-[#EADBCE] bg-white p-4 space-y-3 shadow-2xs mt-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wider text-[#C65B32]">Trip Invitation & RSVP</span>
               <span className="text-xs text-[#6B7C77]">Confirm spot with {organizerName || 'organizer'}</span>
@@ -639,65 +556,17 @@ export default function ReviewScreen({ inputs }: Props) {
                 </button>
               </div>
             </div>
-            {guestError && <p className="text-xs font-semibold text-red-700">{guestError}</p>}
-            {rsvpSent && (
-              <p className="text-xs font-semibold text-emerald-800">✓ WhatsApp opened with your RSVP message.</p>
+            {guestError && <p className="text-xs font-semibold text-rose-700">{guestError}</p>}
+            {whatsappOpened && (
+              <p className="text-xs font-semibold text-emerald-800">
+                ✓ WhatsApp opened. Send the message there to complete your RSVP.
+              </p>
             )}
+            <p className="text-[11px] text-[#6B7C77] pt-1 border-t border-[#EADBCE]">
+              ℹ️ Guest RSVP is sent directly to your organizer via WhatsApp. Guest actions on this link never modify the organizer's original trip schedule.
+            </p>
           </div>
         )}
-
-        {/* Primary Action Buttons: Prioritize Share Trip */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <TactileButton
-            variant="primary"
-            size="md"
-            onClick={handleCopyTripLink}
-            className="w-full justify-center"
-          >
-            <span>🔗</span>
-            <span>Share Trip (Copy Link)</span>
-          </TactileButton>
-
-          <TactileButton
-            variant="secondary"
-            size="md"
-            onClick={handleSaveTrip}
-            className="w-full justify-center"
-          >
-            <span>{savedSuccess ? '✓' : '💾'}</span>
-            <span>{savedSuccess ? 'Saved to My Trip!' : 'Save Trip (This Device)'}</span>
-          </TactileButton>
-        </div>
-
-        {/* Supporting Quick Sharing Options */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-          <button
-            type="button"
-            onClick={handleShareInviteWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl bg-[#25D366] px-3.5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-[#20ba5a] active:scale-[0.99] transition-all cursor-pointer"
-          >
-            <span>💬</span> WhatsApp Invite
-          </button>
-          <button
-            type="button"
-            onClick={handleCopySummary}
-            className="flex items-center justify-center gap-2 rounded-xl border border-[#EADBCE] bg-white px-3.5 py-2.5 text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] shadow-xs active:scale-[0.99] transition-all cursor-pointer"
-          >
-            <span>📋</span> Copy Text Summary
-          </button>
-          <button
-            type="button"
-            onClick={handleShareSummaryWhatsApp}
-            className="flex items-center justify-center gap-2 rounded-xl border border-[#EADBCE] bg-white px-3.5 py-2.5 text-xs font-bold text-[#344F48] hover:bg-[#FAF2EB] shadow-xs active:scale-[0.99] transition-all cursor-pointer"
-          >
-            <span>💬</span> WhatsApp Summary
-          </button>
-        </div>
-
-        {/* Local Storage Disclosure */}
-        <p className="text-[11px] text-[#6B7C77] bg-white p-3 rounded-xl border border-[#EADBCE] leading-relaxed">
-          ℹ️ <strong>Account-Free Storage:</strong> "Save Trip" bookmarks your plan locally in this browser. No login or account required. Clearing browser cache will remove it. To share across devices or with your crew, use the WhatsApp invitation link.
-        </p>
 
         {/* Toast confirmation feedback */}
         {toastMessage && (
@@ -710,9 +579,285 @@ export default function ReviewScreen({ inputs }: Props) {
         )}
       </div>
 
-      <p className="text-center text-xs text-[#6B7C77]">
-        Cost assumes {activeInputs.partySize} travelers sharing {fleet.vehicles} vehicle{fleet.vehicles > 1 ? 's' : ''} and {Math.ceil(activeInputs.partySize / 2)} hotel room{Math.ceil(activeInputs.partySize / 2) > 1 ? 's' : ''}. Personal expenses and meals are excluded. Highway driving times include standard 20% traffic buffers.
-      </p>
+      {/* Section D: Progressive Disclosure Accordion 1 - Vehicle Fleet & Cost Sharing */}
+      <details className="group rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm" open>
+        <summary className="flex items-center justify-between cursor-pointer select-none">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🚗</span>
+            <div>
+              <h2 className="text-base font-black text-[#344F48]">Vehicle Fleet & Cost Sharing</h2>
+              <p className="text-xs text-[#6B7C77]">
+                Transparent cost model for {activeInputs.partySize} {activeInputs.partySize === 1 ? 'traveler' : 'travelers'} ({fleet.badge})
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-3 py-1 text-xs font-bold text-[#C65B32]">
+              ₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}/person
+            </span>
+            <span className="text-[#6B7C77] group-open:rotate-180 transition-transform">▼</span>
+          </div>
+        </summary>
+        <div className="mt-4 space-y-3 pt-3 border-t border-[#EADBCE]">
+          <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 text-xs space-y-2">
+            <strong className="block text-sm text-[#344F48]">{fleet.label}</strong>
+            <p className="text-[#6B7C77] leading-relaxed">{fleet.note}</p>
+            <div className="pt-2 border-t border-[#EADBCE] grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+              <div>
+                <span className="text-[#6B7C77] block">Round-Trip Fuel:</span>
+                <strong className="text-[#344F48]">₹{(dest.approximateRoundTripFuelINR * fleet.vehicles).toLocaleString('en-IN')}</strong>
+              </div>
+              <div>
+                <span className="text-[#6B7C77] block">Highway Tolls:</span>
+                <strong className="text-[#344F48]">₹{(dest.approximateRoundTripTollsINR * fleet.vehicles).toLocaleString('en-IN')}</strong>
+              </div>
+              <div>
+                <span className="text-[#6B7C77] block">Stays ({Math.ceil(activeInputs.partySize / 2)} rooms):</span>
+                <strong className="text-[#344F48]">₹{(dest.approximateOneNightStayINR * Math.ceil(activeInputs.partySize / 2)).toLocaleString('en-IN')}</strong>
+              </div>
+              <div>
+                <span className="text-[#6B7C77] block">Cost Per Traveler:</span>
+                <strong className="text-[#C65B32] font-black">₹{r.estimatedCostPerPersonINR.toLocaleString('en-IN')}</strong>
+              </div>
+            </div>
+          </div>
+          <p className="text-[11px] text-[#6B7C77] leading-relaxed">
+            💡 Fuel and toll expenses are divided equally among all {activeInputs.partySize} travelers. Accommodation assumes twin sharing rooms. Personal dining and souvenir purchases are excluded.
+          </p>
+        </div>
+      </details>
+
+      {/* Section E: Progressive Disclosure Accordion 2 - Day-by-Day Itinerary Review */}
+      <details className="group rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm" open>
+        <summary className="flex items-center justify-between cursor-pointer select-none">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">📅</span>
+            <div>
+              <h2 className="text-base font-black text-[#344F48]">Day-by-Day Itinerary Review</h2>
+              <p className="text-xs text-[#6B7C77]">
+                Hour-by-hour breakdown across {availableDays.length} {availableDays.length === 1 ? 'day' : 'days'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-[#FAF2EB] border border-[#EADBCE] px-3 py-1 text-xs font-bold text-[#5F7B6B]">
+              Verified Schedule
+            </span>
+            <span className="text-[#6B7C77] group-open:rotate-180 transition-transform">▼</span>
+          </div>
+        </summary>
+        <div className="mt-4 space-y-4 pt-3 border-t border-[#EADBCE]">
+          {availableDays.map(day => {
+            const items = r.timeline.filter(t => t.day === day && t.category !== 'REST');
+            const dayDate = r.timeline.find(t => t.day === day)?.startTime;
+            return (
+              <div key={day} className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-[#EADBCE] pb-2">
+                  <h3 className="text-sm font-extrabold text-[#344F48] uppercase tracking-wide">
+                    Day {day} {dayDate && <span className="text-xs font-normal text-[#6B7C77] lowercase">· {formatReadableDate(dayDate)}</span>}
+                  </h3>
+                  <span className="text-[11px] font-semibold text-[#6B7C77]">
+                    {items.length} segments
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {items.map(item => {
+                    const duration = Math.round((parseIST(item.endTime) - parseIST(item.startTime)) / 60_000);
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border border-[#EADBCE] bg-white p-2.5 text-xs"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-semibold text-[#344F48]">{item.label}</span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0 text-[#6B7C77]">
+                          <span>
+                            {formatTimelineTime(item.startTime)} - {formatTimelineTime(item.endTime)}
+                          </span>
+                          <span className="font-bold text-[#344F48]">({formatDuration(duration)})</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </details>
+
+      {/* Section F: Progressive Disclosure Accordion 3 - Route & Planned Places */}
+      <details className="group rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
+        <summary className="flex items-center justify-between cursor-pointer select-none">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">📍</span>
+            <div>
+              <h2 className="text-base font-black text-[#344F48]">Route & Planned Places</h2>
+              <p className="text-xs text-[#6B7C77]">
+                {dest.activities.length} attractions, {selectedStops.length} highway pitstops, and custom stops
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <a
+              href={googleMapsDirectionsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="text-xs font-bold text-[#C65B32] hover:underline"
+            >
+              Open in Google Maps ↗
+            </a>
+            <span className="text-[#6B7C77] group-open:rotate-180 transition-transform">▼</span>
+          </div>
+        </summary>
+        <div className="mt-4 space-y-4 pt-3 border-t border-[#EADBCE]">
+          {/* Selected Pitstop Highlight */}
+          {selectedStops.length > 0 && (
+            <div className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 space-y-2 text-xs">
+              <span className="font-bold text-[#344F48] block uppercase tracking-wider text-[11px]">
+                ☕ Selected Highway Pitstops ({selectedStops.length})
+              </span>
+              {selectedStops.map(stop => (
+                <div key={stop.id} className="flex gap-3 items-center pt-1 border-t border-[#EADBCE] first:border-t-0">
+                  <div className="text-xs text-[#6B7C77] flex-1">
+                    <strong className="block text-sm text-[#344F48]">{stop.name}</strong>
+                    <p className="mt-0.5">
+                      Est. Dwell: {stop.dwellMinutes}m · Detour: {stop.detourMinutes}m (+{stop.dwellMinutes + stop.detourMinutes}m total)
+                    </p>
+                  </div>
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(stop.name)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-lg bg-white border border-[#EADBCE] px-3 py-1.5 text-xs font-bold text-[#C65B32] hover:bg-[#FAF2EB] transition-colors"
+                  >
+                    Directions ↗
+                  </a>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Planned Attractions & Custom Activities */}
+          <div className="space-y-2 text-xs">
+            <span className="block font-bold text-[#6B7C77] uppercase tracking-wider text-[11px]">
+              Planned Attractions & Activities
+            </span>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {dest.activities.map(a => {
+                const isSkipped = activeInputs.disabledActivityIds.includes(a.id);
+                const aImg = getPlaceImage(a.id);
+                return (
+                  <div
+                    key={a.id}
+                    className={`flex items-center gap-3 rounded-xl border p-2.5 ${
+                      isSkipped ? 'border-[#EADBCE] bg-[#FAF2EB] opacity-60' : 'border-[#EADBCE] bg-white'
+                    }`}
+                  >
+                    {aImg && (
+                      <img
+                        src={aImg.src}
+                        alt={aImg.alt}
+                        className="h-10 w-10 rounded-lg object-cover flex-shrink-0"
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <strong className="block text-[#344F48] truncate">{a.name}</strong>
+                      <span className="text-[#6B7C77]">
+                        {isSkipped ? 'Skipped' : `${formatDuration(a.durationMinutes)} planned visit`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {(activeInputs.customActivities ?? []).map(ca => (
+                <div
+                  key={ca.id}
+                  className="flex items-center gap-3 rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-2.5"
+                >
+                  <div className="h-10 w-10 rounded-lg bg-[#C65B32] text-white flex items-center justify-center text-base font-bold flex-shrink-0">
+                    ✨
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <strong className="block text-[#344F48] truncate">{ca.name}</strong>
+                    <span className="text-[#6B7C77]">
+                      Day {ca.day} · {ca.durationMinutes}m · {ca.costPerPersonINR ? `₹${ca.costPerPersonINR}` : 'Free'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </details>
+
+      {/* Section G: Progressive Disclosure Accordion 4 - Plain-Text Messaging Summary */}
+      <details className="group rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
+        <summary className="flex items-center justify-between cursor-pointer select-none">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">📋</span>
+            <div>
+              <h2 className="text-base font-black text-[#344F48]">Plain-Text Messaging Summary</h2>
+              <p className="text-xs text-[#6B7C77]">
+                Clean unformatted text formatted for messaging apps, notes, or team chats
+              </p>
+            </div>
+          </div>
+          <span className="text-[#6B7C77] group-open:rotate-180 transition-transform">▼</span>
+        </summary>
+        <div className="mt-4 space-y-3 pt-3 border-t border-[#EADBCE]">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleCopySummary}
+              className="text-xs font-bold text-[#C65B32] hover:underline cursor-pointer"
+            >
+              Copy Full Text 📋
+            </button>
+          </div>
+          <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-4 text-xs text-[#344F48] font-mono leading-relaxed">
+            {summaryText}
+          </pre>
+        </div>
+      </details>
+
+      {/* Section H: Honest Planning Assumptions & Disclosures */}
+      <div className="rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-[#FAF2EB]/70 p-5 sm:p-6 space-y-3 text-xs text-[#6B7C77] leading-relaxed">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-[#344F48]">
+          Planning Assumptions & Disclosures
+        </h3>
+        <ul className="space-y-2 list-none">
+          <li className="flex items-start gap-2">
+            <span className="text-base leading-none">🚗</span>
+            <span>
+              <strong>20% Driving Contingency:</strong> Highway travel times include a mandatory 20% traffic buffer above Google Maps / OSM baseline times. This is a deterministic planning assumption, not live GPS traffic.
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-base leading-none">💰</span>
+            <span>
+              <strong>Transparent Estimated Costs:</strong> Cost per person assumes {activeInputs.partySize} {activeInputs.partySize === 1 ? 'traveler' : 'travelers'} sharing {fleet.vehicles} vehicle{fleet.vehicles > 1 ? 's' : ''} and {Math.ceil(activeInputs.partySize / 2)} twin-sharing hotel room{Math.ceil(activeInputs.partySize / 2) > 1 ? 's' : ''}. Personal meals, activities, and discretionary shopping are excluded.
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-base leading-none">🔒</span>
+            <span>
+              <strong>Account-Free Device Storage:</strong> "Save Trip" saves your itinerary locally to this browser's <code>localStorage</code>. No account creation or cloud sync is involved. Clearing your browser data will delete it. To share across devices or with your crew, use the share link or WhatsApp invite.
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-base leading-none">📍</span>
+            <span>
+              <strong>Reference Corridor:</strong> Calculations use MG Road, Bengaluru as the common origin and final arrival point. Actual travel time within Bengaluru city limits before hitting the highway corridor may vary.
+            </span>
+          </li>
+        </ul>
+      </div>
     </section>
   );
 }

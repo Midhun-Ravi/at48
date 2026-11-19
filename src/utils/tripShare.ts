@@ -296,13 +296,29 @@ export function parseShareableTrip(
         const durationMinutes = parseInt(durStr, 10);
         const costPerPersonINR = parseInt(costStr || '0', 10);
         if (day >= 1 && day <= 4 && name && durationMinutes > 0 && durationMinutes <= 600) {
+          let safeSlotStart: string | undefined = undefined;
+          if (slotStart) {
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(slotStart)) {
+              safeSlotStart = slotStart;
+            } else if (/^\d{2}:\d{2}$/.test(slotStart)) {
+              try {
+                const depDate = new Date(parseIST(dep));
+                depDate.setDate(depDate.getDate() + (day - 1));
+                const yyyy = depDate.getFullYear();
+                const mm = String(depDate.getMonth() + 1).padStart(2, '0');
+                const dd = String(depDate.getDate()).padStart(2, '0');
+                safeSlotStart = `${yyyy}-${mm}-${dd}T${slotStart}`;
+              } catch {}
+            }
+          }
+
           customActivities.push({
             id: `custom_${i + 1}`,
             day,
             name,
             durationMinutes,
             costPerPersonINR: !isNaN(costPerPersonINR) ? costPerPersonINR : 0,
-            slotStart: slotStart || undefined,
+            slotStart: safeSlotStart,
           });
         }
       }

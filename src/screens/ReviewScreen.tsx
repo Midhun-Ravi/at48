@@ -563,7 +563,7 @@ export default function ReviewScreen({ inputs }: Props) {
               </p>
             )}
             <p className="text-[11px] text-[#6B7C77] pt-1 border-t border-[#EADBCE]">
-              ℹ️ Guest RSVP is sent directly to your organizer via WhatsApp. Guest actions on this link never modify the organizer's original trip schedule.
+              ℹ️ WhatsApp opens with a prefilled RSVP message. Choose the appropriate recipient and tap Send to complete your response. Guest actions on this link never modify the organizer's original trip schedule.
             </p>
           </div>
         )}

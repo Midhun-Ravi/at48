@@ -580,7 +580,7 @@ export default function ReviewScreen({ inputs }: Props) {
       </div>
 
       {/* Section D: Progressive Disclosure Accordion 1 - Vehicle Fleet & Cost Sharing */}
-      <details className="group rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm" open>
+      <details className="group rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
         <summary className="flex items-center justify-between cursor-pointer select-none">
           <div className="flex items-center gap-2">
             <span className="text-lg">🚗</span>
@@ -628,7 +628,7 @@ export default function ReviewScreen({ inputs }: Props) {
       </details>
 
       {/* Section E: Progressive Disclosure Accordion 2 - Day-by-Day Itinerary Review */}
-      <details className="group rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm" open>
+      <details className="group rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm">
         <summary className="flex items-center justify-between cursor-pointer select-none">
           <div className="flex items-center gap-2">
             <span className="text-lg">📅</span>
@@ -854,6 +854,12 @@ export default function ReviewScreen({ inputs }: Props) {
             <span className="text-base leading-none">📍</span>
             <span>
               <strong>Reference Corridor:</strong> Calculations use MG Road, Bengaluru as the common origin and final arrival point. Actual travel time within Bengaluru city limits before hitting the highway corridor may vary.
+            </span>
+          </li>
+          <li className="flex items-start gap-2">
+            <span className="text-base leading-none">🔗</span>
+            <span>
+              <strong>Shareable Link Fidelity:</strong> Shared trip links serialize your complete customized itinerary: departure/return dates, party size, budget, vehicle fleet, selected highway stops, reordered activities, moved days, custom visit times, and transfer allowances. Guests opening the link enter in read-only preview mode and can RSVP via WhatsApp without altering your saved itinerary.
             </span>
           </li>
         </ul>

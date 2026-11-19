@@ -34,12 +34,16 @@ describe('Page 4 Calm Review & Release Readiness', () => {
     expect(reviewSrc).toContain('Copy Text Summary');
   });
 
-  it('2. verifies progressive disclosure accordions for fleet, timeline, places, and plain-text summary', () => {
+  it('2. verifies progressive disclosure accordions for fleet, timeline, places, and plain-text summary start collapsed', () => {
     // Progressive disclosure accordions
     expect(reviewSrc).toContain('Vehicle Fleet & Cost Sharing');
     expect(reviewSrc).toContain('Day-by-Day Itinerary Review');
     expect(reviewSrc).toContain('Route & Planned Places');
     expect(reviewSrc).toContain('Plain-Text Messaging Summary');
+
+    // Confirm Vehicle Fleet and Day-by-Day Itinerary start collapsed by default (no open attribute)
+    expect(reviewSrc).not.toContain('Section D: Progressive Disclosure Accordion 1 - Vehicle Fleet & Cost Sharing */}\n      <details className="group rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm" open>');
+    expect(reviewSrc).not.toContain('Section E: Progressive Disclosure Accordion 2 - Day-by-Day Itinerary Review */}\n      <details className="group rounded-2xl sm:rounded-3xl border border-[#EADBCE] bg-white p-5 sm:p-6 shadow-sm" open>');
 
     // Vehicle fleet breakdown
     expect(reviewSrc).toContain('1 Standard Car');
@@ -58,6 +62,7 @@ describe('Page 4 Calm Review & Release Readiness', () => {
     expect(reviewSrc).toContain('Account-Free Device Storage');
     expect(reviewSrc).toContain('localStorage');
     expect(reviewSrc).toContain('Reference Corridor');
+    expect(reviewSrc).toContain('Shareable Link Fidelity');
   });
 
   it('4. enforces honest WhatsApp RSVP handoff language and guest protection', () => {
@@ -96,7 +101,7 @@ describe('Page 4 Calm Review & Release Readiness', () => {
     expect(r.returnDeadlineMarginMinutes).toBeLessThan(0);
   });
 
-  it('6. verifies complete shareable URL roundtrip and reconstruction fidelity', () => {
+  it('6. verifies complete shareable URL roundtrip and reconstruction fidelity for all customizations', () => {
     const destId = 'mysuru';
     const originalInputs: UserConstraints = {
       departureDateTime: '2026-11-21T07:00',
@@ -110,6 +115,23 @@ describe('Page 4 Calm Review & Release Readiness', () => {
       selectedPitstopIds: ['maddur-tiffanys'],
       organizerName: 'Ananya & Rohan',
       planningMode: 'group',
+      activityOrder: ['mysuru-market', 'mysuru-palace'],
+      activityDayAssignments: {
+        'mysuru-market': 1,
+        'mysuru-palace': 2,
+      },
+      transferAdjustments: {
+        'mysuru-palace': 30,
+        'mysuru-market': 45,
+      },
+      activityCustomizations: {
+        'mysuru-palace': {
+          day: 1,
+          startTime: '2026-11-21T15:00',
+          durationMinutes: 90,
+          transferMinutes: 25,
+        },
+      },
       customActivities: [
         {
           id: 'custom_1',
@@ -140,10 +162,37 @@ describe('Page 4 Calm Review & Release Readiness', () => {
     expect(parsed.data.inputs.simulateDelayMinutes).toBe(60);
     expect(parsed.data.inputs.disabledActivityIds).toEqual(['mysuru-market']);
     expect(parsed.data.inputs.selectedPitstopIds).toEqual(['maddur-tiffanys']);
+
+    // Custom planned activities
     expect(parsed.data.inputs.customActivities).toHaveLength(1);
     expect(parsed.data.inputs.customActivities![0].name).toBe('St Philomena Sunset Photography');
     expect(parsed.data.inputs.customActivities![0].durationMinutes).toBe(75);
     expect(parsed.data.inputs.customActivities![0].slotStart).toBe('2026-11-21T17:30');
+
+    // Reordered activities
+    expect(parsed.data.inputs.activityOrder).toEqual(['mysuru-market', 'mysuru-palace']);
+
+    // Day assignments
+    expect(parsed.data.inputs.activityDayAssignments).toEqual({
+      'mysuru-market': 1,
+      'mysuru-palace': 2,
+    });
+
+    // Transfer adjustments
+    expect(parsed.data.inputs.transferAdjustments).toEqual({
+      'mysuru-palace': 30,
+      'mysuru-market': 45,
+    });
+
+    // Activity visit customizations
+    expect(parsed.data.inputs.activityCustomizations).toEqual({
+      'mysuru-palace': {
+        day: 1,
+        startTime: '2026-11-21T15:00',
+        durationMinutes: 90,
+        transferMinutes: 25,
+      },
+    });
   });
 
   it('7. handles corrupted or invalid shareable parameters defensively', () => {

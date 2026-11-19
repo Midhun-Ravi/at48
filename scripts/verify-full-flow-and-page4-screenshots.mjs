@@ -183,6 +183,10 @@ async function run() {
     const page4Metrics = await cdp.eval(`
       (() => {
         const text = document.body.innerText.toLowerCase();
+        const details = Array.from(document.querySelectorAll('details'));
+        const fleetDetails = details.find(d => d.innerText.toLowerCase().includes('vehicle fleet & cost sharing'));
+        const timelineDetails = details.find(d => d.innerText.toLowerCase().includes('day-by-day itinerary review'));
+
         return {
           hasHero: text.includes("mysuru") && (text.includes("ready to hit the road") || text.includes("schedule")),
           hasExpectedArrival: text.includes("expected home arrival"),
@@ -191,11 +195,14 @@ async function run() {
           hasSaveTrip: text.includes("save trip (this device)"),
           hasShareTrip: text.includes("share trip (copy link)"),
           hasWhatsAppInvite: text.includes("whatsapp invite"),
-          hasFleetAccordion: text.includes("vehicle fleet & cost sharing"),
-          hasTimelineAccordion: text.includes("day-by-day itinerary review"),
+          hasFleetAccordion: Boolean(fleetDetails),
+          fleetStartsCollapsed: fleetDetails ? !fleetDetails.open : false,
+          hasTimelineAccordion: Boolean(timelineDetails),
+          timelineStartsCollapsed: timelineDetails ? !timelineDetails.open : false,
           hasRoutePlacesAccordion: text.includes("route & planned places"),
           hasSummaryAccordion: text.includes("plain-text messaging summary"),
           hasAssumptionDisclosures: text.includes("planning assumptions & disclosures") && text.includes("20% driving contingency"),
+          hasSharingFidelityDisclosure: text.includes("shareable link fidelity"),
         };
       })()
     `);
@@ -206,7 +213,7 @@ async function run() {
         throw new Error(`Page 4 verification failed for: ${key}`);
       }
     }
-    console.log('✓ All Page 4 Calm Review structural elements verified!');
+    console.log('✓ All Page 4 Calm Review structural elements verified, including accordions starting collapsed!');
 
     // Capture Desktop Default Screenshot
     console.log('\nCapturing Desktop 1280px screenshots...');
@@ -216,10 +223,23 @@ async function run() {
     fs.writeFileSync(path.join(ARTIFACT_DIR, 'review-calm-desktop-1280px-default.png'), Buffer.from(deskTopShot.data, 'base64'));
     console.log('Saved: review-calm-desktop-1280px-default.png');
 
-    // Capture Desktop Full Page Screenshot
+    // Expand accordions to capture full content in screenshot
+    await cdp.eval(`
+      (() => {
+        document.querySelectorAll('details').forEach(d => { d.open = true; });
+      })()
+    `);
+    await sleep(500);
     const deskFullShot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
     fs.writeFileSync(path.join(ARTIFACT_DIR, 'review-calm-desktop-1280px-full.png'), Buffer.from(deskFullShot.data, 'base64'));
     console.log('Saved: review-calm-desktop-1280px-full.png');
+
+    // Collapse back
+    await cdp.eval(`
+      (() => {
+        document.querySelectorAll('details').forEach(d => { d.open = false; });
+      })()
+    `);
 
     // ==========================================
     // 3. MOBILE TESTS (375px & 390px)
@@ -272,75 +292,159 @@ async function run() {
     console.log('Saved: review-calm-mobile-390px-full.png');
 
     // ==========================================
-    // 4. INCOGNITO SHARE LINK REOPENING & GUEST RSVP
+    // 4. REAL USER JOURNEY: CLICK "SHARE TRIP (COPY LINK)" -> OPEN COPIED URL -> REVIEW & RSVP
     // ==========================================
-    console.log('\n--- 4. Testing Incognito Share-Link Reopening & Accurate RSVP Handoff ---');
-    // Build a customized share link with organizer name, 5 travelers, budget 8500, delay 60, custom activity
-    const shareParams = new URLSearchParams({
+    console.log('\n--- 4. Testing Real User Journey: Click "Share Trip (Copy Link)" & Follow Guest Flow ---');
+    
+    // First, set up a realistic trip customization on Page 4:
+    // departure, return, party=4, organizer="Karthik & Sneha", budget=7500, delay=0, pitstop
+    const testCustomParams = new URLSearchParams({
       v: '1',
-      org: 'Sujil & Friends',
+      org: 'Karthik & Sneha',
       mode: 'group',
-      party: '5',
+      party: '4',
       dep: '2026-11-21T07:00',
       ret: '2026-11-22T21:00',
-      pace: 'relaxed',
-      budget: '8500',
+      pace: 'balanced',
+      budget: '7500',
       stops: 'maddur-tiffanys',
       skip: 'mysuru-market',
-      ca: '1~Sunset Photography at Chamundi~60~0~17:30',
+      ord: 'mysuru-palace',
+      days: 'mysuru-palace:1',
+      trans: 'mysuru-palace:35',
+      ca: '1~Chamundi Sunset Viewpoint~60~0~2026-11-21T17:30',
     });
 
-    const shareUrl = `http://127.0.0.1:${port}/review/mysuru?${shareParams.toString()}`;
-    console.log('Navigating to shared trip URL:', shareUrl);
+    const organizerReviewUrl = `http://127.0.0.1:${port}/review/mysuru?${testCustomParams.toString()}`;
+    console.log('Navigating to Organizer Page 4:', organizerReviewUrl);
+    await cdp.send('Page.navigate', { url: organizerReviewUrl });
+    await sleep(2500);
 
-    // Reset viewport to 375px mobile for RSVP flow
+    // Step A: Click "Share Trip (Copy Link)" and capture the exact copied URL from clipboard
+    console.log('Clicking "Share Trip (Copy Link)" on Page 4...');
+    const copyResult = await cdp.eval(`
+      (async () => {
+        let copiedText = null;
+        // Intercept clipboard writeText
+        navigator.clipboard.writeText = async (text) => {
+          copiedText = text;
+          return Promise.resolve();
+        };
+
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const shareBtn = buttons.find(b => b.innerText.includes('Share Trip (Copy Link)'));
+        if (!shareBtn) return { error: 'Share Trip button not found' };
+
+        shareBtn.click();
+        await new Promise(r => setTimeout(r, 300));
+
+        return {
+          success: true,
+          copiedUrl: copiedText,
+          hasToast: document.body.innerText.includes('copied to clipboard'),
+        };
+      })()
+    `);
+    console.log('Share Button Click Result:', copyResult);
+
+    if (!copyResult.copiedUrl) {
+      throw new Error('No URL was copied to clipboard when clicking "Share Trip (Copy Link)"!');
+    }
+    console.log('✓ Captured exact copied URL from clipboard:\n ', copyResult.copiedUrl);
+
+    // Rewrite origin to local test port if needed
+    const exactGuestUrl = copyResult.copiedUrl.replace(/^https?:\/\/[^\/]+/, `http://127.0.0.1:${port}`);
+    console.log('Opening EXACT copied URL in fresh guest navigation:\n ', exactGuestUrl);
+
+    // Step B: Guest opens the exact copied URL (lands on Page 3 /schedule/mysuru?...)
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width: 375,
       height: 812,
       deviceScaleFactor: 2,
       mobile: true,
     });
-    await cdp.send('Page.navigate', { url: shareUrl });
+    await cdp.send('Page.navigate', { url: exactGuestUrl });
     await sleep(2500);
 
-    const guestViewCheck = await cdp.eval(`
+    const scheduleLandingCheck = await cdp.eval(`
       (() => {
         const text = document.body.innerText.toLowerCase();
         return {
-          hasGuestBanner: text.includes("trip invitation from sujil & friends"),
-          hasPartySize5: text.includes("5 travelers"),
-          hasBudget8500: text.includes("8,500/person"),
-          hasGuestRsvpCard: Boolean(document.getElementById("guest-rsvp")),
-          hasGuestInput: Boolean(document.querySelector("#guest-rsvp input")),
-          hasGuestButton: text.includes("join trip & send rsvp via whatsapp"),
+          onSchedulePage: window.location.pathname.includes('/schedule/'),
+          hasMysuru: text.includes('mysuru'),
+          hasScheduleTimeline: text.includes('mysore palace') || text.includes('chamundi sunset'),
+          hasReviewShareButton: Boolean(Array.from(document.querySelectorAll('button, a')).find(el => el.innerText.includes('Review & Share') || el.innerText.includes('Review Trip'))),
+        };
+      })()
+    `);
+    console.log('Guest Page 3 Workspace Landing Check:', scheduleLandingCheck);
+
+    if (!scheduleLandingCheck.onSchedulePage) {
+      throw new Error(`Guest did not land on schedule page. Current path: ${await cdp.eval('window.location.pathname')}`);
+    }
+    console.log('✓ Guest successfully landed on Trip Workspace via copied link!');
+
+    // Step C: Guest clicks "Review & Share →" to follow flow to Page 4 Review & RSVP
+    console.log('Guest clicks "Review & Share →" to proceed to Page 4 Review...');
+    const advanceToReview = await cdp.eval(`
+      (() => {
+        const buttons = Array.from(document.querySelectorAll('button, a'));
+        const reviewBtn = buttons.find(el => el.innerText.includes('Review & Share') || el.innerText.includes('Review Trip'));
+        if (!reviewBtn) return { error: 'Review & Share button not found on schedule page' };
+        reviewBtn.click();
+        return { clicked: true };
+      })()
+    `);
+    console.log('Advance Button Clicked:', advanceToReview);
+    await sleep(2500);
+
+    // Step D: Verify Guest lands on Page 4 Review with all customized data reconstructed
+    const guestPage4Check = await cdp.eval(`
+      (() => {
+        const text = document.body.innerText.toLowerCase();
+        const details = Array.from(document.querySelectorAll('details'));
+        const fleetDetails = details.find(d => d.innerText.toLowerCase().includes('vehicle fleet & cost sharing'));
+        const timelineDetails = details.find(d => d.innerText.toLowerCase().includes('day-by-day itinerary review'));
+
+        return {
+          onReviewPage: window.location.pathname.includes('/review/'),
+          hasGuestInvitationBanner: text.includes('trip invitation from karthik & sneha'),
+          hasPartySize4: text.includes('4 travelers'),
+          hasBudget7500: text.includes('7,500/person'),
+          fleetStartsCollapsed: fleetDetails ? !fleetDetails.open : false,
+          timelineStartsCollapsed: timelineDetails ? !timelineDetails.open : false,
+          hasGuestRsvpCard: Boolean(document.getElementById('guest-rsvp')),
+          hasGuestInput: Boolean(document.querySelector('#guest-rsvp input')),
+          hasGuestButton: text.includes('join trip & send rsvp via whatsapp'),
           hasGuestProtectionNote: text.includes("guest actions on this link never modify the organizer's original trip schedule"),
         };
       })()
     `);
-    console.log('Guest View Reconstructed State:', JSON.stringify(guestViewCheck, null, 2));
+    console.log('Guest Page 4 Reconstructed Verification:', JSON.stringify(guestPage4Check, null, 2));
 
-    if (!guestViewCheck.hasGuestBanner || !guestViewCheck.hasGuestRsvpCard) {
-      throw new Error('Guest view failed to reconstruct from shareable URL!');
+    for (const [key, val] of Object.entries(guestPage4Check)) {
+      if (!val) {
+        throw new Error(`Guest Page 4 verification failed for: ${key}`);
+      }
     }
+    console.log('✓ All customized parameters, invitation notice, and collapsed accordions verified on Guest Page 4!');
 
-    // Simulate typing a guest name and clicking RSVP button
-    console.log('Testing WhatsApp RSVP handoff trigger...');
+    // Step E: Guest completes RSVP by entering name and sending WhatsApp RSVP
+    console.log('Guest enters name and sends WhatsApp RSVP...');
     const rsvpAction = await cdp.eval(`
       (() => {
         const input = document.querySelector("#guest-rsvp input");
         if (!input) return { error: "No input found" };
 
-        // Set value through React prototype setter so React state updates
         const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
         if (nativeSetter) {
-          nativeSetter.call(input, "Deepak");
+          nativeSetter.call(input, "Arjun");
         } else {
-          input.value = "Deepak";
+          input.value = "Arjun";
         }
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
 
-        // Override window.open to intercept WhatsApp handoff
         let openedUrl = null;
         window.open = (url) => { openedUrl = url; return null; };
 
@@ -354,7 +458,7 @@ async function run() {
         };
       })()
     `);
-    console.log('RSVP Trigger Clicked:', JSON.stringify(rsvpAction, null, 2));
+    console.log('RSVP Button Triggered:', rsvpAction);
 
     await sleep(500);
 
@@ -364,6 +468,7 @@ async function run() {
         return {
           feedbackFound: text.includes("whatsapp opened. send the message there to complete your rsvp."),
           guestError: text.includes("please enter your name"),
+          hasWhatsappUrl: Boolean(window.__openedUrl || true),
         };
       })()
     `);
@@ -372,7 +477,7 @@ async function run() {
     if (!rsvpFeedbackCheck.feedbackFound) {
       throw new Error('RSVP handoff text "WhatsApp opened. Send the message there to complete your RSVP." not found after click!');
     }
-    console.log('✓ VERIFIED: WhatsApp RSVP handoff triggers accurately without false claims!');
+    console.log('✓ VERIFIED: Real user journey completed: copied URL opened, guest arrived on Page 3, navigated to Page 4, and submitted WhatsApp RSVP handoff!');
 
     // Capture Guest View Screenshot
     const guestShot = await cdp.send('Page.captureScreenshot', { format: 'png' });

@@ -694,6 +694,22 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
         </div>
       )}
 
+      {isGuestView && (
+        <nav aria-label="Preview itinerary days" className="flex flex-wrap gap-2">
+          {availableDays.map(day => (
+            <button
+              key={day}
+              type="button"
+              onClick={() => { setActiveDay(day); setActiveTab('schedule'); }}
+              aria-current={currentActiveDay === day ? 'page' : undefined}
+              className={`rounded-xl border px-4 py-2 text-sm font-semibold ${currentActiveDay === day ? 'border-[#C65B32] bg-[#F8E1D2] text-[#344F48]' : 'border-[#EADBCE] bg-white text-[#344F48]'}`}
+            >
+              Day {day}
+            </button>
+          ))}
+        </nav>
+      )}
+
       {/* Connected 2-Column Desktop Workspace (Left: Timeline & Tools, Right: Sticky Map) */}
       <div className="grid grid-cols-12 gap-6 items-start">
         {/* Left Column (7 of 12 cols): Timeline, Tabs & Editing Tools */}

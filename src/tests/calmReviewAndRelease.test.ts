@@ -152,7 +152,7 @@ describe('Page 4 Calm Review & Release Readiness', () => {
 
     expect(parsed.data.destinationId).toBe(destId);
     expect(parsed.data.organizerName).toBe('Ananya & Rohan');
-    expect(parsed.data.isGuestView).toBe(true);
+    expect(parsed.data.isGuestView).toBe(false); // in-app planner URLs are editable
     expect(parsed.data.inputs.departureDateTime).toBe(originalInputs.departureDateTime);
     expect(parsed.data.inputs.returnDeadlineDateTime).toBe(originalInputs.returnDeadlineDateTime);
     expect(parsed.data.inputs.pace).toBe(originalInputs.pace);

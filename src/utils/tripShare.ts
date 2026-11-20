@@ -139,6 +139,8 @@ export function buildShareableTripUrl(
     : 'https://at48.vercel.app';
 
   const params = buildShareableParams(destinationId, inputs);
+  // Explicit guest marker: ordinary in-app navigation must remain editable.
+  params.set('guest', '1');
   return `${origin}/schedule/${encodeURIComponent(destinationId)}?${params.toString()}`;
 }
 
@@ -244,8 +246,9 @@ export function parseShareableTrip(
     const rawMode = searchParams.get('mode');
     const planningMode: 'solo' | 'group' = rawMode === 'solo' ? 'solo' : 'group';
 
-    // Guest view is active when an organizer name is present or group invitation parameters exist
-    const isGuestView = Boolean(organizerName || searchParams.has('org') || searchParams.has('v'));
+    // Schema version and organizer name are present in normal planning URLs too.
+    // Only a deliberately shared invitation enters read-only guest mode.
+    const isGuestView = searchParams.get('guest') === '1';
 
     // 4. Pace preference
     const rawPace = (searchParams.get('pace') || '').toLowerCase();

@@ -467,6 +467,8 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
 
   const goToReviewScreen = () => {
     const params = buildShareableParams(dest.id, currentInputs);
+    // Carry explicit invitation context to the RSVP screen; normal planning stays editable.
+    if (isGuestView) params.set('guest', '1');
     nav(`/review/${dest.id}?${params.toString()}`);
   };
 

@@ -118,4 +118,13 @@ describe('@48 Page 3 Calm Trip Workspace Redesign (/schedule/:id)', () => {
     expect(preview.isValid).toBe(true);
     expect(preview.proposedConstraints.customActivities?.length).toBe(1);
   });
+  it('7. lets invitation viewers create an editable copy without modifying the original guest link', () => {
+    const src = readSrc('screens/ScheduleScreen.tsx');
+    expect(src).toContain('Edit My Own Copy');
+    expect(src).toContain("params.delete('guest')");
+    expect(src).toContain("params.delete('org')");
+    expect(src).toContain('setCurrentInputs(editableInputs)');
+    expect(src).toContain('Shared trip preview');
+  });
+
 });

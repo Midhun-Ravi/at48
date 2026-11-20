@@ -653,9 +653,28 @@ export default function ScheduleScreen({ inputs, setInputs }: Props) {
       </div>
 
       {isGuestView && (
-        <div role="status" className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3 text-sm text-[#344F48]">
-          Shared trip preview · Editing is disabled. Review the route and itinerary, then continue to RSVP.
-          <TactileButton variant="primary" size="sm" onClick={goToReviewScreen} className="ml-3">Review & RSVP →</TactileButton>
+        <div role="status" className="rounded-xl border border-[#EADBCE] bg-[#FAF2EB] p-3 text-sm text-[#344F48] space-y-2">
+          <p className="font-semibold">Shared trip preview · Editing is disabled for this invitation.</p>
+          <p>Want to change the plan? Make an editable copy. Your changes won't affect the original trip.</p>
+          <div className="flex flex-wrap gap-2">
+            <TactileButton
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                const params = buildShareableParams(dest.id, currentInputs);
+                // Make an independent editable copy, not another guest invitation.
+                params.delete('guest');
+                params.delete('org');
+                const editableInputs = { ...currentInputs, organizerName: '' };
+                setCurrentInputs(editableInputs);
+                setInputs(editableInputs);
+                nav(`/schedule/${dest.id}?${params.toString()}`);
+              }}
+            >
+              ✏️ Edit My Own Copy
+            </TactileButton>
+            <TactileButton variant="secondary" size="sm" onClick={goToReviewScreen}>Review & RSVP →</TactileButton>
+          </div>
         </div>
       )}
 

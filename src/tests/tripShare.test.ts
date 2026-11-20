@@ -31,6 +31,10 @@ describe('Trip URL State & Group Invitation Flow (Gate 4)', () => {
     expect(rawParams.get('v')).toBe('1');
     expect(rawParams.get('org')).toBe('Sujil');
     expect(rawParams.get('mode')).toBe('group');
+    expect(rawParams.has('guest')).toBe(false); // normal planning journey stays editable
+    const organizerParsed = parseShareableTrip(rawParams, 'mysuru');
+    expect(organizerParsed.valid).toBe(true);
+    if (organizerParsed.valid) expect(organizerParsed.data.isGuestView).toBe(false);
 
     const url = buildShareableTripUrl('mysuru', baseInputs, 'https://at48.vercel.app');
     expect(url).toContain('https://at48.vercel.app/schedule/mysuru?');
@@ -259,6 +263,7 @@ describe('Trip URL State & Group Invitation Flow (Gate 4)', () => {
   it('12. functions in a clean guest context without pre-existing localStorage', () => {
     const guestSearch = new URLSearchParams({
       v: '1',
+      guest: '1',
       org: 'Sujil',
       mode: 'group',
       dep: '2026-10-31T08:00',
@@ -304,4 +309,17 @@ describe('Trip URL State & Group Invitation Flow (Gate 4)', () => {
     expect(rsvpMsg).toContain(tripUrl);
     expect(rsvpMsg).toContain('- Roshan');
   });
+  it('13. distinguishes internal route params from explicit guest invitations', () => {
+    const internal = buildShareableParams('mysuru', baseInputs);
+    const internalParsed = parseShareableTrip(internal, 'mysuru');
+    expect(internalParsed.valid).toBe(true);
+    if (internalParsed.valid) expect(internalParsed.data.isGuestView).toBe(false);
+
+    const sharedUrl = buildShareableTripUrl('mysuru', baseInputs, 'https://at48.vercel.app');
+    const shared = parseShareableTrip(sharedUrl.split('?')[1], 'mysuru');
+    expect(new URL(sharedUrl).searchParams.get('guest')).toBe('1');
+    expect(shared.valid).toBe(true);
+    if (shared.valid) expect(shared.data.isGuestView).toBe(true);
+  });
+
 });
